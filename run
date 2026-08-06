@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# 1. Verify input arguments
+if [ "$#" -ne 2 ]; then
+    echo "Usage: $0 <pipeline> <samplesheet>" >&2
+    exit 1
+fi
+
+# Prefer binaries in the nextflow bin directory
+export NXF="/data/prod/nextflow"
+export PATH="$NXF/bin:$PATH"
+
+# Nextflow Persistent Asset and Container Cache Directories
+export NXF_ASSET_DIR="$NXF/assets"
+export NXF_APPTAINER_CACHEDIR="$NXF/cache/apptainer"
+export NXF_SINGULARITY_CACHEDIR="$NXF/cache/apptainer"
+
+# Automatically clean up temporary files
+export TMPDIR=$(mktemp -d "$NXF/tmp/XXXXXX")
+export APPTAINERENV_TMPDIR="$TMPDIR"
+trap 'rm -rf "$TMPDIR"' EXIT
+

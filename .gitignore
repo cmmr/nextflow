@@ -2,3 +2,8 @@ assets/
 bin/
 cache/
 db/
+log/
+tmp/
+secrets/
+.claude/
+.aiexclude

@@ -1,0 +1,137 @@
+<!doctype html>
+<!--
+  index.html - Landing page for a published ampliseq run.
+
+  Rendered by scripts/ampliseq_upload.sh, which fills in the placeholders below
+  and uploads the result to s3://$AWS_S3_BUCKET/nxf/<run_id>/. It overwrites the
+  progress page scripts/nextflow_progress.sh published while the job was
+  running, which is why this one carries no meta refresh: arriving here is how a
+  reader's browser stops polling.
+
+  Everything is inline and every link is relative, because this file is served
+  from S3 next to the objects it points at and has no origin to fetch from.
+
+  Placeholders are TASK_NAME, RUN_ID, RUN_DATE, SAMPLE_COUNT and DOWNLOADS, each
+  wrapped in doubled underscores. They are deliberately not spelled that way in
+  this comment - the renderer substitutes the whole file, comment included, and
+  would fill these in too. The task name is user-authored text and is
+  HTML-escaped on the way in; DOWNLOADS is markup the renderer escaped itself,
+  one button per file the run actually produced.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TASK_NAME__</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --header-bg: #f4f6f8;
+    --border: #d7dde3;
+    --text: #1b2733;
+    --muted: #5c6b7a;
+    --accent: #1f6feb;
+    --accent-text: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12171d;
+      --header-bg: #1a2129;
+      --border: #2c3742;
+      --text: #e6edf3;
+      --muted: #9aa7b4;
+      --accent: #3b82f6;
+      --accent-text: #ffffff;
+    }
+  }
+
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Helvetica, Arial, sans-serif;
+  }
+
+  header {
+    flex: 0 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px 24px;
+    padding: 14px 22px;
+    background: var(--header-bg);
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+  header .meta {
+    margin: 3px 0 0;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  header .meta code {
+    font: inherit;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  /* One button per file the run actually produced, so the count varies */
+  .downloads {
+    flex: 0 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  /* Labelled with the filename, so set in the face filenames are read in */
+  a.download {
+    padding: 8px 14px;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    color: var(--accent);
+    background: transparent;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  /* The reads are the bulky download most people came for */
+  a.download:first-child {
+    background: var(--accent);
+    color: var(--accent-text);
+  }
+  a.download:hover { filter: brightness(1.08); }
+
+  /* The report is the page; the header is just a strip above it. */
+  iframe {
+    flex: 1 1 auto;
+    width: 100%;
+    border: 0;
+    background: var(--bg);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>__TASK_NAME__</h1>
+    <!-- The sample count brings its own separator, so it can render as nothing -->
+    <p class="meta">Completed __RUN_DATE__ &middot; run <code>__RUN_ID__</code> __SAMPLE_COUNT__</p>
+  </div>
+  <div class="downloads">__DOWNLOADS__</div>
+</header>
+
+<iframe src="summary_report/summary_report.html" title="Summary report"></iframe>
+
+</body>
+</html>

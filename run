@@ -1,24 +1,232 @@
-#!/usr/bin/env bash
+#!/bin/bash
+#
+# run - Submit a pipeline request from the command line.
+#
+# Author: Daniel Smith
+# Date:   August 12th, 2026
+#
+# The entry point for people who would rather not open a browser. It runs no
+# pipeline itself: it builds the same task the "Bioinformatics Pipeline" request
+# form builds and files it in "Dashboards", so a command-line request rejoins the
+# normal path at the webhook and reaches wrike_task_handler.sh indistinguishable
+# from any other. One code path, one set of failure modes.
+#
+# Wrike's API cannot submit a request form - /request_forms is read-only, form
+# submission is UI-only - so this reproduces what the form does instead.
+#
+# The task is staged in the caller's own space first, attached to, and only then
+# moved into "Dashboards". Nothing watches that space, which buys two things: the
+# samplesheet is always in place before the webhook fires, and any failure before
+# the move can be discarded unseen.
+#
+# Filing an existing task fires TaskParentsAdded rather than the TaskCreated a
+# form submission produces; wrike_sqs_listener.sh routes both.
+#
+# This is the one part of the system that does not run as the Cluster Bot, which
+# is a Wrike Collaborator and so cannot create tasks. It runs as whoever invoked
+# it: they export their own WRIKE_API_TOKEN, and secrets/.env falls back to the
+# bot's only when nobody has. Step 3 checks this before creating anything.
+#
+# Usage:     run <pipeline> <samplesheet>
+#            e.g. run 16Sv4 /path/to/somesamples.txt
+# Triggers:  wrike_task_handler.sh, by way of the Wrike webhook and SQS
+# Requires:  curl and jq (via call_wrike_api)
+# Env:       WRIKE_API_TOKEN, which must be the caller's own and not the bot's,
+#            plus NEXTFLOW_DIR, WRIKE_DASHBOARDS_FOLDER_ID,
+#            WRIKE_PIPELINE_NAME_CFID, the Wrike helper functions and the
+#            log/warn/fail helpers, from .env
+#
+# Exits 0 once the request is filed - not once the pipeline finishes. The bot
+# reports progress and the result on the task it prints.
 
 set -euo pipefail
 
-# 1. Verify input arguments
-if [ "$#" -ne 2 ]; then
-    echo "Usage: $0 <pipeline> <samplesheet>" >&2
-    exit 1
+source /data/prod/nextflow/.env
+
+# Work somewhere of our own from here on. This script needs no working directory,
+# but the shared helpers write beside themselves - fail leaves message.out where
+# it finds one - and this is the only script that runs from wherever the caller
+# was standing, which may be a directory with their own files in it.
+#
+# The trap fires on every way out: a normal return, set -e, fail's exit, and
+# SIGINT/SIGTERM, whose exit statuses it leaves alone.
+ORIGINAL_DIR="$PWD"
+
+if ! WORK_DIR=$(mktemp -d); then
+    fail "Could not create a temporary working directory."
 fi
 
-# Prefer binaries in the nextflow bin directory
-export NXF="/data/prod/nextflow"
-export PATH="$NXF/bin:$PATH"
+trap 'cd /; rm -rf "$WORK_DIR"' EXIT
+cd "$WORK_DIR"
 
-# Nextflow Persistent Asset and Container Cache Directories
-export NXF_ASSET_DIR="$NXF/assets"
-export NXF_APPTAINER_CACHEDIR="$NXF/cache/apptainer"
-export NXF_SINGULARITY_CACHEDIR="$NXF/cache/apptainer"
+# The basenames of every pipeline in pipelines/, without the .sh suffix
+available_pipelines() {
+    local script list=""
+    for script in "$NEXTFLOW_DIR"/pipelines/*.sh; do
+        script=${script##*/}
+        list+="${script%.sh} "
+    done
+    echo "$list"
+}
 
-# Automatically clean up temporary files
-export TMPDIR=$(mktemp -d "$NXF/tmp/XXXXXX")
-export APPTAINERENV_TMPDIR="$TMPDIR"
-trap 'rm -rf "$TMPDIR"' EXIT
+# Delete a staged task that never reached "Dashboards". No webhook watches the
+# staging space, so nothing downstream has seen it and this leaves no trace -
+# which is what the extra two API calls buy.
+discard_staged_task() {
+    call_wrike_api DELETE "tasks/$TASK_ID" > /dev/null 2>&1 || true
+    warn "Discarding the staged task; nothing was submitted."
+}
 
+if [[ $# -ne 2 ]]; then
+    fail "Usage: $0 <pipeline> <samplesheet>"$'\n'"Available pipelines: $(available_pipelines)"
+fi
+
+PIPELINE_INPUT="$1"
+SAMPLESHEET="$2"
+
+# Resolved against where the caller invoked us, not the scratch directory we just
+# moved into, so a relative path still means what they typed. Everything below
+# uses this one absolute path.
+[[ "$SAMPLESHEET" == /* ]] || SAMPLESHEET="$ORIGINAL_DIR/$SAMPLESHEET"
+
+# 1. Resolve the pipeline exactly as wrike_task_handler.sh will, so a bad name is
+#    caught here rather than after a round trip through Wrike. Validated as a
+#    name, not merely as a path: wrike_job.sh sources what it resolves to.
+PIPELINE_UPPER=${PIPELINE_INPUT^^}
+
+if [[ ! "$PIPELINE_UPPER" =~ ^[A-Z0-9_]+$ || ! -f "$NEXTFLOW_DIR/pipelines/$PIPELINE_UPPER.sh" ]]; then
+    fail "Pipeline not found: $PIPELINE_INPUT"$'\n'"Available pipelines: $(available_pipelines)"
+fi
+
+# 2. Check the samplesheet here for the same reason. Its name travels as an HTTP
+#    header value, faces the handler's extension check, and ends up naming a
+#    published artifact, so keep it to characters safe in all three.
+if [[ ! -r "$SAMPLESHEET" ]]; then
+    fail "Samplesheet not found or not readable: $SAMPLESHEET"
+fi
+
+if [[ ! -s "$SAMPLESHEET" ]]; then
+    fail "Samplesheet is empty: $SAMPLESHEET"
+fi
+
+SAMPLESHEET_NAME=${SAMPLESHEET##*/}
+
+if [[ ! "$SAMPLESHEET_NAME" =~ ^[A-Za-z0-9._-]+\.(txt|tsv|out)$ ]]; then
+    REASON="Unsupported samplesheet name: $SAMPLESHEET_NAME"
+    REASON+=$'\n'"It must end in .txt, .tsv, or .out, and contain only letters,"
+    REASON+=" digits, dots, dashes, and underscores."
+    fail "$REASON"
+fi
+
+# 3. Establish that this token can create a task at all, before building anything.
+#    Collaborators cannot, and the fallback token in secrets/.env belongs to one,
+#    so without this the common mistake - never setting a token - would surface
+#    as a bare 403 from step 5.
+if ! ME_JSON=$(call_wrike_api GET "contacts?me=true"); then
+    fail "Could not reach Wrike to check which account this token belongs to."
+fi
+
+# A contact can hold a profile in more than one Wrike account; one licensed
+# profile is enough to create tasks.
+if ! echo "$ME_JSON" | jq -e '[.data[0].profiles[]?.role] | any(. == "User")' > /dev/null; then
+    TOKEN_OWNER=$(echo "$ME_JSON" | jq -r '.data[0] | "\(.firstName) \(.lastName)"')
+    TOKEN_ROLE=$(echo "$ME_JSON" | jq -r '[.data[0].profiles[]?.role] | join(", ")')
+
+    # Collected into one string so the whole explanation goes through fail, like
+    # every other error here
+    TOKEN_HELP=$(cat <<EOF
+This Wrike token belongs to $TOKEN_OWNER (${TOKEN_ROLE:-role unknown}), which cannot create tasks.
+
+Submitting a request means creating a Wrike task, and Collaborator accounts are not
+allowed to. The Cluster Bot is a Collaborator deliberately, so $(basename "$0") has to run
+as you instead, with a token from your own Wrike account:
+
+  1. Sign in to Wrike as yourself and open Apps & Integrations > API:
+       https://www.wrike.com/frontend/apps/index.html#/api
+  2. Create a permanent token there and copy it.
+  3. Export it before calling $(basename "$0"), and put it in your ~/.bashrc to keep it:
+       export WRIKE_API_TOKEN="<your token>"
+
+Nothing else on the cluster is affected: the daemon and the pipeline jobs will keep using
+the bot's Wrike token.
+EOF
+)
+    fail "$TOKEN_HELP"
+fi
+
+# 4. Find somewhere unwatched to stage the task. Your Personal space is the one
+#    folder you always have and nothing else looks at. Discovered rather than
+#    configured: it differs per caller, so it cannot be pinned in wrike_api.sh
+#    the way the shared Wrike IDs are.
+if ! SPACES_JSON=$(call_wrike_api GET "spaces"); then
+    fail "Could not list Wrike spaces. Nothing was submitted."
+fi
+
+STAGING_SPACE_ID=$(echo "$SPACES_JSON" \
+    | jq -r 'first(.data[] | select(.accessType == "Personal") | .id) // empty')
+
+if [[ -z "$STAGING_SPACE_ID" ]]; then
+    fail "Your Wrike account has no Personal space to stage the request in."
+fi
+
+# 5. Build the task there. Request bodies are made with jq rather than by
+#    splicing values into hand-written JSON, as everywhere else here.
+CUSTOM_FIELDS=$(jq -nc --arg id "$WRIKE_PIPELINE_NAME_CFID" --arg value "$PIPELINE_UPPER" \
+    '[{id: $id, value: $value}]')
+
+DESCRIPTION="Submitted from the command line by $(whoami).<br />$SAMPLESHEET_NAME<br />"
+
+# Born "Submitted", the status a request form leaves its task in. Set here rather
+# than after filing, so it cannot land after the handler has already moved the
+# task on to "Validating". Skipped when unmapped: an empty customStatus is
+# rejected outright.
+CREATE_STATUS=()
+if [[ -n "${WRIKE_CUSTOM_STATUS_IDS[Submitted]:-}" ]]; then
+    CREATE_STATUS=(--data-urlencode "customStatus=${WRIKE_CUSTOM_STATUS_IDS[Submitted]}")
+fi
+
+if ! TASK_JSON=$(call_wrike_api POST "folders/$STAGING_SPACE_ID/tasks" \
+        --data-urlencode "title=$PIPELINE_UPPER - Dashboard" \
+        --data-urlencode "description=$DESCRIPTION" \
+        --data-urlencode "customFields=$CUSTOM_FIELDS" \
+        "${CREATE_STATUS[@]}"); then
+    REASON="Could not create the Wrike task. Nothing was submitted."
+    REASON+=$'\n'"Step 3 confirmed the account may create tasks, so an HTTP 403 here points at"
+    REASON+=$'\n'"the Personal space $STAGING_SPACE_ID rather than at the account itself."
+    fail "$REASON"
+fi
+
+# TASK_ID is read by update_wrike_add_parent and discard_staged_task
+TASK_ID=$(echo "$TASK_JSON" | jq -r '.data[0].id // empty')
+PERMALINK=$(echo "$TASK_JSON" | jq -r '.data[0].permalink // empty')
+
+if [[ -z "$TASK_ID" ]]; then
+    fail "Wrike accepted the task but returned no task ID. Nothing was submitted."
+fi
+
+# 6. Attach the samplesheet as raw bytes rather than multipart - that is what this
+#    endpoint takes. No hurry: the task is not on the dashboard yet, so nothing
+#    is waiting on this file.
+if ! call_wrike_api POST "tasks/$TASK_ID/attachments" \
+        -H "X-File-Name: $SAMPLESHEET_NAME" \
+        -H "Content-Type: application/octet-stream" \
+        --data-binary "@$SAMPLESHEET" > /dev/null; then
+    discard_staged_task
+    fail "Could not attach $SAMPLESHEET_NAME to the staged task."
+fi
+
+# 7. File it under "Dashboards". The only step the outside world sees: it fires
+#    the TaskParentsAdded that puts the request on the rails. The staging space
+#    is deliberately left attached - detaching it would also fire
+#    TaskParentsRemoved, which wrike_delete_handler.sh listens for.
+if ! update_wrike_add_parent "$WRIKE_DASHBOARDS_FOLDER_ID" > /dev/null; then
+    discard_staged_task
+    fail "Could not file the task under \"Dashboards\"."
+fi
+
+log "Submitted the $PIPELINE_UPPER pipeline with $SAMPLESHEET_NAME as Wrike task $TASK_ID."
+if [[ -n "$PERMALINK" ]]; then
+    log "Progress and results will be reported there: $PERMALINK"
+else
+    log "Progress and results will be reported on that task."
+fi

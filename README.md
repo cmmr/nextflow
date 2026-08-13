@@ -203,10 +203,10 @@ re-running `16SV4_01` a year from now reproduces this run exactly.
 
 ### Naming
 
-Three names resolve to the same run, by chained `source`:
+Two names resolve to the same run, by chained `source`:
 
 ```
-V4.sh  →  16SV4.sh  →  16SV4_01.sh      (the actual definition)
+16SV4.sh  →  16SV4_01.sh      (the actual definition)
 ```
 
 `16SV4_01.sh` is immutable once it has been used in production. To change
@@ -225,10 +225,7 @@ against SILVA 138.2.
 1. Write `pipelines/<NAME>_01.sh` setting the variables above.
 2. Add `pipelines/<NAME>.sh` containing
    `source "$NEXTFLOW_DIR/pipelines/<NAME>_01.sh"`.
-3. That's it — the handler discovers it by globbing `pipelines/*.sh`, and it
-   appears in the "available pipelines" list the bot offers on a typo. Adding it
-   to the request form's dropdown is a separate, optional step in Wrike; the
-   field accepts any text.
+3. Add `<NAME>` as an option to Wrike's "Pipeline Name" custom field.
 
 ---
 

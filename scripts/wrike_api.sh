@@ -41,6 +41,8 @@ declare -A WRIKE_CUSTOM_STATUS_IDS=(
     [Archived]="IEAAIKU5JMHRVOM3"
     [Cancelled]="IEAAIKU5JMHRVONH"
 )
+export WRIKE_TASK_ID_FILE="wrike_task_id.txt"
+export WRIKE_TASK_NAME_FILE="wrike_task_name.txt"
 
 # True when the argument could be a Wrike API v4 ID. Wrike's own pattern for one
 # is ^([a-zA-Z0-9-_:.=]){1,256}$ - not the bare alphanumerics these IDs used to
@@ -70,15 +72,6 @@ is_valid_wrike_id() {
 # directories are named after the uid, and a uid cannot be turned back into a
 # task ID, so wrike_task_handler.sh records it in this file when it creates the
 # directory. Everything on the compute node reads it back from there.
-#
-# Like derive_uid, this warns and returns rather than failing: callers read it
-# through $(...), where fail would exit only the subshell.
-readonly WRIKE_TASK_ID_FILE="wrike_task_id.txt"
-
-# The task's title, recorded beside its ID for the same reason and read the same
-# way. Only ever displayed - it heads the published results page - so unlike the
-# ID nothing validates it and nothing fails without it.
-readonly WRIKE_TASK_NAME_FILE="wrike_task_name.txt"
 
 read_wrike_task_id() {
     local file="${1:-$WRIKE_TASK_ID_FILE}"

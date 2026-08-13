@@ -3,7 +3,7 @@ bin/
 cache/
 db/
 log/
-tmp/
 secrets/
+tmp/
 .claude/
 .aiexclude

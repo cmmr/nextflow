@@ -1,0 +1,4 @@
+tool,db_name,db_params,db_path
+kraken2,bac_arc_fun_Feb2024,,/biolib/prod/db/kraken2/bac_arc_fun_Feb2024
+bracken,bac_arc_fun_Feb2024_150m,,/biolib/prod/db/kraken2/bac_arc_fun_Feb2024
+metaphlan,mpa_vJun23_CHOCOPhlAnSGB_202403,,/biolib/prod/db/metaphlan4/mpa_vJun23_CHOCOPhlAnSGB_202403/mpa_vJun23_CHOCOPhlAnSGB_202403

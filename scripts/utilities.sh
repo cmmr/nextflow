@@ -11,8 +11,15 @@
 # All three stamp the time:
 #
 #   log   a plain line on stdout
-#   warn  the same, marked WARNING; the script carries on regardless
+#   warn  the same on stderr, marked WARNING; the script carries on regardless
 #   fail  an ERROR on stderr, then exit 1, so the caller stops where it stands
+#
+# Only log writes to stdout, which keeps stdout free to be a function's return
+# value. Several helpers here hand their result back through $(...), where a
+# warning written to stdout would be captured as part of that result and never
+# reach anyone - so warn and fail stay off it. Slurm points --output and --error
+# at the same file and the daemon runs under a supervisor, so both streams end
+# up in the same log either way.
 #
 # fail also copies its message - unstamped - to ./message.out when that file
 # exists. That is how a compute node explains itself to the requester:
@@ -33,7 +40,7 @@ log() {
 }
 
 warn() {
-    echo "[$(date)] WARNING: $*"
+    echo "[$(date)] WARNING: $*" >&2
 }
 
 fail() {
@@ -102,7 +109,8 @@ is_valid_uid() {
 
 # warn and return rather than fail: callers read this through $(...), and fail's
 # exit would only leave that subshell. Every call site checks the return status
-# and decides for itself how to report the failure.
+# and decides for itself how to report the failure. warn is safe to use inside a
+# substitution like this because it writes to stderr; stdout here is the uid.
 derive_uid() {
     if [[ -z "${RUN_ID_SALT:-}" ]]; then
         warn "RUN_ID_SALT is not set; cannot derive a uid."

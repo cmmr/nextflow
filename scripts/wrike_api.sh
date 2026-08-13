@@ -18,7 +18,8 @@
 # Requires: curl, jq, Bash 4+ (WRIKE_CUSTOM_STATUS_IDS is an associative array),
 #           and the warn helper from utilities.sh, which .env sources first
 # Defines:  WRIKE_DASHBOARDS_FOLDER_ID, WRIKE_NXFPIPE_*, WRIKE_*_CFID,
-#           WRIKE_CUSTOM_STATUS_IDS, WRIKE_TASK_ID_FILE, WRIKE_TASK_NAME_FILE
+#           WRIKE_CUSTOM_STATUS_IDS, WRIKE_TASK_ID_FILE, WRIKE_TASK_NAME_FILE,
+#           WRIKE_LAST_RESPONSE (the reply to the most recent update_wrike_task)
 # Env:      WRIKE_API_TOKEN from secrets/.env, and TASK_ID at the call site
 
 export WRIKE_BOT_USER_ID="KUAYXHNY"
@@ -72,7 +73,10 @@ is_valid_wrike_id() {
 # directories are named after the uid, and a uid cannot be turned back into a
 # task ID, so wrike_task_handler.sh records it in this file when it creates the
 # directory. Everything on the compute node reads it back from there.
-
+#
+# Like derive_uid, this warns and returns rather than failing: callers read it
+# through $(...), where fail would exit only the subshell. stdout here is the
+# task ID, which is why warn writes to stderr.
 read_wrike_task_id() {
     local file="${1:-$WRIKE_TASK_ID_FILE}"
     local id
@@ -109,9 +113,9 @@ call_wrike_api() {
     local status=$?
     if [[ $status -ne 0 ]]; then
         # warn, not fail: every caller decides for itself whether a failed call
-        # is fatal. To stderr, since most calls sit inside a command
-        # substitution that would otherwise swallow the warning.
-        warn "Request failed: $verb $endpoint (curl exit code $status)" >&2
+        # is fatal. Safe to use here, where the response is on stdout, because
+        # warn writes to stderr.
+        warn "Request failed: $verb $endpoint (curl exit code $status)"
 
         # The one place that reports without stopping, so it writes message.out
         # itself rather than leaving it to fail
@@ -125,6 +129,16 @@ call_wrike_api() {
 
 # PUT to the current task. body is assigned separately so a jq failure is not
 # masked by the assignment's own exit status.
+#
+# The reply is captured rather than printed. Wrike answers a PUT with the whole
+# updated task - some 700 bytes of JSON - which none of the helpers below wants
+# on stdout, where it would land in a Slurm log, the daemon's log, or, for the
+# helpers `run` uses, the user's terminal. Capturing it in the one place every
+# update goes through means a new helper cannot leak it by forgetting to
+# redirect, and leaves it in WRIKE_LAST_RESPONSE for the one caller that needs
+# to read what Wrike actually did.
+#
+# The assignment's exit status is the request's, so callers still see a failure.
 update_wrike_task() {
     local jq_filter="$1"
     shift
@@ -132,18 +146,44 @@ update_wrike_task() {
     local body
     body=$(jq -n "$@" "$jq_filter")
 
-    call_wrike_api PUT "tasks/$TASK_ID" \
+    WRIKE_LAST_RESPONSE=$(call_wrike_api PUT "tasks/$TASK_ID" \
       -H "Content-Type: application/json" \
-      -d "$body"
+      -d "$body")
 }
 
+# Set one custom field, then confirm Wrike agreed to it.
+#
+# The confirmation is not paranoia. Wrike answers a rejected custom field write
+# with 200 and simply omits the change - no error, no warning, nothing in the
+# body to distinguish it from success. That is what an API token belonging to a
+# Collaborator gets, since collaborators may change a task's status but not edit
+# its fields; an archived or unshared field, or a value a DropDown will not take,
+# behaves the same way. The reply carries the task's custom fields as they now
+# stand, so the only way to know a write landed is to look for it there.
+#
+# A rejected write warns but still returns success: the request itself was
+# accepted, these fields are display-only, and callers on the compute node run
+# under set -e where a non-zero return would abandon a finished pipeline over a
+# cosmetic field. A transport failure is different and still returns non-zero.
 update_wrike_custom_field() {
     local custom_field_id="$1"
     local new_value="$2"
 
     update_wrike_task '{customFields: [{id: $id, value: $value}]}' \
         --arg id "$custom_field_id" \
-        --arg value "$new_value"
+        --arg value "$new_value" || return 1
+
+    local applied
+    applied=$(echo "$WRIKE_LAST_RESPONSE" \
+        | jq -r --arg id "$custom_field_id" \
+            '.data[0].customFields[]? | select(.id == $id) | .value')
+
+    if [[ "$applied" != "$new_value" ]]; then
+        warn "Wrike accepted the write to custom field $custom_field_id but did not apply it:" \
+             "asked for \"$new_value\", field now reads \"$applied\"." \
+             "Check that the API user is not a Collaborator and that the field is editable."
+        return 0
+    fi
 }
 
 update_wrike_task_status() {
@@ -155,10 +195,7 @@ update_wrike_task_status() {
         return 0
     fi
 
-    # Discarded, not logged: Wrike answers a PUT with the whole updated task, and
-    # this is the most frequently called helper here - every stage of every run
-    # goes through it. The return status still reaches the caller.
-    update_wrike_task '{customStatus: $status}' --arg status "$status_id" > /dev/null
+    update_wrike_task '{customStatus: $status}' --arg status "$status_id"
 }
 
 update_wrike_pipeline_progress() {

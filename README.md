@@ -336,8 +336,10 @@ directories, and then sources three things:
     the uid rather than looking it up.
   - `WRIKE_WEBHOOK_SECRET`, `AWS_WEBHOOK_BRIDGE` (used when registering webhooks)
 - [`scripts/utilities.sh`](scripts/utilities.sh) — `log`, `warn`, and `fail`, the
-  three ways anything in this system says anything. All stamp the time; `log` and
-  `warn` go to stdout, `fail` goes to stderr, copies itself to `message.out` when
+  three ways anything in this system says anything. All stamp the time.
+  `log` goes to stdout while `warn` and `fail` go to stderr — which keeps stdout
+  free to carry a function's return value, since several helpers hand their
+  result back through `$(…)`. `fail` also copies itself to `message.out` when
   that file exists, and exits non-zero, so a caller stops on the spot rather than
   having to check. Also `derive_uid`, which turns a Wrike task ID into the
   8-character base32 uid that names the run everywhere outside Wrike — 40 bits,

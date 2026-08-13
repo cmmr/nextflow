@@ -22,11 +22,13 @@
 # Usage:     wrike_task_handler.sh <sqs_message_body_json>
 # Called by: wrike_sqs_listener.sh
 # Submits:   wrike_job.sh, then wrike_followup.sh (dependent on the first)
+# Runs:      scripts/nextflow_progress.sh once, to seed the results page
 # Requires:  jq, sbatch/squeue (Slurm), aws, openssl (via derive_uid), curl (via
 #            call_wrike_api)
-# Env:       NEXTFLOW_DIR, NEXTFLOW_NODE, AWS_S3_BUCKET, RUN_ID_SALT,
-#            WRIKE_PIPELINE_NAME_CFID, the Wrike helper functions and the
-#            log/warn/fail/derive_uid helpers, all from .env
+# Env:       NEXTFLOW_DIR, NEXTFLOW_NODE, AWS_S3_BUCKET, S3_RUN_PREFIX,
+#            RUN_ID_SALT, WRIKE_PIPELINE_NAME_CFID, WRIKE_S3_RESULTS_URL_CFID,
+#            the Wrike helper functions and the log/warn/fail/derive_uid/
+#            run_results_url helpers, all from .env
 
 set -euo pipefail
 
@@ -34,12 +36,12 @@ source /data/prod/nextflow/.env
 
 # A form submission's attachment arrives as its own webhook event, so the file may
 # not have landed yet. Attempts, and seconds between them.
-readonly ATTACHMENT_TRIES=5
-readonly ATTACHMENT_WAIT=3
+ATTACHMENT_TRIES=5
+ATTACHMENT_WAIT=3
 
 # How much of the pipeline field to quote back to the user. The field is free
 # text, so a bad value could be an entire pasted document.
-readonly PIPELINE_ECHO_CHARS=50
+PIPELINE_ECHO_CHARS=50
 
 if [[ $# -ne 1 ]]; then
     fail "Usage: $0 <sqs_message_body_json>"
@@ -290,9 +292,29 @@ if JOB_ID=$(sbatch --parsable --job-name="$RUN_ID" --chdir="$RUN_DIR" \
         warn "Follow-up submission failed for task $TASK_ID; job $JOB_ID will run unreported."
     fi
 
+    # The results address is known the moment the run has a uid, so publish it
+    # now rather than at the end: it is where the requester watches the job as
+    # well as where they collect it. Best effort from here on - the job is
+    # queued, and nothing below is worth abandoning it over. ampliseq_upload.sh
+    # sets the same field again when the results land, which covers a failure
+    # here.
+    RESULTS_URL=$(run_results_url "$RUN_ID")
+
+    update_wrike_custom_field "$WRIKE_S3_RESULTS_URL_CFID" "$RESULTS_URL" \
+        || warn "Could not set the results URL on task $TASK_ID."
+
+    # Put a page at that address straight away, so the link in the comment below
+    # leads somewhere from the moment it is posted. Until the job starts running
+    # this says the run is queued; nextflow_progress.sh takes over once the
+    # pipeline is under way.
+    "$NEXTFLOW_DIR/scripts/nextflow_progress.sh" \
+        || warn "Could not publish the initial progress page for task $TASK_ID."
+
     REPLY="Success! Your job for the $PIPELINE_UPPER pipeline was successfully"
     REPLY+=" submitted to the cluster using the attached samplesheet."
     REPLY+=" There are currently $JOBS_AHEAD pending jobs ahead of yours in the queue."
+    REPLY+=$'\n\n'"You can follow along here, and this is where your results will"
+    REPLY+=" appear once the run finishes:"$'\n'"$RESULTS_URL"
     add_wrike_task_comment "$REPLY"
     log "Job $JOB_ID submitted for task $TASK_ID as uid $RUN_ID, followed by dependent job $FOLLOWUP_ID."
 else

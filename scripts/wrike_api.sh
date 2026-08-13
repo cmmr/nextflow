@@ -155,7 +155,10 @@ update_wrike_task_status() {
         return 0
     fi
 
-    update_wrike_task '{customStatus: $status}' --arg status "$status_id"
+    # Discarded, not logged: Wrike answers a PUT with the whole updated task, and
+    # this is the most frequently called helper here - every stage of every run
+    # goes through it. The return status still reaches the caller.
+    update_wrike_task '{customStatus: $status}' --arg status "$status_id" > /dev/null
 }
 
 update_wrike_pipeline_progress() {

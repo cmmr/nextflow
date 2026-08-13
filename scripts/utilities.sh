@@ -24,8 +24,9 @@
 # uid is Wrike's: it names a directory, a job, and an S3 prefix, and only takes
 # a task ID because that is what the system happens to key on.
 #
-# Defines: log, warn, fail, escape_html, is_valid_uid, derive_uid
-# Env:     RUN_ID_SALT from secrets/.env, for derive_uid only
+# Defines: log, warn, fail, run_results_url, escape_html, is_valid_uid, derive_uid
+# Env:     RUN_ID_SALT from secrets/.env, for derive_uid only; AWS_S3_BUCKET and
+#          S3_RUN_PREFIX for run_results_url
 
 log() {
     echo "[$(date)] $*"
@@ -45,6 +46,19 @@ fail() {
     fi
 
     exit 1
+}
+
+# Where a run's results live, as a reader sees it. Built here rather than at
+# each call site because two scripts write this exact string onto the Wrike task
+# - wrike_task_handler.sh at submission and ampliseq_upload.sh at the end - and
+# a run whose task points somewhere its results are not is worse than one with
+# no link at all.
+#
+# index.html rather than the report itself: that key holds the progress page
+# while the run is going and the finished report afterwards, so the address is
+# good from the moment the job is queued.
+run_results_url() {
+    printf 'https://%s/%s/%s/index.html' "$AWS_S3_BUCKET" "$S3_RUN_PREFIX" "$1"
 }
 
 # Make a string safe to drop into HTML text. Used on the Wrike task name, which

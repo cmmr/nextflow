@@ -27,14 +27,11 @@ set -euo pipefail
 source /data/prod/nextflow/.env
 
 # Seconds to wait before re-checking an unreachable Slurm controller
-readonly SLURM_RETRY_WAIT=60
-
-# Seconds SQS holds the receive-message call open waiting for a message
-readonly SQS_WAIT_SECONDS=20
+SLURM_RETRY_WAIT=60
 
 # Seconds to back off after a failed poll. A failing aws call returns instantly,
 # so without this a persistent failure would spin the loop at full speed.
-readonly SQS_ERROR_WAIT=10
+SQS_ERROR_WAIT=10
 
 # Leave the loop cleanly when the supervisor stops us. The signal is not handled
 # until the in-flight aws call returns, so shutdown can lag by SQS_WAIT_SECONDS.
@@ -58,7 +55,7 @@ while true; do
             --queue-url "$AWS_SQS_QUEUE_URL" \
             --region "$AWS_REGION" \
             --max-number-of-messages 1 \
-            --wait-time-seconds "$SQS_WAIT_SECONDS" \
+            --wait-time-seconds 20 \
             --output json 2>&1); then
         warn "SQS poll failed, retrying in ${SQS_ERROR_WAIT}s: $RESPONSE"
         sleep "$SQS_ERROR_WAIT"
@@ -66,6 +63,7 @@ while true; do
     fi
 
     if echo "$RESPONSE" | jq -e '.Messages | length > 0' > /dev/null 2>&1; then
+
         RECEIPT_HANDLE=$(echo "$RESPONSE" | jq -r '.Messages[0].ReceiptHandle')
         MESSAGE_BODY=$(echo "$RESPONSE" | jq -r '.Messages[0].Body')
 

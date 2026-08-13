@@ -285,8 +285,19 @@ submitted. A run without that file simply leaves the figure out.
 [`nextflow_progress.sh`](scripts/nextflow_progress.sh), backgrounded by
 `wrike_job.sh` for the length of the nextflow stage, renders
 [`config/progress.html`](config/progress.html) to the *same key* every minute —
-so the results link works from the moment the job starts, and a requester who
-opens it early watches the pipeline work. The final upload overwrites it.
+so a requester who opens the results link early watches the pipeline work. The
+final upload overwrites it.
+
+The link is live before any of that. `wrike_task_handler.sh` writes the URL to
+the task's results custom field the moment Slurm accepts the job, includes it in
+the comment telling the requester their run is queued, and runs
+`nextflow_progress.sh` once to put a "Queued" page at that address — so the link
+it just posted leads somewhere rather than to a `NoSuchKey`. Every one of those
+steps is best-effort: the job is already queued, and none of them is worth
+abandoning a run over. `ampliseq_upload.sh` sets the same field again at the end,
+which covers a failure at submission and marks the point where the address stops
+being a promise. Both build it through `run_results_url`, so a task can never
+point somewhere its results are not.
 
 The numbers come from parsing nextflow's console output, which `wrike_job.sh`
 tees to `nextflow.out`. Nextflow has no live status API outside Seqera Platform:
@@ -332,8 +343,9 @@ directories, and then sources three things:
   8-character base32 uid that names the run everywhere outside Wrike — 40 bits,
   HMAC-SHA256, so it is stable, unguessable, and safe in a path and a URL, none
   of which a raw Wrike ID is — plus `is_valid_uid`, which every script that
-  builds a path or an S3 prefix out of one checks first, and `escape_html`, for
-  the task name that heads both published pages.
+  builds a path or an S3 prefix out of one checks first, `escape_html`, for the
+  task name that heads both published pages, and `run_results_url`, the one
+  place the address written onto a Wrike task is spelled.
 - [`scripts/wrike_api.sh`](scripts/wrike_api.sh) — `call_wrike_api` plus the
   `update_wrike_*` / `add_wrike_task_comment` helpers, which read `TASK_ID` from
   the environment rather than taking it as an argument. **It also defines every

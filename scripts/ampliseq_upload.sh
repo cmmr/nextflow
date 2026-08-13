@@ -72,8 +72,11 @@ fi
 S3_RESULTS_DIR="s3://$AWS_S3_BUCKET/$S3_RUN_PREFIX/$RUN_ID"
 
 # The landing page, not the report itself: it frames the report under a header
-# carrying the task name and a link to the raw sequences.
-S3_RESULTS_URL="https://$AWS_S3_BUCKET/$S3_RUN_PREFIX/$RUN_ID/index.html"
+# carrying the task name and the run's downloads. wrike_task_handler.sh already
+# put this on the task at submission - it is re-asserted at the end because that
+# call was best effort, and because this is the point at which it stops being a
+# promise.
+S3_RESULTS_URL=$(run_results_url "$RUN_ID")
 
 if [[ ! -d "$RESULTS_DIR" ]]; then
     fail "The pipeline finished but produced no results directory ('$RESULTS_DIR') to upload."

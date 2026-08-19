@@ -16,7 +16,6 @@ cat << EOF > ampliseq_args.yaml
 input: "ampliseq_samplesheet.tsv"
 outdir: "results"
 skip_cutadapt: true
-sample_inference: "pooled"
 dada_ref_taxonomy: "silva=138.2"
 FW_primer: "GTGCCAGCMGCCGCGGTAA"
 RV_primer: "GGACTACHVGGGTWTCTAAT"

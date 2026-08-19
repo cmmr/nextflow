@@ -63,17 +63,29 @@ while true; do
 
     if echo "$RESPONSE" | jq -e '.Messages | length > 0' > /dev/null 2>&1; then
 
-        RECEIPT_HANDLE=$(echo "$RESPONSE" | jq -r '.Messages[0].ReceiptHandle')
+        RECEIPT_HANDLE=$(echo "$RESPONSE" | jq -r '.Messages[0].ReceiptHandle // empty')
         MESSAGE_BODY=$(echo "$RESPONSE" | jq -r '.Messages[0].Body')
 
         log "Webhook trigger received from SQS."
 
         # 3. Delete before dispatching, so a handler that dies cannot cause the
         #    message to be redelivered and the same job to be submitted twice.
-        aws sqs delete-message \
-            --queue-url "$AWS_SQS_QUEUE_URL" \
-            --receipt-handle "$RECEIPT_HANDLE" \
-            --region "$AWS_REGION" > /dev/null
+        #    A message that cannot be deleted is left undispatched for the same
+        #    reason: SQS returns it after the visibility timeout, and dispatching
+        #    it now would run it a second time then. An empty handle would be
+        #    sent as a missing parameter, which aborts the delete.
+        if [[ -z $RECEIPT_HANDLE ]]; then
+            warn "SQS message carries no receipt handle; skipping it."
+            continue
+        fi
+
+        if ! DELETE_ERROR=$(aws sqs delete-message \
+                --queue-url "$AWS_SQS_QUEUE_URL" \
+                --receipt-handle "$RECEIPT_HANDLE" \
+                --region "$AWS_REGION" 2>&1); then
+            warn "Failed to delete SQS message, leaving it for redelivery: $DELETE_ERROR"
+            continue
+        fi
 
         # 4. Route on eventType. Handlers run in the background, so their exit
         #    status is not checked here; they log their own outcome.

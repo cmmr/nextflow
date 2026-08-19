@@ -32,7 +32,7 @@
 # --output and --error name the same file, so this job's commentary and anything
 # nextflow writes to stderr interleave in one log/job_<uid>_<jobid>.out.
 #
-# Usage:     sbatch --chdir=<run_dir> --job-name=<uid> --nodelist=<node> \
+# Usage:     sbatch --chdir=<run_dir> --job-name=nf-<uid> --nodelist=<node> \
 #                wrike_job.sh <PIPELINE_NAME> <WRIKE_ATTACHMENT_ID>
 # Called by: wrike_task_handler.sh
 # Sources:   pipelines/<PIPELINE_NAME>.sh

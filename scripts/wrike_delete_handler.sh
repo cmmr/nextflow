@@ -76,7 +76,7 @@ log "Commencing cleanup protocol for task $TASK_ID (uid $RUN_ID)"
 # 1. Terminate any Slurm jobs for this run; both the pipeline job and its
 #    follow-up are named after the uid. Failure is expected, and ignored, once
 #    the jobs have finished.
-scancel --name="$RUN_ID" --user="$(whoami)" > /dev/null 2>&1 || true
+scancel --name="nf-$RUN_ID" --user="$(whoami)" > /dev/null 2>&1 || true
 
 # 2. Purge everything published under the prefix: the progress page
 #    wrike_task_handler.sh put there when the request arrived, and the results on

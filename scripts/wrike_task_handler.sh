@@ -300,14 +300,14 @@ fi
 #    with it.
 JOBS_AHEAD=$(squeue -h -t PENDING | wc -l) || JOBS_AHEAD="an unknown number of"
 
-if JOB_ID=$(sbatch --parsable --job-name="$RUN_ID" --chdir="$RUN_DIR" \
+if JOB_ID=$(sbatch --parsable --job-name="nf-$RUN_ID" --chdir="$RUN_DIR" \
         $NEXTFLOW_OPTS \
         "$NEXTFLOW_DIR/scripts/wrike_job.sh" "$PIPELINE_UPPER" "$ATTACHMENT_ID"); then
 
     # afterany, not afterok, so failures are reported to the user too. A
     # follow-up that fails to submit is not fatal - the pipeline is already
     # queued - but it does mean nothing will report the outcome.
-    if ! FOLLOWUP_ID=$(sbatch --parsable --job-name="$RUN_ID" --chdir="$RUN_DIR" \
+    if ! FOLLOWUP_ID=$(sbatch --parsable --job-name="nf-$RUN_ID" --chdir="$RUN_DIR" \
             $NEXTFLOW_OPTS \
             --dependency=afterany:"$JOB_ID" \
             "$NEXTFLOW_DIR/scripts/wrike_followup.sh"); then

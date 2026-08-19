@@ -3,6 +3,7 @@ bin/
 cache/
 db/
 log/
+opt/
 secrets/
 tmp/
 .claude/

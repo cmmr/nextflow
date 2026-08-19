@@ -333,7 +333,7 @@ Every script that talks to Wrike or AWS begins with
 `source /data/prod/nextflow/.env`. Every statement in that file is a plain
 assignment or a `source`, so it is safe and cheap to source any number of times,
 in any process, and it carries no guard. It sets `NEXTFLOW_DIR` and
-`NEXTFLOW_NODE` (the compute node everything is pinned to — read both by the
+`NEXTFLOW_OPTS` (the compute node everything is pinned to — read both by the
 `sbatch` calls and by `config/slurm.config`), sets the nextflow cache
 directories, unsets any `WRIKE_API_TOKEN` inherited from the caller, and then
 sources three things:

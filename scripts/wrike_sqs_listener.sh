@@ -61,60 +61,61 @@ while true; do
         continue
     fi
 
-    if echo "$RESPONSE" | jq -e '.Messages | length > 0' > /dev/null 2>&1; then
+    # 3. Pulling out the receipt handle is also the test for whether the poll
+    #    returned anything: a long poll that times out prints no message, so the
+    #    handle comes back empty and there is nothing to do. jq is allowed to
+    #    fail here - a response that is not message JSON leaves it empty too.
+    RECEIPT_HANDLE=$(echo "$RESPONSE" | jq -r '.Messages[0].ReceiptHandle // empty' 2>/dev/null) \
+        || RECEIPT_HANDLE=""
 
-        RECEIPT_HANDLE=$(echo "$RESPONSE" | jq -r '.Messages[0].ReceiptHandle // empty')
-        MESSAGE_BODY=$(echo "$RESPONSE" | jq -r '.Messages[0].Body')
+    if [[ -z $RECEIPT_HANDLE ]]; then
+        continue
+    fi
 
-        log "Webhook trigger received from SQS."
+    MESSAGE_BODY=$(echo "$RESPONSE" | jq -r '.Messages[0].Body')
 
-        # 3. Delete before dispatching, so a handler that dies cannot cause the
-        #    message to be redelivered and the same job to be submitted twice.
-        #    A message that cannot be deleted is left undispatched for the same
-        #    reason: SQS returns it after the visibility timeout, and dispatching
-        #    it now would run it a second time then. An empty handle would be
-        #    sent as a missing parameter, which aborts the delete.
-        if [[ -z $RECEIPT_HANDLE ]]; then
-            warn "SQS message carries no receipt handle; skipping it."
-            continue
-        fi
+    log "Webhook trigger received from SQS."
 
-        if ! DELETE_ERROR=$(aws sqs delete-message \
-                --queue-url "$AWS_SQS_QUEUE_URL" \
-                --receipt-handle "$RECEIPT_HANDLE" \
-                --region "$AWS_REGION" 2>&1); then
-            warn "Failed to delete SQS message, leaving it for redelivery: $DELETE_ERROR"
-            continue
-        fi
+    # 4. Delete before dispatching, so a handler that dies cannot cause the
+    #    message to be redelivered and the same job to be submitted twice. A
+    #    message that cannot be deleted is left undispatched for the same
+    #    reason: SQS returns it after the visibility timeout, and dispatching it
+    #    now would run it a second time then.
+    if ! DELETE_ERROR=$(aws sqs delete-message \
+            --queue-url "$AWS_SQS_QUEUE_URL" \
+            --receipt-handle "$RECEIPT_HANDLE" \
+            --region "$AWS_REGION" 2>&1); then
+        warn "Failed to delete SQS message, leaving it for redelivery: $DELETE_ERROR"
+        continue
+    fi
 
-        # 4. Route on eventType. Handlers run in the background, so their exit
-        #    status is not checked here; they log their own outcome.
-        EVENT_TYPE=$(echo "$MESSAGE_BODY" | jq -r '.[0].eventType // empty')
+    # 5. Route on eventType. Handlers run in the background, so their exit
+    #    status is not checked here; they log their own outcome.
+    EVENT_TYPE=$(echo "$MESSAGE_BODY" | jq -r '.[0].eventType // empty')
 
-        case "$EVENT_TYPE" in
-            TaskCreated)
+    case "$EVENT_TYPE" in
+        TaskCreated)
+            log "Routing to wrike_task_handler.sh for $EVENT_TYPE event."
+            "$NEXTFLOW_DIR/scripts/wrike_task_handler.sh" "$MESSAGE_BODY" &
+            ;;
+        TaskParentsAdded)
+            # How a `run` submission arrives. This fires for any parent change
+            # on a task the webhook can see, so check that "Dashboards" is what
+            # was added.
+            if echo "$MESSAGE_BODY" | jq -e --arg folder "$WRIKE_DASHBOARDS_FOLDER_ID" \
+                    '[.[0].addedParents[]?] | any(. == $folder)' > /dev/null; then
                 log "Routing to wrike_task_handler.sh for $EVENT_TYPE event."
                 "$NEXTFLOW_DIR/scripts/wrike_task_handler.sh" "$MESSAGE_BODY" &
-                ;;
-            TaskParentsAdded)
-                # How a `run` submission arrives. This fires for any parent
-                # change on a task the webhook can see, so check that
-                # "Dashboards" is what was added.
-                if echo "$MESSAGE_BODY" | jq -e --arg folder "$WRIKE_DASHBOARDS_FOLDER_ID" \
-                        '[.[0].addedParents[]?] | any(. == $folder)' > /dev/null; then
-                    log "Routing to wrike_task_handler.sh for $EVENT_TYPE event."
-                    "$NEXTFLOW_DIR/scripts/wrike_task_handler.sh" "$MESSAGE_BODY" &
-                else
-                    log "Ignoring $EVENT_TYPE event: \"Dashboards\" was not among the parents added."
-                fi
-                ;;
-            TaskDeleted | TaskParentsRemoved)
-                log "Routing to wrike_delete_handler.sh for $EVENT_TYPE event."
-                "$NEXTFLOW_DIR/scripts/wrike_delete_handler.sh" "$MESSAGE_BODY" "$EVENT_TYPE" &
-                ;;
-            *)
-                log "Ignoring unhandled event type: $EVENT_TYPE."
-                ;;
-        esac
-    fi
+            else
+                log "Ignoring $EVENT_TYPE event: \"Dashboards\" was not among the parents added."
+            fi
+            ;;
+        TaskDeleted | TaskParentsRemoved)
+            log "Routing to wrike_delete_handler.sh for $EVENT_TYPE event."
+            "$NEXTFLOW_DIR/scripts/wrike_delete_handler.sh" "$MESSAGE_BODY" "$EVENT_TYPE" &
+            ;;
+        *)
+            log "Ignoring unhandled event type: $EVENT_TYPE."
+            ;;
+    esac
 done

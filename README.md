@@ -1,5 +1,7 @@
 # nextflow
 
+<img src="images/bot_100px.png" alt="Cluster Bot avatar" width="100" align="right">
+
 Amplicon (16S) and WGS pipelines for CMMR, driven from Wrike.
 
 A user submits the **"Bioinformatics Pipeline"** Wrike request form, naming a
@@ -39,7 +41,7 @@ flowchart TD
    Gateway endpoint backed by a Lambda, which checks an HMAC signature against a
    pre-shared secret and pushes the raw body onto SQS. Registration commands,
    example payloads, and the Lambda source are in
-   [config/webhooks.md](config/webhooks.md).
+   [docs/webhook_bridge.md](docs/webhook_bridge.md).
 
    **A request arrives as one of two events, because there are two ways into that
    folder.** The request form creates its task there outright, which is
@@ -177,14 +179,27 @@ scripts/
   ampliseq_upload.sh       POST_PROCESS_CMD for the ampliseq pipelines.
 
 pipelines/            One file per pipeline; see below.
-config/
-  slurm.config        Nextflow executor + apptainer settings used by the pipelines.
+config/               Nextflow config, passed to `nextflow run -c`.
+  slurm.config        Executor + apptainer settings used by the pipelines.
   local.config        Same, for running off the scheduler.
+  cmp09.config        Same, pinned to the cmp09 node.
+  taxprofiler/
+    database.csv      Database sheet for the taxprofiler pipeline.
+
+templates/            Web pages published to S3 alongside a run's results.
   progress.html       Live progress page template. Pipeline-agnostic.
   listing.html        Folder listing page template. Likewise.
   ampliseq/
     index.html        Landing page template for a published ampliseq run.
-  webhooks.md         Webhook registration commands and the Lambda source.
+
+images/               Assets that are not part of any published page.
+  bot_100px.png       Cluster Bot's Wrike avatar. The small one is in this README.
+  bot_large.png       Full size, kept so the avatar can be reused elsewhere.
+
+docs/                 How the external services were set up, and their responses.
+  webhook_bridge.md   Wrike webhook registration and the AWS Lambda source.
+  cloudfront.md       Viewer request function that serves the listing pages.
+  wrike_responses.md  Wrike API responses for the request form and its fields.
 ```
 
 Working directories that exist only on the cluster: `assets/`, `bin/`, `cache/`,
@@ -265,7 +280,7 @@ them later.
 ### The results page
 
 The URL handed to the requester is `index.html`, not the report itself.
-[`config/ampliseq/index.html`](config/ampliseq/index.html) is a template that
+[`templates/ampliseq/index.html`](templates/ampliseq/index.html) is a template that
 `ampliseq_upload.sh` fills in and uploads last, once everything it links to is
 in place: a fixed header carrying the Wrike task name, the date, and download
 buttons, above an iframe holding `summary_report/summary_report.html`. Every
@@ -296,7 +311,7 @@ submitted. A run without that file simply leaves the figure out.
 **That page starts as a live progress view.**
 [`nextflow_progress.sh`](scripts/nextflow_progress.sh), backgrounded by
 `wrike_job.sh` for the length of the nextflow stage, renders
-[`config/progress.html`](config/progress.html) to the *same key* every minute —
+[`templates/progress.html`](templates/progress.html) to the *same key* every minute —
 so a requester who opens the results link early watches the pipeline work. The
 final upload overwrites it.
 
@@ -334,11 +349,16 @@ The report links to folders as well as to files, and S3 serves objects rather
 than directories, so those links land on nothing once the results are published.
 [`index_directories.sh`](scripts/index_directories.sh) fills that gap in before
 the upload: it walks the results folder and renders
-[`config/listing.html`](config/listing.html) into every subdirectory below it,
+[`templates/listing.html`](templates/listing.html) into every subdirectory below it,
 listing what that folder holds — subfolders first, then files with their sizes,
 every entry linked, and a link back up. Names are HTML-escaped for the page and
 percent-encoded for the href beside it, a byte at a time, since a filename is
 bytes and a `#` in one would otherwise cut its own link short.
+
+**Those pages are only reachable because CloudFront maps a folder URL onto the
+`index.html` beneath it.** A viewer request function does it — see
+[docs/cloudfront.md](docs/cloudfront.md) — and without it every folder link in a
+report is a 404, whatever `index_directories.sh` wrote.
 
 A directory that already carries an `index.html` keeps it, so pages the pipeline
 published itself are left alone and a second pass over the same results folder
@@ -397,7 +417,7 @@ sources three things:
   - `WRIKE_NXFPIPE_SPACE_ID`, `WRIKE_NXFPIPE_WORKFLOW_ID`,
     `WRIKE_NXFPIPE_REQUEST_FORM_ID` — not read by the running system; they are
     what you need to re-inspect the workflow and form, as
-    [config/wrike_responses.md](config/wrike_responses.md) does
+    [docs/wrike_responses.md](docs/wrike_responses.md) does
 
 **`.env` deliberately does not touch `PATH`.** Everything in this project is
 invoked by its absolute path — `"$NEXTFLOW_DIR/scripts/wrike_job.sh"`, and
@@ -447,7 +467,7 @@ in `WRIKE_CUSTOM_STATUS_IDS`** at the top of
 
 **That map is a copy of state that lives in Wrike, so editing the workflow
 desyncs it.** Regenerate it from the live workflow — the full response is kept in
-[config/wrike_responses.md](config/wrike_responses.md):
+[docs/wrike_responses.md](docs/wrike_responses.md):
 
 ```bash
 call_wrike_api GET "/spaces/$WRIKE_NXFPIPE_SPACE_ID/workflows"
@@ -491,7 +511,7 @@ curl -sS -H "Authorization: bearer $WRIKE_API_TOKEN" "https://www.wrike.com/api/
 A "Nextflow Pipelines" space holds the
 "Dashboards" folder that tracks every submitted job, and the "Bioinformatics
 Pipeline" request form that creates tasks in it — see
-[config/webhooks.md](config/webhooks.md) for the form's definition. Everything
+[docs/wrike_responses.md](docs/wrike_responses.md) for the form's definition. Everything
 the bot sees, it sees because the request form put it in that folder.
 
 ---

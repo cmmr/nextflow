@@ -7,7 +7,7 @@
 #
 # S3 serves objects, not directories, so a reader who follows one of the folder
 # links summary_report.html carries lands on nothing. This walks a finished
-# results folder and renders config/listing.html into each subdirectory
+# results folder and renders templates/listing.html into each subdirectory
 # below it: subfolders first, then files with their sizes, every entry linked,
 # and a link back up.
 #
@@ -22,7 +22,7 @@
 #            defaults to ./results, the outdir set in the ampliseq params file
 # Called by: ampliseq_upload.sh, just before it copies the folder to S3
 # Requires:  GNU find and awk
-# Reads:     config/listing.html, the listing template
+# Reads:     templates/listing.html, the listing template
 # Env:       NEXTFLOW_DIR and the log/warn/fail and escape_html helpers, sourced
 #            from .env
 
@@ -37,7 +37,7 @@ readonly INDEX_NAME="index.html"
 
 # One listing page, filled in per directory. Every link in it is relative, so it
 # only works from the same prefix as the entries it names.
-readonly INDEX_TEMPLATE="$NEXTFLOW_DIR/config/listing.html"
+readonly INDEX_TEMPLATE="$NEXTFLOW_DIR/templates/listing.html"
 
 if [[ ! -d "$RESULTS_DIR" ]]; then
     fail "There is no '$RESULTS_DIR' directory to index."

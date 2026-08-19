@@ -25,7 +25,7 @@
 #            defaults to ./results, the outdir set in the ampliseq params file
 # Called by: wrike_job.sh, as the POST_PROCESS_CMD of the ampliseq pipelines
 # Requires:  aws, zip, curl and jq (via the Wrike helpers)
-# Reads:     config/ampliseq/index.html, the landing page template
+# Reads:     templates/ampliseq/index.html, the landing page template
 # Runs:      index_directories.sh, over the results folder
 # Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, WRIKE_S3_RESULTS_URL_CFID,
 #            the Wrike helper functions and the log/fail/escape_html/is_valid_uid
@@ -54,7 +54,7 @@ SAMPLE_COUNT_FILE="sample_count.txt"
 
 # The page that frames the report. Both of the links it carries are relative, so
 # it only works from the same prefix as the objects it points at.
-readonly INDEX_TEMPLATE="$NEXTFLOW_DIR/config/ampliseq/index.html"
+readonly INDEX_TEMPLATE="$NEXTFLOW_DIR/templates/ampliseq/index.html"
 
 # The run directory is named after the uid, so results publish under the
 # directory's own name. Validated because an empty value would make

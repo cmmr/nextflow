@@ -5,7 +5,7 @@
 # Author: Daniel Smith
 # Date:   August 12th, 2026
 #
-# Renders config/progress.html and uploads it to the key the finished report will
+# Renders templates/progress.html and uploads it to the key the finished report will
 # later occupy, s3://$AWS_S3_BUCKET/$S3_RUN_PREFIX/<run_id>/index.html. A reader
 # who opens the results link before the run finishes therefore watches it work,
 # and is handed the report once ampliseq_upload.sh overwrites this file. The
@@ -43,7 +43,7 @@ set -euo pipefail
 
 source /data/prod/nextflow/.env
 
-readonly PROGRESS_TEMPLATE="$NEXTFLOW_DIR/config/progress.html"
+readonly PROGRESS_TEMPLATE="$NEXTFLOW_DIR/templates/progress.html"
 
 # What wrike_job.sh tees nextflow's console output to
 readonly NEXTFLOW_OUT="nextflow.out"

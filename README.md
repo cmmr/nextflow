@@ -53,7 +53,9 @@ flowchart TD
    forever on the login node, long-polling SQS. It deletes each message before
    dispatching it (so a crashed handler can't cause the same job to run twice) and
    routes on `eventType`. Handlers are backgrounded so a slow one never stalls
-   polling. It pauses entirely while Slurm is unreachable.
+   polling. It pauses entirely while Slurm is unreachable. It runs under systemd
+   as a user unit; installing and supervising it is
+   [docs/daemon.md](docs/daemon.md).
 
    `TaskCreated` is unambiguous — a task appearing in that folder is a request.
    The two parent events are not, because they fire for *any* parent change on a
@@ -177,6 +179,8 @@ scripts/
   index_directories.sh     Writes a listing page into every results folder. Pipeline-agnostic.
   ampliseq_samplesheet.sh  PRE_PROCESS_CMD for the ampliseq pipelines.
   ampliseq_upload.sh       POST_PROCESS_CMD for the ampliseq pipelines.
+  taxprofiler_samplesheet.sh  PRE_PROCESS_CMD for the taxprofiler pipelines.
+  taxprofiler_upload.sh       POST_PROCESS_CMD for the taxprofiler pipelines.
 
 pipelines/            One file per pipeline; see below.
 config/               Nextflow config, passed to `nextflow run -c`.
@@ -184,19 +188,26 @@ config/               Nextflow config, passed to `nextflow run -c`.
   local.config        Same, for running off the scheduler.
   cmp09.config        Same, pinned to the cmp09 node.
   taxprofiler/
-    database.csv      Database sheet for the taxprofiler pipeline.
+    database.csv      Database sheet for the taxprofiler pipelines.
+    slurm.config      Executor + apptainer settings for the taxprofiler pipelines.
 
 templates/            Web pages published to S3 alongside a run's results.
   progress.html       Live progress page template. Pipeline-agnostic.
   listing.html        Folder listing page template. Likewise.
   ampliseq/
     index.html        Landing page template for a published ampliseq run.
+  taxprofiler/
+    index.html        Landing page template for a published taxprofiler run.
+
+systemd/              The daemon's supervisor.
+  wrike-sqs-listener.service  systemd user unit for wrike_sqs_listener.sh.
 
 images/               Assets that are not part of any published page.
   bot_100px.png       Cluster Bot's Wrike avatar. The small one is in this README.
   bot_large.png       Full size, kept so the avatar can be reused elsewhere.
 
-docs/                 How the external services were set up, and their responses.
+docs/                 How the daemon and the external services were set up.
+  daemon.md           Installing, supervising, and troubleshooting the daemon.
   webhook_bridge.md   Wrike webhook registration and the AWS Lambda source.
   cloudfront.md       Viewer request function that serves the listing pages.
   wrike_responses.md  Wrike API responses for the request form and its fields.
@@ -244,7 +255,13 @@ default.
 
 Currently defined: **16SV1V3** (27f/534r), **16SV3V5** (357f/926r),
 **16SV4** (515f/806r), **16SV5V6** (806f/1053r) — all nf-core/ampliseq 2.18.0
-against SILVA 138.2.
+against SILVA 138.2 — and **TAXPROFILER**, nf-core/taxprofiler 2.0.1 running
+kraken2, bracken and metaphlan over shotgun reads.
+
+**Pipeline files are named in upper case.** `wrike_task_handler.sh` uppercases
+whatever the user typed and looks for exactly that filename, so `taxprofiler` on
+the form resolves to `pipelines/TAXPROFILER.sh` and a lower-case file would never
+be found.
 
 ### Adding a pipeline
 
@@ -365,6 +382,64 @@ published itself are left alone and a second pass over the same results folder
 changes nothing. The results folder itself is skipped — that `index.html` is the
 landing page above, which goes up last. Like the progress page, none of this is
 worth failing a run over: results nobody can browse are still results.
+
+---
+
+## The taxprofiler pre/post steps
+
+[`taxprofiler_samplesheet.sh`](scripts/taxprofiler_samplesheet.sh) turns the same
+lab sheet into the six-column CSV taxprofiler wants — `sample`,
+`run_accession`, `instrument_platform`, `fastq_1`, `fastq_2`, `fasta`. It differs
+from the ampliseq converter in two ways that follow from what taxprofiler can do
+for itself:
+
+- **Duplicate sample names are not merged.** taxprofiler concatenates a sample's
+  runs itself, after per-run QC, so entries sharing a sample name become separate
+  rows numbered `run_1`, `run_2`, … The count in `sample_count.txt` is therefore
+  *distinct samples*, not rows.
+- **Already-gzipped inputs are referenced where they lie.** taxprofiler reads
+  gzipped FASTQ only, so `.bz2` and plain FASTQ are still recompressed into
+  `raw-sequences/` — but a WGS run's inputs are normally `.gz` already, and
+  staging tens of gigabytes to symlink them buys nothing. `raw-sequences/` is
+  removed again when it turns out to be empty.
+
+`instrument_platform` is written as `ILLUMINA` unless the pipeline definition
+sets `INSTRUMENT_PLATFORM`, which is what a long-read version would change.
+
+[`taxprofiler_upload.sh`](scripts/taxprofiler_upload.sh) is the ampliseq uploader
+without the reads archive: it indexes the results folders, copies them to
+`s3://$AWS_S3_BUCKET/nxf/<uid>/`, renders
+[`templates/taxprofiler/index.html`](templates/taxprofiler/index.html) over
+`multiqc/multiqc_report.html`, and writes the report URL to the Wrike custom
+field. Publishing a client's WGS reads would mean uploading the same tens of
+gigabytes to S3, so it does not.
+
+Its buttons are globbed rather than listed, since the filenames carry the tool
+and database names from `database.csv`:
+
+| Button | Files |
+|---|---|
+| krona charts | `krona/*.html` — opened in a new tab rather than downloaded |
+| taxpasta tables | `taxpasta/*.tsv` — one merged profile per tool and database |
+
+### Databases and resource limits
+
+taxprofiler takes its databases from a second sheet,
+[`config/taxprofiler/database.csv`](config/taxprofiler/database.csv), naming a
+kraken2 database, a bracken database over the same path, and a metaphlan4
+database under `/biolib/prod/db`. **Bracken's `db_params` must contain a
+semicolon**, which splits kraken2's parameters from bracken's — `;-r 150` is
+default kraken2 settings with a 150 bp read length.
+
+It also has its own
+[`config/taxprofiler/slurm.config`](config/taxprofiler/slurm.config) rather than
+sharing `config/slurm.config`. taxprofiler 2.0.1 is built on the nf-core 3.x
+template, which dropped `params.max_cpus` / `max_memory` / `max_time` in favour
+of `process.resourceLimits`; the `params` block in `config/slurm.config` sets
+nothing taxprofiler reads. The kraken2 process is given memory explicitly,
+because kraken2 loads its whole database into RAM and the module's default
+(`process_high`) is far below what a full bacterial/archaeal/fungal database
+needs.
 
 ---
 
@@ -518,12 +593,29 @@ the bot sees, it sees because the request form put it in that folder.
 
 ## Operating it
 
-The daemon is the only long-lived process. Start it under a supervisor — it
-never returns, and handles `INT`/`TERM` cleanly (shutdown can lag by up to the
-20s SQS long-poll):
+The daemon is the only long-lived process. It never returns, and handles
+`INT`/`TERM` cleanly, so it runs under systemd as a **user** unit —
+[`systemd/wrike-sqs-listener.service`](systemd/wrike-sqs-listener.service).
+Nothing here needs root, and lingering is what keeps the unit alive once you log
+out. Installation, the `PATH` the unit has to carry, and what to check when it
+will not start are in [docs/daemon.md](docs/daemon.md).
 
 ```bash
-/data/prod/nextflow/scripts/wrike_sqs_listener.sh
+systemctl --user status wrike-sqs-listener
+```
+
+`log` and `warn` write to stdout and stderr, so the journal is the daemon log:
+
+```bash
+journalctl --user -u wrike-sqs-listener -f
+```
+
+Restarting picks up edits to `.env` and to the files it sources, both read once
+at startup; a change to a handler script needs nothing, since the daemon
+executes it fresh per message:
+
+```bash
+systemctl --user restart wrike-sqs-listener
 ```
 
 Slurm output goes to `$NEXTFLOW_DIR/log/job_<uid>_<jobid>.out` and

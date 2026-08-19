@@ -1,0 +1,27 @@
+[Unit]
+Description=Wrike SQS listener (nextflow pipeline requests)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/data/prod/nextflow/scripts/wrike_sqs_listener.sh
+WorkingDirectory=/data/prod/nextflow
+
+# A user unit does not read the login shell's PATH. aws and jq resolve from
+# /usr/bin; Slurm's bin holds sinfo here, and the sbatch and scancel the
+# handlers inherit this PATH to call.
+Environment=PATH=/cm/shared/apps/slurm/current/bin:/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin
+
+Restart=always
+RestartSec=30s
+
+# SIGTERM goes to the listener only, so a handler it backgrounded can finish
+# submitting. Anything still running after the timeout is killed.
+KillMode=mixed
+TimeoutStopSec=300
+
+SyslogIdentifier=wrike-sqs-listener
+
+[Install]
+WantedBy=default.target

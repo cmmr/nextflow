@@ -13,6 +13,10 @@
 # rather than under an extra results/ level. Nextflow's work/ directory is left
 # behind.
 #
+# The folders go up browsable: index_directories.sh gives each one a listing
+# page first, since a bucket has no directories for the report's folder links to
+# land on.
+#
 # The archive is stored, not compressed (zip -0): the reads are already gzipped.
 # zip stores what a symlink points at, so linked samples are archived as real
 # data.
@@ -22,6 +26,7 @@
 # Called by: wrike_job.sh, as the POST_PROCESS_CMD of the ampliseq pipelines
 # Requires:  aws, zip, curl and jq (via the Wrike helpers)
 # Reads:     config/ampliseq/index.html, the landing page template
+# Runs:      index_directories.sh, over the results folder
 # Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, WRIKE_S3_RESULTS_URL_CFID,
 #            the Wrike helper functions and the log/fail/escape_html/is_valid_uid
 #            helpers, all sourced from .env
@@ -123,7 +128,15 @@ else
     log "No $FASTQ_DIR directory; skipping raw sequence archive."
 fi
 
-# 2. Publish everything in one pass
+# 2. Give every folder below the results root a listing page, so that the folder
+#    links summary_report.html carries still resolve once the results are objects
+#    in a bucket rather than directories on disk. Guarded: results a reader
+#    cannot browse are still worth publishing.
+if ! "$NEXTFLOW_DIR/scripts/index_directories.sh" "$RESULTS_DIR"; then
+    warn "The results folders could not be indexed; their listings will be missing."
+fi
+
+# 3. Publish everything in one pass
 log "Initiating S3 upload for Task $TASK_ID..."
 
 # Both streams captured, so a failure can be reported back to the user
@@ -131,7 +144,7 @@ if ! UPLOAD_OUTPUT=$(aws s3 cp "$RESULTS_DIR/" "$S3_RESULTS_DIR/" --recursive 2>
     fail "The results could not be uploaded to S3:"$'\n'"$UPLOAD_OUTPUT"
 fi
 
-# 3. Land the page that frames all of it last, once nothing it points at is still
+# 4. Land the page that frames all of it last, once nothing it points at is still
 #    uploading. This overwrites the progress page published to this key, which is
 #    how a reader watching the run is handed the report.
 if [[ ! -r "$INDEX_TEMPLATE" ]]; then

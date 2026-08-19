@@ -172,6 +172,7 @@ scripts/
   wrike_job.sh             Runs one pipeline end to end. Slurm batch job.
   wrike_followup.sh        Reports the outcome to Wrike. Slurm batch job.
   nextflow_progress.sh     Publishes the live progress page. Backgrounded by wrike_job.sh.
+  index_directories.sh     Writes a listing page into every results folder. Pipeline-agnostic.
   ampliseq_samplesheet.sh  PRE_PROCESS_CMD for the ampliseq pipelines.
   ampliseq_upload.sh       POST_PROCESS_CMD for the ampliseq pipelines.
 
@@ -180,6 +181,7 @@ config/
   slurm.config        Nextflow executor + apptainer settings used by the pipelines.
   local.config        Same, for running off the scheduler.
   progress.html       Live progress page template. Pipeline-agnostic.
+  listing.html        Folder listing page template. Likewise.
   ampliseq/
     index.html        Landing page template for a published ampliseq run.
   webhooks.md         Webhook registration commands and the Lambda source.
@@ -251,9 +253,10 @@ groups samples that were sequenced together for error-model training. It records
 the post-merge sample count in `sample_count.txt` for the results page to show.
 
 [`ampliseq_upload.sh`](scripts/ampliseq_upload.sh) zips `raw-sequences/` into the
-results folder (`zip -0` — the reads are already compressed), uploads the folder
-to `s3://$AWS_S3_BUCKET/nxf/<uid>/`, and writes the report URL to a Wrike custom
-field. Nextflow's `work/` directory is deliberately left behind.
+results folder (`zip -0` — the reads are already compressed), gives every folder
+in it a listing page, uploads the folder to `s3://$AWS_S3_BUCKET/nxf/<uid>/`, and
+writes the report URL to a Wrike custom field. Nextflow's `work/` directory is
+deliberately left behind.
 
 Everything published lives under one `nxf/` prefix (`S3_RUN_PREFIX` in `.env`),
 so that runs do not crowd the top of the bucket and a site can be built around
@@ -324,6 +327,24 @@ that cannot be built is skipped, and nothing about the run depends on it.
 
 The progress page refreshes itself every minute and the finished report does
 not, which is what stops a reader's browser polling once the results land.
+
+### Browsable folders
+
+The report links to folders as well as to files, and S3 serves objects rather
+than directories, so those links land on nothing once the results are published.
+[`index_directories.sh`](scripts/index_directories.sh) fills that gap in before
+the upload: it walks the results folder and renders
+[`config/listing.html`](config/listing.html) into every subdirectory below it,
+listing what that folder holds — subfolders first, then files with their sizes,
+every entry linked, and a link back up. Names are HTML-escaped for the page and
+percent-encoded for the href beside it, a byte at a time, since a filename is
+bytes and a `#` in one would otherwise cut its own link short.
+
+A directory that already carries an `index.html` keeps it, so pages the pipeline
+published itself are left alone and a second pass over the same results folder
+changes nothing. The results folder itself is skipped — that `index.html` is the
+landing page above, which goes up last. Like the progress page, none of this is
+worth failing a run over: results nobody can browse are still results.
 
 ---
 

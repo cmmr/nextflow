@@ -6,23 +6,27 @@
 # Date:   August 12th, 2026
 #
 # wrike_sqs_listener.sh calls this for both kinds of request: the "Bioinformatics
-# Pipeline" form creates a task in "Dashboards" (TaskCreated), and the `run` script
-# files an already-built task there (TaskParentsAdded). The two payloads differ,
-# but everything used below - task ID, custom field, attachment - is read from
-# Wrike rather than from the event.
+# Pipeline" form creates a task in "Dashboards" (TaskCreated), and the `run`
+# script files an already-built task there (TaskParentsAdded). Everything used
+# below - task ID, custom field, attachment - is read from Wrike rather than from
+# the event, so the two payloads are handled the same way.
 #
 # Runs on the login node and must stay lightweight; all real work goes to Slurm.
-#
-# The requested pipeline comes from the task's pipeline-name custom field, which
-# accepts any text, so it is validated as a name before being used as a path.
 #
 # Every validation failure replies on the originating Wrike task and exits 0: a
 # rejected request is a normal outcome, not a daemon error.
 #
+# The run's two homes - its local run directory and the S3 prefix its results
+# page is published to - are created before that validation, as soon as the
+# request has a uid to name them with. Both last until the Wrike task is deleted;
+# the run directory also goes when its job finishes successfully, at which point
+# wrike_followup.sh removes it. So a rejected request still has a page saying so
+# and a directory to look in, and the results link is on the task from the start.
+#
 # Usage:     wrike_task_handler.sh <sqs_message_body_json>
 # Called by: wrike_sqs_listener.sh
 # Submits:   wrike_job.sh, then wrike_followup.sh (dependent on the first)
-# Runs:      scripts/nextflow_progress.sh once, to seed the results page
+# Runs:      scripts/nextflow_progress.sh, to publish the results page
 # Requires:  jq, sbatch/squeue (Slurm), aws, openssl (via derive_uid), curl (via
 #            call_wrike_api)
 # Env:       NEXTFLOW_DIR, NEXTFLOW_NODE, AWS_S3_BUCKET, S3_RUN_PREFIX,
@@ -34,8 +38,8 @@ set -euo pipefail
 
 source /data/prod/nextflow/.env
 
-# A form submission's attachment arrives as its own webhook event, so the file may
-# not have landed yet. Attempts, and seconds between them.
+# A form submission's attachment arrives as its own webhook event, so the file
+# may not have landed yet. Attempts, and seconds between them.
 ATTACHMENT_TRIES=5
 ATTACHMENT_WAIT=3
 
@@ -54,53 +58,74 @@ MESSAGE_BODY="$1"
 # like a perfectly good Wrike ID to the check below.
 TASK_ID=$(echo "$MESSAGE_BODY" | jq -r '.[0].taskId // empty')
 
-# TASK_ID names the run directory, the Slurm job, and the S3 prefix, so refuse
-# anything that could not be a Wrike ID rather than sending the run after
-# tmp/null. See is_valid_wrike_id for what Wrike can actually put here.
+# The uid naming the run directory, the Slurm job, and the S3 prefix is derived
+# from TASK_ID, so anything that could not be a Wrike ID is refused here.
 if ! is_valid_wrike_id "$TASK_ID"; then
     fail "Malformed or missing taskId in request payload; ignoring."
 fi
 
-# Apologize on the task, then give up. The SQS message is deleted before dispatch,
-# so there is no redelivery: without this the user would watch a task that never
-# does anything. Best effort, since Wrike being unreachable is the usual reason
-# for getting here at all.
+# Publish the run's results page, which reports whatever status.txt says. Called
+# at each point that answer changes. Cosmetic: nothing about the run depends on
+# it.
+publish_progress_page() {
+    "$NEXTFLOW_DIR/scripts/nextflow_progress.sh" \
+        || warn "Could not publish the progress page for task $TASK_ID."
+}
+
+# Leave the task, and the page published for it, reading "Failed". Before the run
+# directory exists there is no status.txt to write and no page to publish, so
+# only the task's own status is set.
+mark_failed() {
+    if [[ "$PWD" == "${RUN_DIR:-}" ]]; then
+        update_wrike_pipeline_progress "Failed" || true
+        publish_progress_page
+    else
+        update_wrike_task_status "Failed" || true
+    fi
+}
+
+# Tell the requester what was wrong with their request, mark it failed, and exit
+# 0. Whatever the run created stays behind for the life of the Wrike task.
+reject() {
+    local reply="$1" reason="$2"
+
+    add_wrike_task_comment "$reply" || true
+    mark_failed
+    log "Validation failed: $reason"
+    exit 0
+}
+
+# Apologize on the task, then give up. The SQS message is deleted before
+# dispatch, so there is no redelivery: without this the user would watch a task
+# that never does anything.
 fail_with_apology() {
     local reply="Something went wrong on my end while handling this request."
     reply+=" Please submit a new request to try again."
     add_wrike_task_comment "$reply" || true
 
-    # Nothing was submitted, so release the step 4 guard if it was taken
-    if [[ -n "${RUN_DIR:-}" && -d "$RUN_DIR" ]]; then
-        cd /
-        rm -rf "$RUN_DIR"
-    fi
+    mark_failed
 
-    # Last, because it does not return. The run directory is gone, so there is no
-    # message.out for fail to write to - nor any need, the user having been told
-    # on the task itself.
+    # Last, because it does not return. Inside a run directory, fail's copy of
+    # this message lands in message.out there.
     fail "$* (task $TASK_ID); asked the user to resubmit."
 }
 
 # Show the requester their request was picked up, before anything slow.
 # update_wrike_task_status rather than the pipeline_progress helper: there is no
-# run directory yet for status.txt to live in. Cosmetic, so not worth abandoning
-# a good request over - the next call will report a Wrike outage anyway.
+# run directory yet for status.txt to live in.
 update_wrike_task_status "Validating" || true
 
-# And say so in as many words, since the status field alone is easy to miss.
 # Everything after this point reports back by commenting on the task, so this
-# also tells the requester where the answer will show up. Best effort for the
-# same reason as the status above.
+# also tells the requester where the answer will show up.
 REPLY="Hi! I've picked up your request and am validating it now."
 REPLY+=" Watch this task's \"Status\" to follow the job's progress,"
 REPLY+=" and I'll comment here as soon as there's anything to report."
 add_wrike_task_comment "$REPLY" || true
 
-# 1. Read the requested pipeline out of the task's custom field, which the form
-#    fills in and `run` sets directly. Free text, so users can pin an exact
-#    version like "16Sv4_01" - and so its contents are whatever they typed. Keep
-#    the first line only, without surrounding whitespace.
+# 1. Read the task: the requested pipeline, from the custom field the form fills
+#    in and `run` sets directly, and the title, which heads the results page. The
+#    pipeline field is free text, so keep its first line only, without
+#    surrounding whitespace.
 if ! TASK_JSON=$(call_wrike_api GET "tasks/$TASK_ID"); then
     fail_with_apology "Could not read the task"
 fi
@@ -111,7 +136,86 @@ PIPELINE_FIELD=$(echo "$TASK_JSON" \
 
 read -r PIPELINE_INPUT <<< "$PIPELINE_FIELD"
 
-# 2. Resolve that name to a script in pipelines/, upper-cased so "16Sv4",
+# One line: the title goes into an HTML header. Best effort - the pages fall back
+# to a generic heading.
+TASK_NAME=$(echo "$TASK_JSON" | jq -r '.data[0].title // empty') || TASK_NAME=""
+TASK_NAME=${TASK_NAME%%$'\n'*}
+
+# 2. Derive the uid this run is known by and create the run directory named after
+#    it, which is how wrike_job.sh and wrike_followup.sh know theirs, from their
+#    working directory.
+#
+#    Creating it also guards against running a task twice: SQS delivers at least
+#    once, and a redelivered event derives this same directory. Plain mkdir, not
+#    mkdir -p, so that an existing directory is an error.
+#
+#    derive_uid's status is tested explicitly because set -e does not fire on an
+#    assignment from a failed command substitution.
+if ! RUN_ID=$(derive_uid "$TASK_ID"); then
+    fail_with_apology "Could not derive a uid"
+fi
+
+RUN_DIR="$NEXTFLOW_DIR/tmp/$RUN_ID"
+mkdir -p "$NEXTFLOW_DIR/tmp"
+
+if ! mkdir "$RUN_DIR" 2>/dev/null; then
+    log "Ignoring task $TASK_ID: $RUN_DIR already exists, so this request has already been handled."
+    exit 0
+fi
+
+cd "$RUN_DIR"
+
+# A uid does not lead back to a task, so record the one this run came from.
+# Everything on the compute node reads it back through read_wrike_task_id.
+echo "$TASK_ID" > "$WRIKE_TASK_ID_FILE"
+
+# The title too, since both published pages are headed with it
+printf '%s\n' "$TASK_NAME" > "$WRIKE_TASK_NAME_FILE"
+
+# Open the channel back to the requester: fail writes to message.out wherever it
+# exists, so anything that goes wrong from here on - here, in wrike_job.sh, or in
+# a pipeline's pre/post-process scripts - reaches the user when wrike_followup.sh
+# posts it at the end of the job.
+: > message.out
+
+# The run's own record of how far it has got, which the page below reads
+echo "Validating" > status.txt
+
+# 3. Claim the S3 prefix. A uid is derived, so it is not unique by construction
+#    and has to be checked against what is already published; a collision would
+#    mean one client's results overwriting another's. A failed call is not a free
+#    prefix, so "cannot tell" is fatal.
+if ! S3_LISTING=$(aws s3api list-objects-v2 --bucket "$AWS_S3_BUCKET" \
+        --prefix "$S3_RUN_PREFIX/$RUN_ID/" --max-keys 1 2>&1); then
+    fail_with_apology "Could not check whether the S3 prefix $S3_RUN_PREFIX/$RUN_ID is free"
+fi
+
+if [[ "$(echo "$S3_LISTING" | jq -r '.KeyCount // 0')" -ne 0 ]]; then
+    REPLY="Something rare went wrong on my end: the storage location for this"
+    REPLY+=" job's results is already taken. Please submit a new request, which"
+    REPLY+=" will be given a different one."
+    add_wrike_task_comment "$REPLY" || true
+
+    update_wrike_task_status "Failed" || true
+
+    # The one rejection that publishes nothing and removes its run directory:
+    # both the prefix and the directory belong to the run that got there first.
+    log "Validation failed: uid $RUN_ID (task $TASK_ID) is already in use in S3."
+    cd /
+    rm -rf "$RUN_DIR"
+    exit 0
+fi
+
+# Put a page at the prefix, and the address of that page on the task. Both are
+# best effort; ampliseq_upload.sh sets the same field again when the results land.
+RESULTS_URL=$(run_results_url "$RUN_ID")
+
+publish_progress_page
+
+update_wrike_custom_field "$WRIKE_S3_RESULTS_URL_CFID" "$RESULTS_URL" \
+    || warn "Could not set the results URL on task $TASK_ID."
+
+# 4. Resolve the requested name to a script in pipelines/, upper-cased so "16Sv4",
 #    "16sv4", and "16SV4" all resolve to pipelines/16SV4.sh.
 PIPELINE_UPPER=${PIPELINE_INPUT^^}
 PIPELINE_SCRIPT="$NEXTFLOW_DIR/pipelines/$PIPELINE_UPPER.sh"
@@ -136,16 +240,13 @@ if [[ ! "$PIPELINE_UPPER" =~ ^[A-Z0-9_]+$ || ! -f "$PIPELINE_SCRIPT" ]]; then
     fi
     REPLY+=" Please submit a new request with one of the following options:"
     REPLY+=$'\n'"$VALID_PIPELINES"
-    add_wrike_task_comment "$REPLY"
-    log "Validation failed: Invalid pipeline requested (${PIPELINE_SHOWN:-none})."
-    exit 0
+    reject "$REPLY" "Invalid pipeline requested (${PIPELINE_SHOWN:-none})."
 fi
 
-# 3. Require exactly one samplesheet on the task. The form makes the attachment
-#    mandatory, but AttachmentAdded is a separate webhook event from the
-#    TaskCreated that got us here and Wrike promises no order, so give the file a
-#    few seconds to appear. Requests from `run` attach before filing the task, so
-#    for those this loop always succeeds on the first attempt.
+# 5. Require exactly one samplesheet on the task. AttachmentAdded is a separate
+#    webhook event from the TaskCreated that got us here, and Wrike promises no
+#    order, so give the file a few seconds to appear. Requests from `run` attach
+#    before filing the task, so for those this loop succeeds on the first attempt.
 TRIES_LEFT=$ATTACHMENT_TRIES
 while true; do
     # A failed call is worth another attempt for the same reason a missing
@@ -170,9 +271,7 @@ if [[ "$ATTACHMENT_COUNT" -ne 1 ]]; then
     REPLY="I need exactly one samplesheet attached to run the $PIPELINE_UPPER pipeline,"
     REPLY+=" but this request has $ATTACHMENT_COUNT."
     REPLY+=" Please submit a new request with a single samplesheet attached."
-    add_wrike_task_comment "$REPLY"
-    log "Validation failed: Expected 1 attachment, found $ATTACHMENT_COUNT."
-    exit 0
+    reject "$REPLY" "Expected 1 attachment, found $ATTACHMENT_COUNT."
 fi
 
 ATTACHMENT_ID=$(echo "$ATTACHMENTS_JSON" | jq -r '.data[0].id')
@@ -181,88 +280,13 @@ ATTACHMENT_NAME=$(echo "$ATTACHMENTS_JSON" | jq -r '.data[0].name')
 if [[ ! "$ATTACHMENT_NAME" =~ \.(txt|tsv|out)$ ]]; then
     REPLY="I don't recognize the file extension on \"$ATTACHMENT_NAME\"."
     REPLY+=" Please submit a new request with a samplesheet that ends in .txt, .tsv, or .out."
-    add_wrike_task_comment "$REPLY"
-    log "Validation failed: Invalid extension on file $ATTACHMENT_NAME."
-    exit 0
+    reject "$REPLY" "Invalid extension on file $ATTACHMENT_NAME."
 fi
 
-# 4. Work out the uid this run will be known by - its directory, its Slurm job
-#    name, and the S3 prefix it publishes under - and claim that prefix. The uid
-#    is derived from the task ID (see derive_uid), so unlike the task ID it is
-#    not unique by construction and has to be checked against what is already
-#    published. Two tasks deriving the same uid is remote, but it would mean one
-#    client's results overwriting another's, and the check costs one API call
-#    against the request's whole lifetime.
-#
-#    Checked here rather than at upload time so a collision costs the requester
-#    a resubmission instead of a run's worth of cluster time.
-#
-#    derive_uid's status is tested explicitly because set -e does not fire on an
-#    assignment from a failed command substitution.
-if ! RUN_ID=$(derive_uid "$TASK_ID"); then
-    fail_with_apology "Could not derive a uid"
-fi
-
-# A failed call is not a free prefix: treat "cannot tell" as fatal rather than
-# publishing over results that might be there.
-if ! S3_LISTING=$(aws s3api list-objects-v2 --bucket "$AWS_S3_BUCKET" \
-        --prefix "$S3_RUN_PREFIX/$RUN_ID/" --max-keys 1 2>&1); then
-    fail_with_apology "Could not check whether the S3 prefix $S3_RUN_PREFIX/$RUN_ID is free"
-fi
-
-if [[ "$(echo "$S3_LISTING" | jq -r '.KeyCount // 0')" -ne 0 ]]; then
-    # Deliberately vague: the requester can neither diagnose nor fix this, and
-    # resubmitting is the whole remedy - a new task derives a new uid.
-    REPLY="Something rare went wrong on my end: the storage location for this"
-    REPLY+=" job's results is already taken. Please submit a new request, which"
-    REPLY+=" will be given a different one."
-    add_wrike_task_comment "$REPLY"
-    log "Validation failed: uid $RUN_ID (task $TASK_ID) is already in use in S3."
-    exit 0
-fi
-
-# 5. Create the run directory, named after the uid - which is how wrike_job.sh
-#    and wrike_followup.sh know theirs, from their working directory. Creating
-#    it also guards against running a task twice: SQS delivers at least once,
-#    and a redelivered event would otherwise put a second pipeline behind the
-#    same uid. The uid is derived, so a redelivery lands on this same directory
-#    rather than a fresh one. Plain mkdir, not mkdir -p, so that an existing
-#    directory is an error.
-RUN_DIR="$NEXTFLOW_DIR/tmp/$RUN_ID"
-mkdir -p "$NEXTFLOW_DIR/tmp"
-
-if ! mkdir "$RUN_DIR" 2>/dev/null; then
-    log "Ignoring task $TASK_ID: $RUN_DIR already exists, so this request has already been handled."
-    exit 0
-fi
-
-cd "$RUN_DIR"
-
-# The one thing about a run that cannot be worked out from its directory: uids
-# are derived one way only, so record the task this one came from. Everything on
-# the compute node reads it back through read_wrike_task_id.
-echo "$TASK_ID" > "$WRIKE_TASK_ID_FILE"
-
-# The title too, since the published results page is headed with it. Taken from
-# the task JSON already fetched at step 1 rather than asked for again, and kept
-# to one line - it is going into an HTML header, not a document. Best effort:
-# the pages fall back to a generic heading, which is no reason to lose a run.
-TASK_NAME=$(echo "$TASK_JSON" | jq -r '.data[0].title // empty') || TASK_NAME=""
-printf '%s\n' "${TASK_NAME%%$'\n'*}" > "$WRIKE_TASK_NAME_FILE"
-
-# Open the channel back to the requester now that we are inside the run directory:
-# fail writes to message.out wherever it exists, so anything that goes wrong from
-# here on - here, in wrike_job.sh, or in a pipeline's pre/post-process scripts -
-# reaches the user when wrike_followup.sh posts it at the end of the job.
-: > message.out
-
-# 6. Seed the task's pipeline name and status, and status.txt in the run directory
-#    for wrike_followup.sh to read later. Must happen before submission, because
-#    the job starts by overwriting both. Writing the name back normalizes whatever
-#    the user typed to the name that actually resolved.
-#
-#    Nothing is submitted yet, so a Wrike failure here is recoverable by asking
-#    for a resubmit rather than leaving a half-marked task behind.
+# 6. Move the task's pipeline name and status on from where step 2 left them.
+#    Both must be set before submission, because the job starts by overwriting
+#    them. Writing the name back normalizes whatever the user typed to the name
+#    that resolved.
 if ! update_wrike_pipeline_name "$PIPELINE_UPPER" \
         || ! update_wrike_pipeline_progress "Queued"; then
     fail_with_apology "Could not set the task's pipeline name and status"
@@ -273,8 +297,7 @@ fi
 #    and both run in RUN_DIR. sbatch options must precede the script name.
 #
 #    Queue depth is cosmetic, so a failing squeue must not take the submission
-#    with it: the task is already marked Queued, and dying here would strand it
-#    that way with no job behind it.
+#    with it.
 JOBS_AHEAD=$(squeue -h -t PENDING | wc -l) || JOBS_AHEAD="an unknown number of"
 
 if JOB_ID=$(sbatch --parsable --job-name="$RUN_ID" --chdir="$RUN_DIR" \
@@ -292,23 +315,9 @@ if JOB_ID=$(sbatch --parsable --job-name="$RUN_ID" --chdir="$RUN_DIR" \
         warn "Follow-up submission failed for task $TASK_ID; job $JOB_ID will run unreported."
     fi
 
-    # The results address is known the moment the run has a uid, so publish it
-    # now rather than at the end: it is where the requester watches the job as
-    # well as where they collect it. Best effort from here on - the job is
-    # queued, and nothing below is worth abandoning it over. ampliseq_upload.sh
-    # sets the same field again when the results land, which covers a failure
-    # here.
-    RESULTS_URL=$(run_results_url "$RUN_ID")
-
-    update_wrike_custom_field "$WRIKE_S3_RESULTS_URL_CFID" "$RESULTS_URL" \
-        || warn "Could not set the results URL on task $TASK_ID."
-
-    # Put a page at that address straight away, so the link in the comment below
-    # leads somewhere from the moment it is posted. Until the job starts running
-    # this says the run is queued; nextflow_progress.sh takes over once the
-    # pipeline is under way.
-    "$NEXTFLOW_DIR/scripts/nextflow_progress.sh" \
-        || warn "Could not publish the initial progress page for task $TASK_ID."
+    # Bring the page up to the "Queued" step 6 just set. nextflow_progress.sh
+    # takes over once the pipeline is under way.
+    publish_progress_page
 
     REPLY="Success! Your job for the $PIPELINE_UPPER pipeline was successfully"
     REPLY+=" submitted to the cluster using the attached samplesheet."
@@ -318,15 +327,13 @@ if JOB_ID=$(sbatch --parsable --job-name="$RUN_ID" --chdir="$RUN_DIR" \
     add_wrike_task_comment "$REPLY"
     log "Job $JOB_ID submitted for task $TASK_ID as uid $RUN_ID, followed by dependent job $FOLLOWUP_ID."
 else
-    update_wrike_pipeline_progress "Failed"
-
     REPLY="Your pipeline name and samplesheet are valid, but there was an error"
     REPLY+=" submitting this job to the cluster. Please submit a new request."
-    add_wrike_task_comment "$REPLY"
+    add_wrike_task_comment "$REPLY" || true
 
-    # Both cleans up and releases the step 4 guard
-    cd /
-    rm -rf "$RUN_DIR"
+    mark_failed
 
+    # The run directory stays, with fail's explanation in its message.out. No
+    # follow-up job was submitted, so nothing else will report this.
     fail "Slurm submission failed for task $TASK_ID."
 fi

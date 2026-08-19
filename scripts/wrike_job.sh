@@ -11,15 +11,14 @@
 # Author: Daniel Smith
 # Date:   August 12th, 2026
 #
-# Submitted by wrike_task_handler.sh with --job-name set to the Wrike task ID and
-# --chdir set to that task's run directory. Downloads the samplesheet, sources the
+# Submitted by wrike_task_handler.sh with --job-name set to the run's uid and
+# --chdir set to that run's directory. Downloads the samplesheet, sources the
 # requested pipeline definition, and runs its pre-process / nextflow /
 # post-process stages, reporting progress to Wrike as it goes.
 #
 # The pipeline script in pipelines/ writes its params file and sets NEXTFLOW_ARGS,
 # PIPELINE_NAME, and the optional PRE_PROCESS_CMD and POST_PROCESS_CMD. Each
-# versioned pipeline pins its own nextflow arguments as well as its params, so
-# nothing about the command line is supplied or defaulted here.
+# versioned pipeline pins its own nextflow arguments as well as its params.
 #
 # The assembled command is written to ./nextflow_command.sh and then executed, so
 # running the pipeline also leaves an exact, re-runnable record of it. Its console
@@ -31,9 +30,9 @@
 # wrike_followup.sh reads once this job ends, however it ends.
 #
 # --output and --error name the same file, so this job's commentary and anything
-# nextflow writes to stderr interleave in one log/job_<task_id>_<job_id>.out.
+# nextflow writes to stderr interleave in one log/job_<uid>_<jobid>.out.
 #
-# Usage:     sbatch --chdir=<run_dir> --job-name=<task_id> --nodelist=<node> \
+# Usage:     sbatch --chdir=<run_dir> --job-name=<uid> --nodelist=<node> \
 #                wrike_job.sh <PIPELINE_NAME> <WRIKE_ATTACHMENT_ID>
 # Called by: wrike_task_handler.sh
 # Sources:   pipelines/<PIPELINE_NAME>.sh
@@ -57,8 +56,6 @@ ATTACHMENT_ID="$2"
 # The run directory is named after the uid, which says nothing about which Wrike
 # task it came from - that is recorded in the directory instead. The Wrike
 # helpers all read TASK_ID from the environment.
-#
-# Fatal: without it nothing below could report progress or an outcome anywhere.
 if ! TASK_ID=$(read_wrike_task_id); then
     fail "Cannot tell which Wrike task this run belongs to."
 fi
@@ -89,8 +86,8 @@ source "$PIPELINE_SCRIPT"
 update_wrike_custom_field "$WRIKE_PIPELINE_NAME_CFID" "${PIPELINE_NAME:-$PIPELINE_UPPER}"
 
 # 3. Pre-process, e.g. converting the samplesheet to the format nextflow expects.
-#    Deliberately unquoted: pipelines may set a command plus its arguments. They
-#    name it by absolute path, so nothing here depends on PATH.
+#    Unquoted: pipelines may set a command plus its arguments. They name it by
+#    absolute path, so nothing here depends on PATH.
 if [[ -n "${PRE_PROCESS_CMD:-}" ]]; then
     update_wrike_pipeline_progress "Pre-Processing"
     $PRE_PROCESS_CMD
@@ -104,11 +101,8 @@ fi
 
 # Write the resolved command to a script and execute that, rather than running
 # nextflow directly, so the record can never drift from what was actually run.
-# %q quotes only what needs it, keeping the file readable.
-#
-# nextflow by absolute path: nothing here puts it on PATH, and the record names
-# the exact executable that produced the results rather than whichever one a
-# future PATH turns up.
+# %q quotes only what needs it, keeping the file readable. nextflow by absolute
+# path, so the record names the exact executable that produced the results.
 {
     printf '#!/bin/bash\n'
     printf '# %s, Wrike task %s, recorded %s\n' "${PIPELINE_NAME:-$PIPELINE_UPPER}" "$TASK_ID" "$(date)"
@@ -120,10 +114,8 @@ chmod +x nextflow_command.sh
 
 update_wrike_pipeline_progress "Running"
 
-# Publish a progress page for the length of the run, so the results link works
-# from the moment it exists rather than only at the end. Purely cosmetic, and
-# backgrounded, so a failure here never reaches the pipeline; the loop reports
-# its own trouble and keeps going.
+# Publish a progress page for the length of the run. Backgrounded and cosmetic;
+# the loop reports its own trouble and keeps going.
 "$NEXTFLOW_DIR/scripts/nextflow_progress.sh" --watch &
 PROGRESS_PID=$!
 
@@ -131,21 +123,17 @@ PROGRESS_PID=$!
 # no orphan keeps publishing over a finished run's report.
 trap 'kill "$PROGRESS_PID" 2>/dev/null || true' EXIT
 
-# Tee rather than run bare: the console output is the only live account nextflow
-# gives of its own progress, and nextflow_progress.sh reads it from here. It
-# still reaches the Slurm log exactly as before, this just keeps a copy in the
-# run directory. Under pipefail the pipeline's status is nextflow's own.
+# Teed because nextflow's console output is the only live account it gives of its
+# own progress, and nextflow_progress.sh reads it from nextflow.out. It still
+# reaches the Slurm log. Under pipefail the pipeline's status is nextflow's own.
 if ! ./nextflow_command.sh 2>&1 | tee nextflow.out; then
-    # Leave a page saying so, rather than one frozen mid-run: the next thing to
-    # touch this key is wrike_delete_handler.sh removing it.
+    # Leave a page saying so, rather than one frozen mid-run
     kill "$PROGRESS_PID" 2>/dev/null || true
     "$NEXTFLOW_DIR/scripts/nextflow_progress.sh" "Failed" || true
 
     fail "The Nextflow pipeline failed during execution."
 fi
 
-# Nothing further needs the watcher, and the post-process step is about to
-# publish the finished report over the page it has been writing.
 kill "$PROGRESS_PID" 2>/dev/null || true
 trap - EXIT
 

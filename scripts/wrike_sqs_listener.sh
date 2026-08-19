@@ -5,11 +5,11 @@
 # Author: Daniel Smith
 # Date:   August 12th, 2026
 #
-# A Wrike webhook on the "Dashboards" folder publishes JSON payloads to an AWS SQS
-# queue whenever the items inside it change. This daemon runs continuously on the
-# cluster login node, long-polls that queue, and routes each payload to the handler
-# matching its eventType. Handlers are backgrounded so a slow one never stalls
-# polling.
+# A Wrike webhook on the "Dashboards" folder publishes JSON payloads to an AWS
+# SQS queue whenever the items inside it change. This daemon runs continuously on
+# the cluster login node, long-polls that queue, and routes each payload to the
+# handler matching its eventType. Handlers are backgrounded so a slow one never
+# stalls polling.
 #
 # A request arrives as either of two events, because there are two ways a task
 # lands in "Dashboards": a request form creates it there (TaskCreated), while the
@@ -49,8 +49,7 @@ while true; do
         continue
     fi
 
-    # 2. Long poll SQS. A failed call backs off rather than aborting the daemon,
-    #    and is reported rather than being indistinguishable from an empty queue.
+    # 2. Long poll SQS. A failed call backs off rather than aborting the daemon.
     if ! RESPONSE=$(aws sqs receive-message \
             --queue-url "$AWS_SQS_QUEUE_URL" \
             --region "$AWS_REGION" \
@@ -69,7 +68,7 @@ while true; do
 
         log "Webhook trigger received from SQS."
 
-        # 3. Delete before dispatching so a handler that dies cannot cause the
+        # 3. Delete before dispatching, so a handler that dies cannot cause the
         #    message to be redelivered and the same job to be submitted twice.
         aws sqs delete-message \
             --queue-url "$AWS_SQS_QUEUE_URL" \
@@ -86,12 +85,9 @@ while true; do
                 "$NEXTFLOW_DIR/scripts/wrike_task_handler.sh" "$MESSAGE_BODY" &
                 ;;
             TaskParentsAdded)
-                # How a `run` submission arrives: it stages its task elsewhere,
-                # attaches the samplesheet, and only then files it here.
-                #
-                # Unlike TaskCreated, this fires for any parent change on a task
-                # the webhook can see, so check that "Dashboards" is what was
-                # added - filing a task under an unrelated folder is not a request.
+                # How a `run` submission arrives. This fires for any parent
+                # change on a task the webhook can see, so check that
+                # "Dashboards" is what was added.
                 if echo "$MESSAGE_BODY" | jq -e --arg folder "$WRIKE_DASHBOARDS_FOLDER_ID" \
                         '[.[0].addedParents[]?] | any(. == $folder)' > /dev/null; then
                     log "Routing to wrike_task_handler.sh for $EVENT_TYPE event."

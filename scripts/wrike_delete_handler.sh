@@ -7,14 +7,11 @@
 #
 # Called by wrike_sqs_listener.sh for TaskDeleted and TaskParentsRemoved events.
 # Cleanup covers all three places a run leaves state: queued or running Slurm
-# jobs, published S3 results, and the local run directory.
+# jobs, published S3 results, and the local run directory. Every step is
+# best-effort, since a run may never have created the thing being removed.
 #
 # TaskParentsRemoved fires for any parent change on a task the webhook can see,
-# not only one that leaves "Dashboards", so check which parent went before
-# destroying anything.
-#
-# Every step is best-effort: cleanup must finish even when a run never got far
-# enough to create the thing being removed.
+# so the removed parent is checked before anything is destroyed.
 #
 # Usage:     wrike_delete_handler.sh <sqs_message_body_json> <event_type>
 #            where <event_type> is TaskDeleted or TaskParentsRemoved
@@ -41,18 +38,16 @@ EVENT_TYPE="$2"
 # like a perfectly good Wrike ID to the check below.
 TASK_ID=$(echo "$MESSAGE_BODY" | jq -r '.[0].taskId // empty')
 
-# Every destructive step below interpolates TASK_ID into a path or an S3 prefix,
-# so refuse anything that could not be a Wrike ID rather than going after
-# tmp/null and s3://bucket/null. See is_valid_wrike_id for what Wrike can
-# actually put here.
+# Every destructive step below derives a path or an S3 prefix from TASK_ID, so
+# anything that could not be a Wrike ID is refused here.
 if ! is_valid_wrike_id "$TASK_ID"; then
     fail "Malformed or missing taskId in $EVENT_TYPE payload; nothing cleaned up."
 fi
 
-# A deleted task always concerns us; a parent change only when "Dashboards" is the
-# parent removed. A task can sit in other folders too - `run` leaves its staging
-# space attached - and unfiling it from one of those must not tear down a run that
-# is still on the dashboard.
+# A deleted task always concerns us; a parent change only when "Dashboards" is
+# the parent removed. A task can sit in other folders too - `run` leaves its
+# staging space attached - and unfiling it from one of those must not tear down a
+# run that is still on the dashboard.
 if [[ "$EVENT_TYPE" == "TaskParentsRemoved" ]]; then
     DASHBOARDS_REMOVED=$(echo "$MESSAGE_BODY" \
         | jq -r --arg folder "$WRIKE_DASHBOARDS_FOLDER_ID" \
@@ -64,12 +59,9 @@ if [[ "$EVENT_TYPE" == "TaskParentsRemoved" ]]; then
     fi
 fi
 
-# Recomputed from the task ID, which is all a delete event carries - and all it
-# can carry, since by now the task may be gone from Wrike along with the custom
-# field holding the results URL. That a uid is derivable rather than stored is
-# what makes cleanup possible at all; see derive_uid.
-#
-# Nothing below is best-effort until this succeeds: an empty uid would leave
+# Recomputed from the task ID, which is all a delete event carries - by now the
+# task may be gone from Wrike along with the custom field holding the results
+# URL. Nothing below is best-effort until this succeeds: an empty uid would leave
 # RUN_DIR as the whole tmp directory and S3_RESULTS_DIR as the whole bucket, and
 # both are deleted recursively below.
 if ! RUN_ID=$(derive_uid "$TASK_ID"); then
@@ -82,26 +74,27 @@ S3_RESULTS_DIR="s3://$AWS_S3_BUCKET/$S3_RUN_PREFIX/$RUN_ID"
 log "Commencing cleanup protocol for task $TASK_ID (uid $RUN_ID)"
 
 # 1. Terminate any Slurm jobs for this run; both the pipeline job and its
-#    follow-up are named after the uid. Failure is expected, and ignored,
-#    once the jobs have finished.
+#    follow-up are named after the uid. Failure is expected, and ignored, once
+#    the jobs have finished.
 scancel --name="$RUN_ID" --user="$(whoami)" > /dev/null 2>&1 || true
 
-# 2. Purge published results. Ignored when the run never reached the upload step.
+# 2. Purge everything published under the prefix: the progress page
+#    wrike_task_handler.sh put there when the request arrived, and the results on
+#    top of it if the run got that far.
 aws s3 rm "$S3_RESULTS_DIR" --recursive > /dev/null 2>&1 || true
 
-# 3. Confirm to the user. Only a removed Dashboards tag gets a comment - which by
-#    now is the only parent change still here; a deleted task has nowhere to
-#    comment on.
+# 3. Confirm to the user. Only a removed Dashboards tag gets a comment; a deleted
+#    task has nowhere to comment on.
 if [[ "$EVENT_TYPE" == "TaskParentsRemoved" ]]; then
-    REPLY="The Dashboards tag was removed from this task. As a result,"
+    REPLY="The Dashboards tag was removed from this task. As a result, its results"
+    REPLY+=" dashboard has been deleted"
 
-    # A surviving run directory means the pipeline never finished, so there were
-    # no published results to lose - only in-progress working files.
+    # A run directory outlives a request that was rejected or whose job failed,
+    # but not one whose job finished - wrike_followup.sh removes it on success.
     if [[ -e "$RUN_DIR" ]]; then
-        REPLY+=" the temporary run files have been deleted."
-    else
-        REPLY+=" the associated S3 dashboard has been deleted."
+        REPLY+=", along with the temporary run files"
     fi
+    REPLY+="."
 
     add_wrike_task_comment "$REPLY"
     log "Cleanup comment posted for orphaned task $TASK_ID."

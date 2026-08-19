@@ -24,9 +24,9 @@
 # A failed one is kept for inspection.
 #
 # --output and --error name the same file, so both streams land in one
-# log/followup_<task_id>_<job_id>.out.
+# log/followup_<uid>_<jobid>.out.
 #
-# Usage:     sbatch --chdir=<run_dir> --job-name=<task_id> --nodelist=<node> \
+# Usage:     sbatch --chdir=<run_dir> --job-name=<uid> --nodelist=<node> \
 #                --dependency=afterany:<job_id> wrike_followup.sh
 # Called by: wrike_task_handler.sh
 # Requires:  curl and jq (via the Wrike helpers)
@@ -42,8 +42,6 @@ source /data/prod/nextflow/.env
 # The run directory is named after the uid; the Wrike task it came from is
 # recorded inside it, and the Wrike helpers all read TASK_ID from the
 # environment.
-#
-# Fatal: reporting the outcome to that task is this script's whole job.
 if ! TASK_ID=$(read_wrike_task_id); then
     fail "Cannot tell which Wrike task this run belongs to; its outcome goes unreported."
 fi
@@ -91,7 +89,7 @@ REPLY+=$'\n'"See $PWD for details."
 
 add_wrike_task_comment "$REPLY"
 
-# A bare exit rather than fail: the failure is the pipeline's, not this script's,
-# and it has just been reported. fail would overwrite message.out with its own
-# text, destroying the explanation kept here for inspection.
+# A bare exit rather than fail: the failure is the pipeline's, and fail would
+# overwrite message.out with its own text, destroying the explanation kept here
+# for inspection.
 exit 1

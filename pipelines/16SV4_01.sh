@@ -8,7 +8,7 @@ NEXTFLOW_ARGS=(
     -r 2.18.0
     -profile apptainer
     -resume
-    -c "$NEXTFLOW_DIR/config/slurm.config"
+    -c "$NEXTFLOW_DIR/config/local.config"
     -params-file ampliseq_args.yaml
 )
 

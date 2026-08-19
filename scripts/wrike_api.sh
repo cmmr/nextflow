@@ -8,12 +8,11 @@
 # is_valid_wrike_id and read_wrike_task_id acts on the task named by TASK_ID,
 # read from the environment rather than passed in.
 #
-# Request bodies are built with jq, not by splicing values into hand-written
-# JSON: pipeline names originate in a free-text field the requester fills in.
+# Request bodies are built with jq rather than by splicing values into
+# hand-written JSON: pipeline names originate in a free-text field.
 #
 # The Wrike object IDs below are opaque references rather than secrets - useless
-# without a token - so they live here in git, next to the code that uses them,
-# rather than in secrets/.env where a fresh clone could not recover them.
+# without a token - so they live here in git next to the code that uses them.
 #
 # Requires: curl, jq, Bash 4+ (WRIKE_CUSTOM_STATUS_IDS is an associative array),
 #           and the warn helper from utilities.sh, which .env sources first
@@ -45,38 +44,31 @@ declare -A WRIKE_CUSTOM_STATUS_IDS=(
 export WRIKE_TASK_ID_FILE="wrike_task_id.txt"
 export WRIKE_TASK_NAME_FILE="wrike_task_name.txt"
 
-# True when the argument could be a Wrike API v4 ID. Wrike's own pattern for one
-# is ^([a-zA-Z0-9-_:.=]){1,256}$ - not the bare alphanumerics these IDs used to
-# look like - and the documentation asks that they be treated as opaque text
-# rather than matched against whatever shape they happen to have today. So this
-# is not a test for a well-formed ID; it only rules out the values that must
-# never reach a filesystem path, an S3 prefix, or an rm -rf: empty, "null" from
-# a missing jq key, and anything carrying a character Wrike cannot have issued.
+# True when the argument could be a Wrike API v4 ID: 1-256 characters over
+# Wrike's own [a-zA-Z0-9-_:.=], and neither "." nor "..". This rules out the
+# values that must never reach a filesystem path, an S3 prefix, or an rm -rf -
+# empty, "null" from a missing jq key, and anything carrying a character Wrike
+# cannot have issued.
 is_valid_wrike_id() {
     local id="$1"
 
-    # Length is checked with ${#id} rather than as a {1,256} bound on the regex
-    # below: POSIX caps a bound at 255, and over that the pattern does not fail
-    # to match, it fails to compile - which [[ =~ ]] reports the same way it
-    # reports a bad ID, so every task would have been rejected.
+    # Length is checked separately: as a {1,256} bound on the regex below it
+    # would exceed the POSIX limit of 255 and fail to compile, which [[ =~ ]]
+    # reports as a non-match.
     if (( ${#id} < 1 || ${#id} > 256 )); then
         return 1
     fi
 
-    # "." and ".." are the only values over that character set that would
-    # traverse a path - it has no "/" to build anything longer out of - so they
-    # are all that has to be excluded on top of the character set itself.
     [[ "$id" =~ ^[A-Za-z0-9._:=-]+$ && "$id" != "." && "$id" != ".." ]]
 }
 
 # Recover the task a run belongs to, for the helpers below to act on. Run
-# directories are named after the uid, and a uid cannot be turned back into a
-# task ID, so wrike_task_handler.sh records it in this file when it creates the
-# directory. Everything on the compute node reads it back from there.
+# directories are named after the uid, which does not lead back to a task, so
+# wrike_task_handler.sh records the ID in this file when it creates the
+# directory.
 #
 # Like derive_uid, this warns and returns rather than failing: callers read it
-# through $(...), where fail would exit only the subshell. stdout here is the
-# task ID, which is why warn writes to stderr.
+# through $(...). stdout here is the task ID, which is why warn writes to stderr.
 read_wrike_task_id() {
     local file="${1:-$WRIKE_TASK_ID_FILE}"
     local id
@@ -113,12 +105,12 @@ call_wrike_api() {
     local status=$?
     if [[ $status -ne 0 ]]; then
         # warn, not fail: every caller decides for itself whether a failed call
-        # is fatal. Safe to use here, where the response is on stdout, because
-        # warn writes to stderr.
+        # is fatal. Safe here, where the response is on stdout, because warn
+        # writes to stderr.
         warn "Request failed: $verb $endpoint (curl exit code $status)"
 
-        # The one place that reports without stopping, so it writes message.out
-        # itself rather than leaving it to fail
+        # Reports without stopping, so it writes message.out itself rather than
+        # leaving it to fail
         if [[ -f message.out ]]; then
             echo "Curl error code $status for $verb $endpoint." > message.out
         fi
@@ -130,15 +122,10 @@ call_wrike_api() {
 # PUT to the current task. body is assigned separately so a jq failure is not
 # masked by the assignment's own exit status.
 #
-# The reply is captured rather than printed. Wrike answers a PUT with the whole
-# updated task - some 700 bytes of JSON - which none of the helpers below wants
-# on stdout, where it would land in a Slurm log, the daemon's log, or, for the
-# helpers `run` uses, the user's terminal. Capturing it in the one place every
-# update goes through means a new helper cannot leak it by forgetting to
-# redirect, and leaves it in WRIKE_LAST_RESPONSE for the one caller that needs
-# to read what Wrike actually did.
-#
-# The assignment's exit status is the request's, so callers still see a failure.
+# Wrike answers a PUT with the whole updated task, which none of the helpers
+# below wants on stdout - it would land in a Slurm log or the daemon's log - so
+# the reply is captured in WRIKE_LAST_RESPONSE instead. The assignment's exit
+# status is the request's, so callers still see a failure.
 update_wrike_task() {
     local jq_filter="$1"
     shift
@@ -153,18 +140,13 @@ update_wrike_task() {
 
 # Set one custom field, then confirm Wrike agreed to it.
 #
-# The confirmation is not paranoia. Wrike answers a rejected custom field write
-# with 200 and simply omits the change - no error, no warning, nothing in the
-# body to distinguish it from success. That is what an API token belonging to a
-# Collaborator gets, since collaborators may change a task's status but not edit
-# its fields; an archived or unshared field, or a value a DropDown will not take,
-# behaves the same way. The reply carries the task's custom fields as they now
-# stand, so the only way to know a write landed is to look for it there.
+# A rejected custom field write comes back as 200 with the change simply omitted
+# - no error, nothing in the body to distinguish it from success - so the reply's
+# copy of the task's fields is the only way to know the write landed.
 #
-# A rejected write warns but still returns success: the request itself was
-# accepted, these fields are display-only, and callers on the compute node run
-# under set -e where a non-zero return would abandon a finished pipeline over a
-# cosmetic field. A transport failure is different and still returns non-zero.
+# A rejected write warns but still returns success: these fields are display
+# only, and callers on the compute node run under set -e, where a non-zero return
+# would abandon a finished pipeline. A transport failure still returns non-zero.
 update_wrike_custom_field() {
     local custom_field_id="$1"
     local new_value="$2"
@@ -181,11 +163,14 @@ update_wrike_custom_field() {
     if [[ "$applied" != "$new_value" ]]; then
         warn "Wrike accepted the write to custom field $custom_field_id but did not apply it:" \
              "asked for \"$new_value\", field now reads \"$applied\"." \
-             "Check that the API user is not a Collaborator and that the field is editable."
+             "Check that the field is editable and shared with the bot, and that the bot is" \
+             "still a regular Wrike user - a Collaborator cannot edit fields at all."
         return 0
     fi
 }
 
+# Wrike sets a status by ID; the names are mapped in WRIKE_CUSTOM_STATUS_IDS
+# above. An unmapped name is logged and skipped rather than reported.
 update_wrike_task_status() {
     local new_value="$1"
     local status_id="${WRIKE_CUSTOM_STATUS_IDS[$new_value]:-}"
@@ -198,6 +183,8 @@ update_wrike_task_status() {
     update_wrike_task '{customStatus: $status}' --arg status "$status_id"
 }
 
+# The status, plus the run directory's own copy of it, which wrike_followup.sh
+# reads to find out how far the run got. Only for callers inside a run directory.
 update_wrike_pipeline_progress() {
     local new_value="$1"
 

@@ -12,23 +12,22 @@
 # progress page refreshes itself every minute; the report does not, so a browser
 # stops polling on its own the moment the run lands.
 #
-# Where the numbers come from: nextflow has no live status API outside Seqera
-# Platform. Its trace file only records tasks that have already finished, and its
-# HTML report is written once at the end. What it does emit continuously is the
-# same process table an interactive terminal shows - one line per change when
-# ANSI output is off, which is the case in a batch job:
+# The table is built from nextflow's console output, which wrike_job.sh tees to
+# ./nextflow.out - one line per change when ANSI output is off, as it is in a
+# batch job:
 #
 #   [31/52c31e] process > SPLITLETTERS (1) [100%] 1 of 1, cached: 1 ✔
 #
-# so the table below is those lines, last one per process wins. wrike_job.sh tees
-# them to ./nextflow.out for this script to read. Parsing console output is not a
-# stable interface, so every failure here is soft: a page that cannot be built is
-# skipped, never fatal. Nothing about the run depends on it.
+# so the table is those lines, last one per process winning. Parsing console
+# output is not a stable interface, so every failure here is soft: a page that
+# cannot be built is skipped, never fatal.
 #
 # Usage:     nextflow_progress.sh                 # publish once, status from status.txt
 #            nextflow_progress.sh <status>        # publish once, status forced
 #            nextflow_progress.sh --watch [secs]  # publish repeatedly until killed
-# Called by: wrike_job.sh, backgrounded for the length of the nextflow stage
+# Called by: wrike_task_handler.sh, once per change of status while a request is
+#            being handled - the first of those calls creates the run's S3 prefix
+#            - and wrike_job.sh, backgrounded for the length of the nextflow stage
 # Requires:  aws, awk
 # Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, and the log/warn helpers
 #            and is_valid_uid, all sourced from .env
@@ -63,10 +62,7 @@ readonly S3_INDEX="s3://$AWS_S3_BUCKET/$S3_RUN_PREFIX/$RUN_ID/index.html"
 # the latest one, exactly as the interactive table does.
 render_rows() {
     awk '
-        # Built a character at a time rather than with gsub: "&" in a gsub
-        # replacement means the matched text, and the backslash that escapes it
-        # back to a literal does not survive gawk 5 as written - quietly, so
-        # "<x>" escapes to "<lt;x>gt;" and only the "&" case looks right.
+        # HTML-escape, a character at a time
         function esc(s,   out, i, c) {
             out = ""
             for (i = 1; i <= length(s); i++) {
@@ -137,8 +133,6 @@ publish_once() {
     fi
     : "${status:=Running}"
 
-    # Cosmetic, and this page is cosmetic too: a missing name is not worth
-    # skipping an update over.
     task_name="Pipeline run"
     if [[ -r "$WRIKE_TASK_NAME_FILE" ]]; then
         read -r task_name < "$WRIKE_TASK_NAME_FILE" || true
@@ -165,7 +159,7 @@ publish_once() {
     template=${template//__ROWS__/$rows}
 
     # --content-type because reading the body from stdin leaves aws nothing to
-    # guess from, and a report served as binary downloads instead of rendering.
+    # guess from, and a page served as binary downloads instead of rendering.
     printf '%s\n' "$template" \
         | aws s3 cp - "$S3_INDEX" --content-type "text/html" > /dev/null
 }
@@ -173,9 +167,7 @@ publish_once() {
 if [[ "${1:-}" == "--watch" ]]; then
     INTERVAL="${2:-$DEFAULT_INTERVAL}"
 
-    # Soft on every count: this loop outlives individual failures because a
-    # missing page is a cosmetic problem and the run is what matters. It ends
-    # when wrike_job.sh kills it, which is the only way out.
+    # Ends when wrike_job.sh kills it, which is the only way out
     while true; do
         publish_once || warn "Could not publish the progress page; will try again."
         sleep "$INTERVAL"

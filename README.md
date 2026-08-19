@@ -29,7 +29,8 @@ flowchart TD
     D -->|TaskDeleted / TaskParentsRemoved| X[wrike_delete_handler.sh]
     C -->|sbatch| J["wrike_job.sh<br/><i>compute node</i>"]
     J -->|"sbatch --dependency=afterany"| F[wrike_followup.sh]
-    J --> S3[(S3 results)]
+    C -.->|"claims the prefix,<br/>publishes a progress page"| S3[(S3 results)]
+    J --> S3
     F --> R["Reply comment<br/>+ Status on the task"]
     X --> CL["scancel jobs, delete S3 results,<br/>delete run directory"]
 ```
@@ -60,30 +61,38 @@ flowchart TD
    the check simply never matches.
 
 3. **Validation.** [`wrike_task_handler.sh`](scripts/wrike_task_handler.sh)
-   is deliberately lightweight — it does no real work, only checks. In order: is
-   the pipeline named in the task's custom field a real pipeline? is exactly one
-   samplesheet attached, with a plausible extension? is the S3 prefix this task
-   derives still unpublished? **Every failure replies to the user on the Wrike
-   task and exits 0** — a rejected request is a normal outcome, not a daemon
-   error.
+   is deliberately lightweight — it does no real work, only checks. **Every
+   failure replies to the user on the Wrike task and exits 0** — a rejected
+   request is a normal outcome, not a daemon error.
 
+   **It gives the run its two homes before it checks anything about the
+   request.** As soon as the task ID yields a uid it creates
+   `$NEXTFLOW_DIR/tmp/<uid>/` — recording the task ID and title in
+   `wrike_task_id.txt` and `wrike_task_name.txt` there — confirms the matching S3
+   prefix is unpublished, claims it by uploading a `Validating` progress page,
+   and writes that page's address to the task's results custom field. From that
+   point the requester has a live link and the handler has somewhere durable to
+   say whatever it has to say. Creating the directory with plain `mkdir` is also
+   the idempotency guard: SQS delivers at least once, and a redelivered event
+   would otherwise put a second pipeline behind the same uid. It also covers the
+   case of a task that somehow produces both entry events.
+
+   Then the checks: is the pipeline named in the task's custom field a real
+   pipeline? is exactly one samplesheet attached, with a plausible extension?
    The pipeline field is free text, so users can pin an exact version
    (`16Sv4_01`) rather than only picking from the form's dropdown. It is
    therefore validated as a *name* — `^[A-Z0-9_]+$`, then a file that exists —
    before it is ever used as a path, because `wrike_job.sh` sources what it
    resolves to.
 
-   The last check is that the run's derived S3 prefix is still unpublished; a
-   collision there is rejected like any other bad request, since a new task
-   derives a new uid.
+   A rejected request keeps both homes, its page now reading `Failed`; they last
+   as long as the Wrike task does. The one exception is the S3 prefix collision,
+   which cleans up after itself because neither the prefix nor the directory it
+   would have used is its own — they belong to whichever run got there first.
+   Collisions are rejected like any other bad request, since a new task derives a
+   new uid.
 
-   On success it creates `$NEXTFLOW_DIR/tmp/<uid>/`, records the task ID and
-   title in `wrike_task_id.txt` and `wrike_task_name.txt` there, and submits two
-   Slurm jobs. Creating that directory
-   with plain `mkdir` is also the idempotency guard: SQS delivers at least once,
-   and a redelivered event would otherwise put a second pipeline behind the same
-   uid. It also covers the case of a task that somehow produces both entry
-   events.
+   On success it submits two Slurm jobs and re-publishes the page as `Queued`.
 
 4. **The run.** [`wrike_job.sh`](scripts/wrike_job.sh) downloads the samplesheet,
    sources the requested pipeline definition, and runs its three stages:
@@ -288,16 +297,21 @@ submitted. A run without that file simply leaves the figure out.
 so a requester who opens the results link early watches the pipeline work. The
 final upload overwrites it.
 
-The link is live before any of that. `wrike_task_handler.sh` writes the URL to
-the task's results custom field the moment Slurm accepts the job, includes it in
-the comment telling the requester their run is queued, and runs
-`nextflow_progress.sh` once to put a "Queued" page at that address — so the link
-it just posted leads somewhere rather than to a `NoSuchKey`. Every one of those
-steps is best-effort: the job is already queued, and none of them is worth
-abandoning a run over. `ampliseq_upload.sh` sets the same field again at the end,
-which covers a failure at submission and marks the point where the address stops
-being a promise. Both build it through `run_results_url`, so a task can never
-point somewhere its results are not.
+The link is live before any of that — before the request has even been checked
+over. `wrike_task_handler.sh` claims the run's S3 prefix by publishing a
+`Validating` page to it, writes that address to the task's results custom field,
+and then re-publishes at each point the answer changes: `Queued` once Slurm has
+taken the job, `Failed` if the request is rejected or never reaches the queue.
+So the link on the task leads somewhere from the first few seconds rather than
+to a `NoSuchKey`, and what it leads to agrees with the task's own Status. Every
+one of those steps is best-effort — a page is not worth rejecting a good request
+or abandoning a queued run over. `ampliseq_upload.sh` sets the same field again
+at the end, which covers a failure earlier on and marks the point where the
+address stops being a promise. All of them build it through `run_results_url`,
+so a task can never point somewhere its results are not.
+
+The prefix is deleted only by `wrike_delete_handler.sh`, when the task it belongs
+to is deleted or unfiled. A request that failed keeps its page saying so.
 
 The numbers come from parsing nextflow's console output, which `wrike_job.sh`
 tees to `nextflow.out`. Nextflow has no live status API outside Seqera Platform:
@@ -321,12 +335,14 @@ assignment or a `source`, so it is safe and cheap to source any number of times,
 in any process, and it carries no guard. It sets `NEXTFLOW_DIR` and
 `NEXTFLOW_NODE` (the compute node everything is pinned to — read both by the
 `sbatch` calls and by `config/slurm.config`), sets the nextflow cache
-directories, and then sources three things:
+directories, unsets any `WRIKE_API_TOKEN` inherited from the caller, and then
+sources three things:
 
 - `secrets/.env` — **credentials only**, never committed:
-  - `WRIKE_API_TOKEN` — the bot's, assigned as `${WRIKE_API_TOKEN:-…}` so a token
-    already in the caller's environment wins. That fallback is what lets `run`
-    act as a real user; see below.
+  - `WRIKE_API_TOKEN` — the bot's, and the only one anything here uses. `.env`
+    **unsets any inherited `WRIKE_API_TOKEN` before sourcing this file**, so a
+    token exported by whoever invoked `run` cannot stand in for the bot's; see
+    "Running a pipeline by hand" below.
   - `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `AWS_DEFAULT_REGION`
   - `AWS_SQS_QUEUE_URL`, `AWS_S3_BUCKET`
   - `RUN_ID_SALT` — the HMAC key `derive_uid` derives uids with. Secret because the
@@ -433,14 +449,17 @@ available, but nothing sets them yet.
 A bot account exists under `dpsmith@bcm.edu` ("Cluster Bot", `KUAYXHNY`),
 distinct from Daniel's normal `Daniel.Smith@bcm.edu` account.
 
-**The bot is a Collaborator, on purpose.** Everything the daemon, handlers, and
-jobs do — commenting, attaching files, writing custom fields, setting task
-status — a Collaborator can do, so the bot costs no license seat. Creating a task
-is the one exception: it returns `403 not_allowed` for Collaborators, and that is
-a license restriction, not a permission grantable on the folder.
+**The bot is a regular user**, so it holds a license seat and everything in this
+system runs as it: commenting, attaching files, writing custom fields, setting
+task status, and creating tasks — which is what lets [`run`](run) file a request
+on a caller's behalf rather than making every user bring a token of their own.
 
-Only [`run`](run) creates a task, which is why it is the one component that does
-*not* run as the bot — see "Running a pipeline by hand" below.
+It was a Collaborator until August 2026. That costs no seat, but Collaborators
+may not create tasks (`403 not_allowed`, a license restriction rather than a
+permission grantable on the folder) *or edit custom fields* — and a rejected
+custom field write comes back `200` with the change quietly dropped, which is why
+`update_wrike_custom_field` reads the reply back and warns when Wrike did not
+apply what it was asked for.
 
 To check which account a token belongs to:
 
@@ -469,37 +488,33 @@ never returns, and handles `INT`/`TERM` cleanly (shutdown can lag by up to the
 Slurm output goes to `$NEXTFLOW_DIR/log/job_<uid>_<jobid>.out` and
 `followup_<uid>_<jobid>.out` — one file per run, since `--job-name` is the
 uid, and one file per job rather than two, since `--output` and `--error`
-name the same path and both streams interleave there. Per-run state lives in `$NEXTFLOW_DIR/tmp/<uid>/`: a directory still
-present after a run ended means that run failed, and `status.txt`, `message.out`,
-and `nextflow.log` there say why — with `wrike_task_id.txt` naming the Wrike task
-it came from, since the uid does not lead back to one.
+name the same path and both streams interleave there. Per-run state lives in
+`$NEXTFLOW_DIR/tmp/<uid>/`, which is created as soon as a request is picked up
+and removed only when its job succeeds or its Wrike task goes away: a directory
+still present after a run ended means the run failed or the request was never
+accepted, and `status.txt`, `message.out`, and `nextflow.log` there say why —
+with `wrike_task_id.txt` naming the Wrike task it came from, since the uid does
+not lead back to one.
 
 ### Running a pipeline by hand
 
-**First, once per person: set your own Wrike token.** `run` is the only part of
-this system that does not act as the bot, because the bot is a Collaborator and
-Collaborators cannot create tasks. Create a permanent token in Wrike under
-Apps & Integrations → API
-(<https://www.wrike.com/frontend/apps/index.html#/api>) and put it in your
-`~/.bashrc`:
-
-```bash
-export WRIKE_API_TOKEN="<your token>"
-```
-
-`secrets/.env` assigns the bot's token with `${WRIKE_API_TOKEN:-…}`, so yours
-takes precedence for everything `run` does, while the daemon and the cluster jobs
-— which never see your environment — keep using the bot's. Tasks you submit this
-way are authored by you, which is arguably more honest than having them all
-attributed to the bot.
-
-`run` checks this before it creates anything and explains what to do if the token
-turns out to be a Collaborator's, so the failure mode is a paragraph of
-instructions rather than a bare `403`.
+Nothing to set up: `run` acts as the bot, like everything else here, and the bot
+may create tasks.
 
 ```bash
 /data/prod/nextflow/run 16Sv4 /path/to/somesamples.txt
 ```
+
+The task it files is therefore authored by the bot **on the caller's behalf**,
+and `$(whoami)` goes into the task description — the only record of who asked,
+since a command-line request has no browser session behind it.
+
+**Personal Wrike tokens are not used, and cannot be.** `.env` unsets any
+`WRIKE_API_TOKEN` in the environment before sourcing the bot's, so exporting one
+changes nothing about what `run` does. Every request is the bot's to answer for,
+which is what keeps a submission's rights and its history the same for everyone —
+rather than depending on the Wrike account whoever ran the command happens to
+hold, and on that account still existing when someone comes back to the task.
 
 [`run`](run) does not run a pipeline. It builds the same task the request form
 builds — pipeline in the custom field, samplesheet attached — files it under

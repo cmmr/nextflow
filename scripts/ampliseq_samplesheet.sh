@@ -17,10 +17,9 @@
 #
 # Every sample ends up as exactly one pair of files in ./raw-sequences/, named
 # <sample>_1.fq.gz and <sample>_2.fq.gz, and the samplesheet points there.
-# Already-gzipped inputs are symlinked rather than copied, so the common case
-# costs almost nothing; only merged and non-gzip inputs are written out.
-# ampliseq_upload.sh archives this directory for clients, and zip stores what a
-# symlink points at, so the archive holds real data.
+# Already-gzipped inputs are symlinked rather than copied; only merged and
+# non-gzip inputs are written out. ampliseq_upload.sh archives this directory for
+# clients, and zip stores what a symlink points at, so the archive holds real data.
 #
 # Failures here are caused by the user's samplesheet, which is what fail is for:
 # it writes the explanation to ./message.out, and wrike_followup.sh posts that
@@ -121,9 +120,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     read -r sample fq1 fq2 <<< "$line"
     [[ -z "$sample" ]] && continue
 
-    # Tolerate comment lines and a header row. The lab's sheet has neither, but a
-    # spreadsheet export often does, and a header would otherwise fail as "Input
-    # FASTQ file 'fastq_1' does not exist", which explains nothing.
+    # Skip comment lines and a header row, which a spreadsheet export often has
     [[ "$sample" == \#* ]] && continue
     [[ $line_number -eq 1 && "${sample,,}" == "sample" ]] && continue
 
@@ -131,9 +128,9 @@ while IFS= read -r line || [[ -n "$line" ]]; do
         fail "Invalid line format in samplesheet: '$line'"
     fi
 
-    # Checked here rather than with the unconditional tools above, since lbzip2 is
-    # only needed when a .bz2 input turns up. -x, not command -v: a specific file
-    # rather than a PATH lookup.
+    # lbzip2 is only needed when a .bz2 input turns up, so it is checked here
+    # rather than with the unconditional tools above. -x, not command -v: a
+    # specific file rather than a PATH lookup.
     if [[ "$fq1" == *.bz2 || "$fq2" == *.bz2 ]]; then
         [[ -x "$LBZIP2" ]] \
             || fail "Samplesheet line $line_number has bzip2 inputs, but '$LBZIP2' is not installed."
@@ -202,9 +199,8 @@ for clean_sample in "${SAMPLE_ORDER[@]}"; do
 done
 
 # The count after merging, which is the number of samples the run actually
-# analyses rather than the number of lines the requester submitted. Recorded for
-# ampliseq_upload.sh to put in the published page's header; nothing depends on
-# it, and the page simply omits the figure if this file is missing.
+# analyses. ampliseq_upload.sh puts it in the published page's header, and the
+# page simply omits the figure if this file is missing.
 printf '%s\n' "${#SAMPLE_ORDER[@]}" > "$SAMPLE_COUNT_FILE"
 
 log "Successfully generated ampliseq samplesheet: $OUT_TSV (${#SAMPLE_ORDER[@]} samples)"

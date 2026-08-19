@@ -43,8 +43,8 @@ while true; do
 
     # 1. Skip polling entirely while Slurm is down, since no handler could submit
     #    a job anyway. Messages stay in the queue until the cluster returns.
-    if ! sinfo > /dev/null 2>&1; then
-        warn "Slurm cluster is unreachable or offline. Pausing polling for ${SLURM_RETRY_WAIT}s..."
+    if ! SINFO_ERROR=$(sinfo 2>&1 > /dev/null); then
+        warn "Slurm cluster is unreachable or offline, pausing polling for ${SLURM_RETRY_WAIT}s: $SINFO_ERROR"
         sleep "$SLURM_RETRY_WAIT"
         continue
     fi

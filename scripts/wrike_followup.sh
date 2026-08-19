@@ -26,7 +26,7 @@
 # --output and --error name the same file, so both streams land in one
 # log/followup_<uid>_<jobid>.out.
 #
-# Usage:     sbatch --chdir=<run_dir> --job-name=<uid> --nodelist=<node> \
+# Usage:     sbatch --chdir=<run_dir> --job-name=<uid> \
 #                --dependency=afterany:<job_id> wrike_followup.sh
 # Called by: wrike_task_handler.sh
 # Requires:  curl and jq (via the Wrike helpers)

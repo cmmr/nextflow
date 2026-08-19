@@ -8,10 +8,13 @@ Type=simple
 ExecStart=/data/prod/nextflow/scripts/wrike_sqs_listener.sh
 WorkingDirectory=/data/prod/nextflow
 
-# A user unit does not read the login shell's PATH. aws and jq resolve from
-# /usr/bin; Slurm's bin holds sinfo here, and the sbatch and scancel the
-# handlers inherit this PATH to call.
+# A user unit does not read the login shell, so what `module load slurm` sets
+# has to be repeated here. PATH holds sinfo, plus the sbatch and scancel the
+# handlers inherit this environment to call; aws and jq are in /usr/bin.
 Environment=PATH=/cm/shared/apps/slurm/current/bin:/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin
+
+# Without this the Slurm commands look their config up over DNS and fail.
+Environment=SLURM_CONF=/cm/shared/apps/slurm/var/etc/slurm/slurm.conf
 
 Restart=always
 RestartSec=30s

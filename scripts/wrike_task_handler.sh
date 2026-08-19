@@ -29,7 +29,7 @@
 # Runs:      scripts/nextflow_progress.sh, to publish the results page
 # Requires:  jq, sbatch/squeue (Slurm), aws, openssl (via derive_uid), curl (via
 #            call_wrike_api)
-# Env:       NEXTFLOW_DIR, NEXTFLOW_OPTS, AWS_S3_BUCKET, S3_RUN_PREFIX,
+# Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX,
 #            RUN_ID_SALT, WRIKE_PIPELINE_NAME_CFID, WRIKE_S3_RESULTS_URL_CFID,
 #            the Wrike helper functions and the log/warn/fail/derive_uid/
 #            run_results_url helpers, all from .env
@@ -301,14 +301,12 @@ fi
 JOBS_AHEAD=$(squeue -h -t PENDING | wc -l) || JOBS_AHEAD="an unknown number of"
 
 if JOB_ID=$(sbatch --parsable --job-name="nf-$RUN_ID" --chdir="$RUN_DIR" \
-        $NEXTFLOW_OPTS \
         "$NEXTFLOW_DIR/scripts/wrike_job.sh" "$PIPELINE_UPPER" "$ATTACHMENT_ID"); then
 
     # afterany, not afterok, so failures are reported to the user too. A
     # follow-up that fails to submit is not fatal - the pipeline is already
     # queued - but it does mean nothing will report the outcome.
     if ! FOLLOWUP_ID=$(sbatch --parsable --job-name="nf-$RUN_ID" --chdir="$RUN_DIR" \
-            $NEXTFLOW_OPTS \
             --dependency=afterany:"$JOB_ID" \
             "$NEXTFLOW_DIR/scripts/wrike_followup.sh"); then
         FOLLOWUP_ID="none"

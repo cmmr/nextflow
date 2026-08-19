@@ -68,7 +68,7 @@ Without lingering the unit still works, but only for as long as a session is
 open — useful for testing, useless in production.
 
 
-## PATH
+## The unit's environment
 
 [`.env`](../.env) does not touch `PATH`; everything in this repository is
 invoked by absolute path. The external binaries are not: `aws`, `jq`, and
@@ -76,25 +76,47 @@ invoked by absolute path. The external binaries are not: `aws`, `jq`, and
 handlers it dispatches, which inherit its environment.
 
 A user unit does not read the login shell, so `~/.bashrc`, `~/.bash_profile`,
-and any `module load` in them do not apply. The unit carries its own `PATH`
-instead:
+and the `module load slurm` in them do not apply. **Whatever that module sets
+and Slurm needs, the unit has to set itself** — on `cmmr-login01`, that is two
+of the things `module show slurm` lists:
 
 ```ini
 Environment=PATH=/cm/shared/apps/slurm/current/bin:/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin
+Environment=SLURM_CONF=/cm/shared/apps/slurm/var/etc/slurm/slurm.conf
 ```
 
-On `cmmr-login01` that covers all five — `aws` and `jq` are in `/usr/bin`,
-and Slurm is a Bright Cluster Manager install under `/cm/shared/apps/slurm/`.
-The `current` symlink is used rather than the versioned directory beneath it, so
-a Slurm upgrade does not silently take `sinfo` out of the daemon's reach.
-Confirm on any node before installing there:
+`PATH` finds the Slurm client commands, which are a Bright Cluster Manager
+install under `/cm/shared/apps/slurm/`; `aws` and `jq` come from `/usr/bin`. The
+`current` symlink is used rather than the versioned directory beneath it, so a
+Slurm upgrade does not take `sinfo` out of the daemon's reach.
+
+`SLURM_CONF` is the one that is easy to miss, because nothing on the command
+line needs it: with the module loaded it is already in the environment, and
+without it every Slurm command falls back to locating its configuration over
+DNS, which does not answer here:
+
+```
+sinfo: error: resolve_ctls_from_dns_srv: res_nsearch error: Unknown host
+sinfo: fatal: Could not establish a configuration source
+```
+
+The module's `LD_LIBRARY_PATH` is deliberately not repeated. The binaries under
+`/cm/shared/apps/slurm/current/bin` find their libraries without it, which the
+error above proves — `sinfo` got far enough to complain about configuration.
+
+To check any of this the way the daemon sees it, run the command with the unit's
+environment and nothing else:
 
 ```bash
-command -v aws jq sinfo sbatch scancel
+env -i PATH=/cm/shared/apps/slurm/current/bin:/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin SLURM_CONF=/cm/shared/apps/slurm/var/etc/slurm/slurm.conf HOME=$HOME sinfo
 ```
 
-A missing binary does not fail at startup. The daemon starts, then fails on its
-first poll, and the journal records `sinfo: command not found`.
+```bash
+systemctl --user show wrike-sqs-listener -p Environment
+```
+
+The second reads back what the running service actually has, which is not the
+file's contents until a `daemon-reload` and a restart have picked them up.
 
 
 ## Logs
@@ -151,6 +173,7 @@ polling rather than exiting.
 | Daemon gone after logout | Lingering not enabled; `loginctl show-user $USER --property=Linger` |
 | `Failed to connect to bus` | No user manager for this session — same cause, or you are on a different login node |
 | Starts, then `command not found` in the journal | `aws`, `jq`, `sinfo`, `sbatch`, or `scancel` off the unit's `PATH` |
+| "Slurm cluster is unreachable" while Slurm is up | `SLURM_CONF` unset, so the Slurm commands look their config up over DNS |
 | `status=203/EXEC` | Script not executable, or `/data/prod/nextflow` not mounted on this node |
 | Requests picked up twice | A second listener running on another login node |
 | Queue drains with nothing happening | The daemon deletes each message before dispatching; look for the routing line in the journal |

@@ -186,7 +186,6 @@ pipelines/            One file per pipeline; see below.
 config/               Nextflow config, passed to `nextflow run -c`.
   slurm.config        Executor + apptainer settings used by the pipelines.
   local.config        Same, for running off the scheduler.
-  cmp09.config        Same, pinned to the cmp09 node.
   taxprofiler/
     database.csv      Database sheet for the taxprofiler pipelines.
     slurm.config      Executor + apptainer settings for the taxprofiler pipelines.
@@ -436,10 +435,22 @@ It also has its own
 sharing `config/slurm.config`. taxprofiler 2.0.1 is built on the nf-core 3.x
 template, which dropped `params.max_cpus` / `max_memory` / `max_time` in favour
 of `process.resourceLimits`; the `params` block in `config/slurm.config` sets
-nothing taxprofiler reads. The kraken2 process is given memory explicitly,
-because kraken2 loads its whole database into RAM and the module's default
-(`process_high`) is far below what a full bacterial/archaeal/fungal database
-needs.
+nothing taxprofiler reads.
+
+Kraken2 and MetaPhlAn are sized against the node rather than left on nf-core's
+`process_high` label. Kraken2 reads `hash.k2d` — 74 GB for
+`bac_arc_fun_Feb2024` — into its own heap, which is above the label's default;
+16 cpus each puts two of either on a 32-core node and uses every core. Nothing
+copies a database: Nextflow stages inputs as absolute symlinks
+(`stageInMode` defaults to `symlink`) and `scratch` copies only declared
+*outputs* back, so both tools read the database over the shared filesystem and
+the first task on a node warms the page cache for the rest.
+
+Only five files in the kraken2 directory are read at run time — `hash.k2d`,
+`opts.k2d`, `taxo.k2d`, `seqid2taxid.map`, and Bracken's
+`database150mers.kmer_distrib`. `database.kraken` (61 GB) and `library/` are
+build artifacts. **Do not delete them**: `bracken-build` needs `database.kraken`
+to produce `kmer_distrib` files for read lengths other than 150.
 
 ---
 
@@ -448,11 +459,9 @@ needs.
 Every script that talks to Wrike or AWS begins with
 `source /data/prod/nextflow/.env`. Every statement in that file is a plain
 assignment or a `source`, so it is safe and cheap to source any number of times,
-in any process, and it carries no guard. It sets `NEXTFLOW_DIR` and
-`NEXTFLOW_OPTS` (the compute node everything is pinned to — read both by the
-`sbatch` calls and by `config/slurm.config`), sets the nextflow cache
-directories, unsets any `WRIKE_API_TOKEN` inherited from the caller, and then
-sources three things:
+in any process, and it carries no guard. It sets `NEXTFLOW_DIR`, sets the
+nextflow cache directories, unsets any `WRIKE_API_TOKEN` inherited from the
+caller, and then sources three things:
 
 - `secrets/.env` — **credentials only**, never committed:
   - `WRIKE_API_TOKEN` — the bot's, and the only one anything here uses. `.env`
@@ -597,8 +606,9 @@ The daemon is the only long-lived process. It never returns, and handles
 `INT`/`TERM` cleanly, so it runs under systemd as a **user** unit —
 [`systemd/wrike-sqs-listener.service`](systemd/wrike-sqs-listener.service).
 Nothing here needs root, and lingering is what keeps the unit alive once you log
-out. Installation, the `PATH` the unit has to carry, and what to check when it
-will not start are in [docs/daemon.md](docs/daemon.md).
+out. Installation, the environment the unit has to carry in place of
+`module load slurm`, and what to check when it will not start are in
+[docs/daemon.md](docs/daemon.md).
 
 ```bash
 systemctl --user status wrike-sqs-listener

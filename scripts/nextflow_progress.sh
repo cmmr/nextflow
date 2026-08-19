@@ -13,14 +13,19 @@
 # stops polling on its own the moment the run lands.
 #
 # The table is built from nextflow's console output, which wrike_job.sh tees to
-# ./nextflow.out - one line per change when ANSI output is off, as it is in a
-# batch job:
+# ./nextflow.out. With ANSI output off, as it is in a batch job, nextflow
+# reprints its whole table every time something changes:
 #
-#   [31/52c31e] process > SPLITLETTERS (1) [100%] 1 of 1, cached: 1 ✔
+#   executor >  local (41)
+#   [f5/de7a5f] NFC…SEQ:FASTQC (McAllister_P3) | 6 of 6 ✔
+#   [-        ] NFC…AMPLISEQ:AMPLISEQ:DECONTAM -
+#   Plus 19 more processes waiting for tasks…
 #
-# so the table is those lines, last one per process winning. Parsing console
-# output is not a stable interface, so every failure here is soft: a page that
-# cannot be built is skipped, never fatal.
+# so the table is the last such block. Nextflow cuts each process name to a
+# fixed width, marking the cut with an ellipsis; pretty() recovers the last
+# workflow segment of what survives. Parsing console output is not a stable
+# interface, so every failure here is soft: a page that cannot be built is
+# skipped, never fatal.
 #
 # Usage:     nextflow_progress.sh                 # publish once, status from status.txt
 #            nextflow_progress.sh <status>        # publish once, status forced
@@ -56,10 +61,9 @@ fi
 
 readonly S3_INDEX="s3://$AWS_S3_BUCKET/$S3_RUN_PREFIX/$RUN_ID/index.html"
 
-# Turn nextflow's progress lines into table rows, keeping only the newest line
-# per process. The name carries the current task's tag - "FASTQC (sample3)" -
-# which changes constantly, so rows are keyed on the name without it and display
-# the latest one, exactly as the interactive table does.
+# Turn the newest block of nextflow's progress lines into table rows. Each block
+# lists every process that has started, so the last one is the current state and
+# everything before it is history.
 render_rows() {
     awk '
         # HTML-escape, a character at a time
@@ -75,28 +79,64 @@ render_rows() {
             return out
         }
 
-        # "[hash] process > NAME (tag) [ 50%] 6 of 12, cached: 1 ✔"
-        /process > / {
-            rest = substr($0, index($0, "process > ") + 10)
+        # "NFC…SEQ:FASTQC (McAllister_P3)" -> "FASTQC (McAllister_P3)". The
+        # leading ellipsis is the one nextflow printed; it stays wherever the cut
+        # reached far enough in to leave the workflow path unrecognisable.
+        function pretty(name,   base, tag) {
+            sub(/^.*…/, "…", name)
 
-            # The percentage in brackets is what separates name from counts
-            if (match(rest, /\[[ ]*[0-9]+%\]/) == 0) next
+            tag  = ""
+            base = name
+            if (match(name, / \([^()]*\)$/)) {
+                tag  = substr(name, RSTART)
+                base = substr(name, 1, RSTART - 1)
+            }
 
-            name  = substr(rest, 1, RSTART - 1)
-            pcent = substr(rest, RSTART, RLENGTH)
-            count = substr(rest, RSTART + RLENGTH)
+            # A stray bracket means the cut landed inside the tag of a task, so
+            # what looks like a workflow path is part of that tag.
+            if (base !~ /[()]/ && base ~ /:/) sub(/^.*:/, "", base)
+
+            return base tag
+        }
+
+        # "[f5/de7a5f] NFC…SEQ:FASTQC (McAllister_P3) | 6 of 6 ✔" once a process
+        # has tasks, "[-        ] NFC…AMPLISEQ:AMPLISEQ:DECONTAM -" before that
+        /^\[[0-9a-f-][^]]*\] / {
+            if (!inblock) { inblock = 1; n = 0; more = "" }
+
+            rest = $0
+            sub(/^\[[^]]*\] /, "", rest)
+
+            if (match(rest, / \| [^|]*$/)) {
+                name  = substr(rest, 1, RSTART - 1)
+                count = substr(rest, RSTART + 3)
+            }
+            else {
+                name  = rest
+                count = ""
+                sub(/[ \t]+-$/, "", name)
+            }
 
             gsub(/^[ \t]+|[ \t]+$/, "", name)
             gsub(/^[ \t]+|[ \t]+$/, "", count)
-            gsub(/[^0-9]/, "", pcent)
 
-            key = name
-            sub(/[ \t]*\([^)]*\)[ \t]*$/, "", key)
+            pcent = 0
+            if (match(count, /[0-9]+ of [0-9]+/)) {
+                split(substr(count, RSTART, RLENGTH), done, / of /)
+                if (done[2] + 0 > 0) pcent = int(100 * done[1] / done[2])
+            }
 
-            if (!(key in seen)) { seen[key] = ++n; order[n] = key }
-            label[key] = name
-            pct[key]   = pcent
-            cnt[key]   = count
+            n++
+            label[n] = pretty(name)
+            pct[n]   = pcent
+            cnt[n]   = count
+            next
+        }
+
+        # The line nextflow closes each block with, when it has one
+        {
+            inblock = 0
+            if ($0 ~ /^Plus .* processes waiting/) more = $0
         }
 
         END {
@@ -106,13 +146,13 @@ render_rows() {
             print "<thead><tr><th>Process</th><th></th><th></th><th>Tasks</th></tr></thead>"
             print "<tbody>"
             for (i = 1; i <= n; i++) {
-                k = order[i]
-                printf "<tr><td class=\"proc\">%s</td>", esc(label[k])
-                printf "<td class=\"bar\"><span><i style=\"width:%s%%\"></i></span></td>", pct[k]
-                printf "<td class=\"pct\">%s%%</td>", pct[k]
-                printf "<td class=\"cnt\">%s</td></tr>\n", esc(cnt[k])
+                printf "<tr><td class=\"proc\">%s</td>", esc(label[i])
+                printf "<td class=\"bar\"><span><i style=\"width:%s%%\"></i></span></td>", pct[i]
+                printf "<td class=\"pct\">%s%%</td>", pct[i]
+                printf "<td class=\"cnt\">%s</td></tr>\n", esc(cnt[i])
             }
             print "</tbody></table>"
+            if (more != "") printf "<p class=\"note\">%s</p>\n", esc(more)
         }
     ' "$NEXTFLOW_OUT"
 }

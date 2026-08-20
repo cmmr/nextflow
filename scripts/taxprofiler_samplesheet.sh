@@ -14,9 +14,11 @@
 # rather than being merged; taxprofiler concatenates a sample's runs itself after
 # per-run QC.
 #
-# taxprofiler reads gzipped FASTQ only, so .bz2 and plain FASTQ inputs are
-# recompressed into ./raw-sequences/. Already-gzipped inputs are referenced where
-# they lie, which is the common case for WGS and keeps the run directory small.
+# taxprofiler reads gzipped FASTQ only, so every sample ends up in
+# ./raw-sequences/ as <sample>_<run>_{1,2}.fq.gz: already-gzipped inputs are
+# symlinked, .bz2 and plain FASTQ recompressed. taxprofiler_upload.sh archives
+# that directory for the requester, and zip stores what a symlink points at, so
+# the archive holds real data.
 #
 # Failures here are caused by the user's samplesheet: fail writes the explanation
 # to ./message.out, and wrike_followup.sh posts it back to the requester.
@@ -42,7 +44,7 @@ OUT_CSV="taxprofiler_samplesheet.csv"
 # Read by taxprofiler_upload.sh for the published page's header
 SAMPLE_COUNT_FILE="sample_count.txt"
 
-# Holds only the files that had to be recompressed
+# Client-facing archive directory. taxprofiler_upload.sh zips this by the same name.
 FASTQ_DIR="raw-sequences"
 
 # An ENA controlled-vocabulary value. A long-read pipeline sets OXFORD_NANOPORE.
@@ -71,23 +73,24 @@ to_gz() {
     fi | pigz -p "$THREADS" -c > "$outfile"
 }
 
-# Give one input file the absolute .gz path the samplesheet will name: gzipped
-# files stay where they are, anything else is recompressed into FASTQ_DIR.
+# Place one input file at its destination in FASTQ_DIR and set STAGED_PATH to it:
+# gzipped files are symlinked, anything else recompressed. The link target must
+# be absolute, since the link resolves from inside FASTQ_DIR rather than here.
 #
-# Sets GZ_PATH rather than printing it. set -e does not reach a function called
-# inside a command substitution, so a failed recompression there would leave an
-# empty file and carry on.
-gz_path() {
+# Sets STAGED_PATH rather than printing it. set -e does not reach a function
+# called inside a command substitution, so a failed recompression there would
+# leave an empty file and carry on.
+stage_read() {
     local src="$1"
     local dest="$FASTQ_DIR/$2"
 
     if [[ "$src" == *.gz ]]; then
-        GZ_PATH=$(readlink -e "$src")
-        return
+        ln -sfn "$(readlink -e "$src")" "$dest"
+    else
+        to_gz "$src" "$dest"
     fi
 
-    to_gz "$src" "$dest"
-    GZ_PATH=$(readlink -e "$dest")
+    STAGED_PATH="$PWD/$dest"
 }
 
 # Rows in samplesheet order; RUN_COUNT numbers the runs within each sample
@@ -153,11 +156,11 @@ for i in "${!ROW_SAMPLE[@]}"; do
     RUN_COUNT[$sample]=$(( ${RUN_COUNT[$sample]:-0} + 1 ))
     run="run_${RUN_COUNT[$sample]}"
 
-    gz_path "${ROW_FQ1[$i]}" "${sample}_${run}_1.fq.gz"
-    final_fq1="$GZ_PATH"
+    stage_read "${ROW_FQ1[$i]}" "${sample}_${run}_1.fq.gz"
+    final_fq1="$STAGED_PATH"
 
-    gz_path "${ROW_FQ2[$i]}" "${sample}_${run}_2.fq.gz"
-    final_fq2="$GZ_PATH"
+    stage_read "${ROW_FQ2[$i]}" "${sample}_${run}_2.fq.gz"
+    final_fq2="$STAGED_PATH"
 
     printf '%s,%s,%s,%s,%s,\n' \
         "$sample" "$run" "$INSTRUMENT_PLATFORM" "$final_fq1" "$final_fq2" >> "$OUT_CSV"
@@ -166,8 +169,5 @@ done
 # Distinct samples, not rows: a sample sequenced over several runs is one sample
 SAMPLE_COUNT=${#RUN_COUNT[@]}
 printf '%s\n' "$SAMPLE_COUNT" > "$SAMPLE_COUNT_FILE"
-
-# Left behind when every input was already gzipped
-rmdir "$FASTQ_DIR" 2> /dev/null || true
 
 log "Successfully generated taxprofiler samplesheet: $OUT_CSV ($SAMPLE_COUNT samples, ${#ROW_SAMPLE[@]} runs)"

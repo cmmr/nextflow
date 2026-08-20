@@ -5,18 +5,22 @@
 # Author: Daniel Smith
 # Date:   August 19th, 2026
 #
-# Gives every folder below the results root a listing page, copies the folder to
-# s3://$AWS_S3_BUCKET/$S3_RUN_PREFIX/<uid>/ from the inside out - so
-# multiqc/multiqc_report.html lands directly under the uid - and lands the page
-# that frames it last. Nextflow's work/ directory is left behind.
+# Archives the input FASTQ directory that taxprofiler_samplesheet.sh built, drops
+# the archive into the results folder, gives every folder below the results root
+# a listing page, copies the folder to s3://$AWS_S3_BUCKET/$S3_RUN_PREFIX/<uid>/
+# from the inside out - so multiqc/multiqc_report.html lands directly under the
+# uid - and lands the page that frames it last. Nextflow's work/ directory is
+# left behind.
 #
-# Unlike ampliseq_upload.sh this publishes no archive of the input reads: a WGS
-# run's inputs are tens of gigabytes and already live on the cluster.
+# The archive is stored, not compressed (zip -0): the reads are already gzipped.
+# zip stores what a symlink points at, so linked samples are archived as real
+# data. A WGS run's reads are large, so this needs free space in the run
+# directory equal to the input volume.
 #
 # Usage:     taxprofiler_upload.sh [results_dir]
 #            defaults to ./results, the outdir set in the taxprofiler params file
 # Called by: wrike_job.sh, as the POST_PROCESS_CMD of the taxprofiler pipelines
-# Requires:  aws, curl and jq (via the Wrike helpers)
+# Requires:  aws, zip, curl and jq (via the Wrike helpers)
 # Reads:     templates/taxprofiler/index.html, the landing page template
 # Runs:      index_directories.sh, over the results folder
 # Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, WRIKE_S3_RESULTS_URL_CFID,
@@ -33,6 +37,12 @@ source /data/prod/nextflow/.env
 
 RESULTS_DIR="${1:-results}"
 RESULTS_DIR="${RESULTS_DIR%/}"
+
+# Input FASTQ directory, named to match what taxprofiler_samplesheet.sh creates.
+# The archive it becomes is named for the reader downloading it.
+FASTQ_DIR="raw-sequences"
+FASTQ_ZIP_NAME="raw-sequences.zip"
+FASTQ_ZIP="$RESULTS_DIR/$FASTQ_ZIP_NAME"
 
 # Written by taxprofiler_samplesheet.sh, in the run directory rather than in the
 # results: the number of distinct samples
@@ -92,6 +102,9 @@ add_buttons() {
 render_downloads() {
     DOWNLOADS=""
 
+    # The reads are the bulky download most people came for
+    add_buttons download "$FASTQ_ZIP_NAME"
+
     # Interactive classification charts, one per tool and database
     add_buttons view "krona/*.html"
 
@@ -101,21 +114,39 @@ render_downloads() {
     printf '%s' "$DOWNLOADS"
 }
 
-# 1. Give every folder below the results root a listing page, so that the folder
+# 1. Archive the reads into the results folder so they upload with everything
+#    else. Skipped for any pipeline that does not stage its inputs this way.
+if [[ -d "$FASTQ_DIR" ]]; then
+    command -v zip > /dev/null         || fail "The results could not be packaged for download: zip is not installed."
+
+    log "Archiving $FASTQ_DIR for task $TASK_ID..."
+    rm -f "$FASTQ_ZIP"
+
+    # zip's output goes into the failure message, so the requester is told why
+    # their data could not be packaged
+    if ! ZIP_OUTPUT=$(zip -0 -r "$FASTQ_ZIP" "$FASTQ_DIR" 2>&1); then
+        fail "The sequencing data could not be packaged for download:"$'
+'"$ZIP_OUTPUT"
+    fi
+else
+    log "No $FASTQ_DIR directory; skipping raw sequence archive."
+fi
+
+# 2. Give every folder below the results root a listing page, so that the folder
 #    links multiqc_report.html carries still resolve once the results are objects
 #    in a bucket rather than directories on disk.
 if ! "$NEXTFLOW_DIR/scripts/index_directories.sh" "$RESULTS_DIR"; then
     warn "The results folders could not be indexed; their listings will be missing."
 fi
 
-# 2. Publish everything in one pass
+# 3. Publish everything in one pass
 log "Initiating S3 upload for Task $TASK_ID..."
 
 if ! UPLOAD_OUTPUT=$(aws s3 cp "$RESULTS_DIR/" "$S3_RESULTS_DIR/" --recursive 2>&1); then
     fail "The results could not be uploaded to S3:"$'\n'"$UPLOAD_OUTPUT"
 fi
 
-# 3. Land the page that frames all of it last, once nothing it points at is still
+# 4. Land the page that frames all of it last, once nothing it points at is still
 #    uploading. This overwrites the progress page published to this key.
 if [[ ! -r "$INDEX_TEMPLATE" ]]; then
     fail "The results were uploaded, but the page that presents them is missing from the server."

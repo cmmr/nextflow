@@ -181,6 +181,8 @@ scripts/
   ampliseq_upload.sh       POST_PROCESS_CMD for the ampliseq pipelines.
   taxprofiler_samplesheet.sh  PRE_PROCESS_CMD for the taxprofiler pipelines.
   taxprofiler_upload.sh       POST_PROCESS_CMD for the taxprofiler pipelines.
+  build_host_reference.sh     Builds a host-depletion reference. Setup, not part of a run.
+  fetch_taxprofiler_db.sh     Downloads a taxprofiler database. Likewise.
 
 pipelines/            One file per pipeline; see below.
 config/               Nextflow config, passed to `nextflow run -c`.
@@ -189,6 +191,7 @@ config/               Nextflow config, passed to `nextflow run -c`.
   taxprofiler/
     database.csv      Database sheet for the taxprofiler pipelines.
     slurm.config      Executor + apptainer settings for the taxprofiler pipelines.
+                      Both are documented in docs/taxprofiler.md.
 
 templates/            Web pages published to S3 alongside a run's results.
   progress.html       Live progress page template. Pipeline-agnostic.
@@ -210,6 +213,7 @@ docs/                 How the daemon and the external services were set up.
   webhook_bridge.md   Wrike webhook registration and the AWS Lambda source.
   cloudfront.md       Viewer request function that serves the listing pages.
   wrike_responses.md  Wrike API responses for the request form and its fields.
+  taxprofiler.md      The taxprofiler pipelines, their databases and host references.
 ```
 
 Working directories that exist only on the cluster: `assets/`, `bin/`, `cache/`,
@@ -255,7 +259,8 @@ default.
 Currently defined: **16SV1V3** (27f/534r), **16SV3V5** (357f/926r),
 **16SV4** (515f/806r), **16SV5V6** (806f/1053r) — all nf-core/ampliseq 2.18.0
 against SILVA 138.2 — and **TAXPROFILER**, nf-core/taxprofiler 2.0.1 running
-kraken2, bracken and metaphlan over shotgun reads.
+kraken2, bracken and metaphlan over shotgun reads; see
+[docs/taxprofiler.md](docs/taxprofiler.md).
 
 **Pipeline files are named in upper case.** `wrike_task_handler.sh` uppercases
 whatever the user typed and looks for exactly that filename, so `taxprofiler` on
@@ -384,73 +389,11 @@ worth failing a run over: results nobody can browse are still results.
 
 ---
 
-## The taxprofiler pre/post steps
+## The taxprofiler pipelines
 
-[`taxprofiler_samplesheet.sh`](scripts/taxprofiler_samplesheet.sh) turns the same
-lab sheet into the six-column CSV taxprofiler wants — `sample`,
-`run_accession`, `instrument_platform`, `fastq_1`, `fastq_2`, `fasta`. It differs
-from the ampliseq converter in two ways that follow from what taxprofiler can do
-for itself:
-
-- **Duplicate sample names are not merged.** taxprofiler concatenates a sample's
-  runs itself, after per-run QC, so entries sharing a sample name become separate
-  rows numbered `run_1`, `run_2`, … The count in `sample_count.txt` is therefore
-  *distinct samples*, not rows.
-- **Already-gzipped inputs are referenced where they lie.** taxprofiler reads
-  gzipped FASTQ only, so `.bz2` and plain FASTQ are still recompressed into
-  `raw-sequences/` — but a WGS run's inputs are normally `.gz` already, and
-  staging tens of gigabytes to symlink them buys nothing. `raw-sequences/` is
-  removed again when it turns out to be empty.
-
-`instrument_platform` is written as `ILLUMINA` unless the pipeline definition
-sets `INSTRUMENT_PLATFORM`, which is what a long-read version would change.
-
-[`taxprofiler_upload.sh`](scripts/taxprofiler_upload.sh) is the ampliseq uploader
-without the reads archive: it indexes the results folders, copies them to
-`s3://$AWS_S3_BUCKET/nxf/<uid>/`, renders
-[`templates/taxprofiler/index.html`](templates/taxprofiler/index.html) over
-`multiqc/multiqc_report.html`, and writes the report URL to the Wrike custom
-field. Publishing a client's WGS reads would mean uploading the same tens of
-gigabytes to S3, so it does not.
-
-Its buttons are globbed rather than listed, since the filenames carry the tool
-and database names from `database.csv`:
-
-| Button | Files |
-|---|---|
-| krona charts | `krona/*.html` — opened in a new tab rather than downloaded |
-| taxpasta tables | `taxpasta/*.tsv` — one merged profile per tool and database |
-
-### Databases and resource limits
-
-taxprofiler takes its databases from a second sheet,
-[`config/taxprofiler/database.csv`](config/taxprofiler/database.csv), naming a
-kraken2 database, a bracken database over the same path, and a metaphlan4
-database under `/biolib/prod/db`. **Bracken's `db_params` must contain a
-semicolon**, which splits kraken2's parameters from bracken's — `;-r 150` is
-default kraken2 settings with a 150 bp read length.
-
-It also has its own
-[`config/taxprofiler/slurm.config`](config/taxprofiler/slurm.config) rather than
-sharing `config/slurm.config`. taxprofiler 2.0.1 is built on the nf-core 3.x
-template, which dropped `params.max_cpus` / `max_memory` / `max_time` in favour
-of `process.resourceLimits`; the `params` block in `config/slurm.config` sets
-nothing taxprofiler reads.
-
-Kraken2 and MetaPhlAn are sized against the node rather than left on nf-core's
-`process_high` label. Kraken2 reads `hash.k2d` — 74 GB for
-`bac_arc_fun_Feb2024` — into its own heap, which is above the label's default;
-16 cpus each puts two of either on a 32-core node and uses every core. Nothing
-copies a database: Nextflow stages inputs as absolute symlinks
-(`stageInMode` defaults to `symlink`) and `scratch` copies only declared
-*outputs* back, so both tools read the database over the shared filesystem and
-the first task on a node warms the page cache for the rest.
-
-Only five files in the kraken2 directory are read at run time — `hash.k2d`,
-`opts.k2d`, `taxo.k2d`, `seqid2taxid.map`, and Bracken's
-`database150mers.kmer_distrib`. `database.kraken` (61 GB) and `library/` are
-build artifacts. **Do not delete them**: `bracken-build` needs `database.kraken`
-to produce `kmer_distrib` files for read lengths other than 150.
+Shotgun metagenomic profiling — five host-removal variants over kraken2, bracken
+and metaphlan, their pre/post steps, database sheet and resource limits — is
+documented separately in [docs/taxprofiler.md](docs/taxprofiler.md).
 
 ---
 

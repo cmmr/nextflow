@@ -4,18 +4,104 @@
 long-lived process in this system. It never returns, so something has to start
 it, restart it when it dies, and bring it back after the login node reboots.
 That something is systemd, running it as a **user** unit —
-[`systemd/wrike-sqs-listener.service`](../systemd/wrike-sqs-listener.service).
+[`systemd/wrike-sqs-listener.service`](../systemd/wrike-sqs-listener.service) —
+on one login node, as the account that owns `/data/prod/nextflow`.
 
-A user unit rather than a system one because nothing here needs root: the
-daemon submits Slurm jobs, reads `secrets/.env`, and writes under
-`$NEXTFLOW_DIR`, all as the account that owns them. Running it as root would
-make every file it touches root's.
+[Installing](#installing) it is a one-time job. Everything below is what running
+it involves afterwards.
 
-**Install it on exactly one login node.** Two listeners polling the same queue
-would race for messages, and each request would land on whichever one won.
+
+## Running it
+
+`log` and `warn` write to stdout and stderr, which systemd captures, so the
+journal is the daemon log. There is no log file, and nothing to rotate.
+
+```bash
+journalctl --user -u wrike-sqs-listener -f
+```
+
+```bash
+journalctl --user -u wrike-sqs-listener --since today
+```
+
+A healthy daemon is silent. It logs at startup and then says nothing until a
+webhook arrives, so an empty tail means it is long-polling SQS, not that it has
+stopped. What it is doing right now:
+
+```bash
+systemctl --user status wrike-sqs-listener
+```
+
+Handler output arrives in the journal too, since handlers are backgrounded
+children of the daemon and inherit its streams. A run's own records are
+elsewhere: `$NEXTFLOW_DIR/log/` for Slurm job output, `$NEXTFLOW_DIR/tmp/<uid>/`
+for per-run state.
+
+
+### Getting a change running
+
+The daemon executes [`wrike_sqs_listener.sh`](../scripts/wrike_sqs_listener.sh)
+once, at startup, and holds it for as long as it runs. **Editing that script
+changes nothing until the daemon is restarted** — pull the change onto the
+cluster, then restart:
+
+```bash
+git -C /data/prod/nextflow pull && systemctl --user restart wrike-sqs-listener
+```
+
+Not everything needs that, because not everything is read at startup:
+
+| Changed | What it takes |
+| --- | --- |
+| `scripts/wrike_sqs_listener.sh` | Restart — executed once, at startup |
+| `.env`, `secrets/.env`, `utilities.sh`, `wrike_api.sh` | Restart — sourced once, at startup |
+| `systemd/wrike-sqs-listener.service` | `systemctl --user daemon-reload`, then restart |
+| The handlers, `wrike_job.sh`, the pipelines | Nothing — executed fresh per message |
+
+`daemon-reload` is for the unit file alone. It makes systemd re-read
+`wrike-sqs-listener.service`; it does not touch the running process, which is
+why a unit change takes both commands:
+
+```bash
+systemctl --user daemon-reload && systemctl --user restart wrike-sqs-listener
+```
+
+The journal shows whether a restart took: the `Stopped`/`Started` pair, then a
+fresh `Starting Wrike SQS Listener Daemon...` under a new PID.
+
+
+### Stopping
+
+```bash
+systemctl --user stop wrike-sqs-listener
+```
+
+Stop rather than kill the process. `Restart=always` means a killed daemon comes
+back 30 seconds later, which looks like it ignored you.
+
+Neither stopping nor restarting is instant, by design. `SIGTERM` reaches the
+listener immediately, but its trap does not run until the command in flight
+returns — up to 20 seconds for an SQS long poll, up to 60 while it sleeps out a
+Slurm pause. `KillMode=mixed` then leaves any handler it had backgrounded
+running, so a job already being submitted is not killed underneath itself, and
+`TimeoutStopSec=300` gives those five minutes before systemd kills the rest of
+the cgroup.
+
+`Restart=always` also covers the daemon aborting on its own — `set -euo
+pipefail` means an unhandled failure exits non-zero. It will not restart-loop
+against a down cluster: the daemon checks `sinfo` itself and pauses polling
+rather than exiting.
 
 
 ## Installing
+
+A user unit rather than a system one because nothing here needs root: the daemon
+submits Slurm jobs, reads `secrets/.env`, and writes under `$NEXTFLOW_DIR`, all
+as the account that owns them. Running it as root would make every file it
+touches root's.
+
+**Install it on exactly one login node.** Two listeners polling the same queue
+would race for messages, and each request would land on whichever one won.
 
 With the repository deployed to `/data/prod/nextflow`, as the account that owns
 it:
@@ -37,8 +123,9 @@ systemctl --user status wrike-sqs-listener
 ```
 
 The unit is symlinked rather than copied, so the file in git is the file systemd
-reads and a `git pull` that changes it needs only a `daemon-reload`. `enable`
-is what starts it at boot; `--now` also starts it immediately.
+reads, and a `git pull` that changes it needs no reinstalling — only the
+`daemon-reload` and restart above. `enable` is what starts it at boot; `--now`
+also starts it immediately.
 
 
 ## Lingering
@@ -117,53 +204,6 @@ systemctl --user show wrike-sqs-listener -p Environment
 
 The second reads back what the running service actually has, which is not the
 file's contents until a `daemon-reload` and a restart have picked them up.
-
-
-## Logs
-
-`log` and `warn` write to stdout and stderr, which systemd captures, so the
-journal is the daemon log. There is no log file to rotate.
-
-```bash
-journalctl --user -u wrike-sqs-listener -f
-```
-
-```bash
-journalctl --user -u wrike-sqs-listener --since today
-```
-
-Handler output arrives here too, since handlers are backgrounded children of
-the daemon and inherit its streams. A run's own records are elsewhere:
-`$NEXTFLOW_DIR/log/` for Slurm job output, `$NEXTFLOW_DIR/tmp/<uid>/` for
-per-run state.
-
-
-## Day to day
-
-Restarting is how edits are picked up. The daemon sources `.env` once at
-startup, and the handler paths it dispatches are read per message, so a change
-to `.env`, `wrike_api.sh`, or `utilities.sh` needs a restart while a change to a
-handler script does not:
-
-```bash
-systemctl --user restart wrike-sqs-listener
-```
-
-```bash
-systemctl --user stop wrike-sqs-listener
-```
-
-Stopping is deliberately unhurried. `KillMode=mixed` sends `SIGTERM` to the
-listener alone, so a handler already submitting a job is not killed underneath
-itself; `TimeoutStopSec=300` gives anything still running five minutes before
-systemd kills the rest of the cgroup. The listener's own exit can lag by up to
-20 seconds regardless, because its trap does not run until the in-flight SQS
-long poll returns.
-
-`Restart=always` with `RestartSec=30` covers the case where the daemon aborts —
-`set -euo pipefail` means an unhandled failure exits non-zero. It does not
-restart-loop against a down cluster: the daemon checks `sinfo` itself and pauses
-polling rather than exiting.
 
 
 ## When it is not working

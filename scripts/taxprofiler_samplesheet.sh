@@ -23,14 +23,22 @@
 # Failures here are caused by the user's samplesheet: fail writes the explanation
 # to ./message.out, and wrike_followup.sh posts it back to the requester.
 #
+# It also writes ./taxprofiler_database.csv, a per-run copy of the database sheet
+# with Bracken's read length set from the data. Bracken's -r must name a
+# databaseNNNmers.kmer_distrib the Kraken2 database actually carries, and the
+# right one depends on the reads rather than on the pipeline.
+#
 # Usage:     taxprofiler_samplesheet.sh [input_samplesheet]
 #            defaults to ./original_samplesheet.tsv, as downloaded by wrike_job.sh
 # Called by: wrike_job.sh, as the PRE_PROCESS_CMD of the taxprofiler pipelines
-# Requires:  pigz from PATH; $NEXTFLOW_DIR/bin/lbzip2 additionally for .bz2 inputs
+# Requires:  pigz and awk from PATH; $NEXTFLOW_DIR/bin/lbzip2 additionally for
+#            .bz2 inputs
+# Reads:     config/taxprofiler/database.csv, the database sheet it specializes
 # Env:       the log and fail helpers, sourced from .env; INSTRUMENT_PLATFORM,
 #            optionally set by the pipeline definition
-# Outputs:   ./taxprofiler_samplesheet.csv, ./raw-sequences/, ./sample_count.txt,
-#            and ./message.out on error
+# Outputs:   ./taxprofiler_samplesheet.csv, ./taxprofiler_database.csv,
+#            ./raw-sequences/, ./sample_count.txt, ./read_length.txt, and
+#            ./message.out on error
 #
 # Because the samplesheet is whitespace-delimited, FASTQ paths cannot contain spaces.
 
@@ -43,6 +51,22 @@ OUT_CSV="taxprofiler_samplesheet.csv"
 
 # Read by taxprofiler_upload.sh for the published page's header
 SAMPLE_COUNT_FILE="sample_count.txt"
+
+# The database sheet the pipeline definition names, written per run, and the
+# static one it is derived from
+OUT_DB_SHEET="taxprofiler_database.csv"
+STATIC_DB_SHEET="$NEXTFLOW_DIR/config/taxprofiler/database.csv"
+
+# The detected read length, kept beside the other run metadata
+READ_LENGTH_FILE="read_length.txt"
+
+# Reads per file to sample when measuring read length. Length barely varies
+# within a FASTQ, so this only has to beat the noise.
+READ_LENGTH_SAMPLE=10000
+
+# How far the nearest available Bracken distribution may sit from the measured
+# read length before it is worth mentioning
+READ_LENGTH_TOLERANCE=25
 
 # Client-facing archive directory. taxprofiler_upload.sh zips this by the same name.
 FASTQ_DIR="raw-sequences"

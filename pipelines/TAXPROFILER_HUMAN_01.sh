@@ -1,6 +1,6 @@
 
-# Shotgun metagenomics, PhiX depletion only: fastp trimming, then kraken2, bracken and metaphlan
-PIPELINE_NAME="taxprofiler_01"
+# Shotgun metagenomics with human (T2T-CHM13v2.0 + PhiX) depletion
+PIPELINE_NAME="taxprofiler_human_01"
 
 NEXTFLOW_ARGS=(
     -log nextflow.log
@@ -19,11 +19,11 @@ outdir: "results"
 perform_shortread_qc: true
 shortread_qc_tool: "fastp"
 perform_shortread_hostremoval: true
-hostremoval_reference: "$NEXTFLOW_DIR/db/hostremoval/phix.fa"
-shortread_hostremoval_index: "$NEXTFLOW_DIR/db/hostremoval/phix"
+hostremoval_reference: "$NEXTFLOW_DIR/db/hostremoval/chm13v2phix.fa"
+shortread_hostremoval_index: "$NEXTFLOW_DIR/db/hostremoval/chm13v2phix"
 perform_longread_qc: true
 perform_longread_hostremoval: true
-longread_hostremoval_index: "$NEXTFLOW_DIR/db/hostremoval/phix.mmi"
+longread_hostremoval_index: "$NEXTFLOW_DIR/db/hostremoval/chm13v2phix.mmi"
 run_kraken2: true
 run_bracken: true
 run_metaphlan: true

@@ -48,6 +48,10 @@ FASTQ_ZIP="$RESULTS_DIR/$FASTQ_ZIP_NAME"
 # results: the number of distinct samples
 SAMPLE_COUNT_FILE="sample_count.txt"
 
+# Also written per run by taxprofiler_samplesheet.sh, and published with the
+# results as part of the record
+DB_SHEET="taxprofiler_database.csv"
+
 # The page that frames the report. Both of the links it carries are relative, so
 # it only works from the same prefix as the objects it points at.
 readonly INDEX_TEMPLATE="$NEXTFLOW_DIR/templates/taxprofiler/index.html"
@@ -132,21 +136,30 @@ else
     log "No $FASTQ_DIR directory; skipping raw sequence archive."
 fi
 
-# 2. Give every folder below the results root a listing page, so that the folder
+# 2. Ship the database sheet with the results. wrike_job.sh copies the command
+#    record and the params files; this one is generated per run by
+#    taxprofiler_samplesheet.sh, and it carries the Bracken read length the run
+#    actually used. The input samplesheet is left behind: it names the
+#    requester's own paths on the cluster.
+if [[ -r "$DB_SHEET" ]]; then
+    cp "$DB_SHEET" "$RESULTS_DIR/" || warn "Could not publish $DB_SHEET with the results."
+fi
+
+# 3. Give every folder below the results root a listing page, so that the folder
 #    links multiqc_report.html carries still resolve once the results are objects
 #    in a bucket rather than directories on disk.
 if ! "$NEXTFLOW_DIR/scripts/index_directories.sh" "$RESULTS_DIR"; then
     warn "The results folders could not be indexed; their listings will be missing."
 fi
 
-# 3. Publish everything in one pass
+# 4. Publish everything in one pass
 log "Initiating S3 upload for Task $TASK_ID..."
 
 if ! UPLOAD_OUTPUT=$(aws s3 cp "$RESULTS_DIR/" "$S3_RESULTS_DIR/" --recursive 2>&1); then
     fail "The results could not be uploaded to S3:"$'\n'"$UPLOAD_OUTPUT"
 fi
 
-# 4. Land the page that frames all of it last, once nothing it points at is still
+# 5. Land the page that frames all of it last, once nothing it points at is still
 #    uploading. This overwrites the progress page published to this key.
 if [[ ! -r "$INDEX_TEMPLATE" ]]; then
     fail "The results were uploaded, but the page that presents them is missing from the server."

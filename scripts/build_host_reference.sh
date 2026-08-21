@@ -14,11 +14,17 @@
 # accepts: it takes a single FASTA and a single index, so a host plus PhiX is one
 # concatenated reference rather than two databases.
 #
-# Writes three things into db/hostremoval/:
+# Writes four things into db/hostremoval/:
 #
 #   <name>.fa             the concatenated reference, named by hostremoval_reference
 #   <name>/               the bowtie2 index, named by shortread_hostremoval_index
+#   <name>.mmi            the minimap2 index, named by longread_hostremoval_index
 #   <name>.manifest.json  what went in, from where, and how
+#
+# Both indexes are built because instrument_platform decides which one a sample
+# uses, and that is read from the data rather than from the pipeline. The
+# minimap2 index is built with -x map-ont to match what taxprofiler's
+# MINIMAP2_INDEX would have produced.
 #
 # The manifest is the point. A reference whose provenance is not recorded cannot
 # be reproduced or audited later.
@@ -43,9 +49,14 @@ set -euo pipefail
 
 source /data/prod/nextflow/.env
 
-# The bowtie2 build taxprofiler 2.0.1's BOWTIE2_BUILD uses, so an index built
-# here matches the aligner that reads it
+# The builds taxprofiler 2.0.1's BOWTIE2_BUILD and MINIMAP2_INDEX use, so an
+# index built here matches the aligner that reads it
 readonly BOWTIE2_CONTAINER="docker://community.wave.seqera.io/library/bowtie2_htslib_samtools_pigz:edeb13799090a2a6"
+readonly MINIMAP2_CONTAINER="docker://biocontainers/minimap2:2.29--h577a1d6_0"
+
+# taxprofiler's MINIMAP2_INDEX sets this; an .mmi is only valid for the preset it
+# was built with
+readonly MINIMAP2_PRESET="-x map-ont"
 
 readonly NCBI_GENOMES="https://ftp.ncbi.nlm.nih.gov/genomes/all"
 
@@ -76,10 +87,11 @@ done
 
 REFERENCE="$OUT_DIR/$NAME.fa"
 INDEX_DIR="$OUT_DIR/$NAME"
+MINIMAP2_INDEX="$OUT_DIR/$NAME.mmi"
 MANIFEST="$OUT_DIR/$NAME.manifest.json"
 
-if [[ -e "$REFERENCE" || -e "$INDEX_DIR" ]]; then
-    fail "$NAME already exists in $OUT_DIR; remove $NAME.fa and $NAME/ to rebuild."
+if [[ -e "$REFERENCE" || -e "$INDEX_DIR" || -e "$MINIMAP2_INDEX" ]]; then
+    fail "$NAME already exists in $OUT_DIR; remove $NAME.fa, $NAME/ and $NAME.mmi to rebuild."
 fi
 
 mkdir -p "$OUT_DIR"
@@ -179,27 +191,49 @@ if ! compgen -G "$INDEX_DIR/*.rev.1.bt2*" > /dev/null; then
     fail "bowtie2-build reported success but wrote no .rev.1.bt2 file."
 fi
 
-# 3. Record what was built, so the reference can be audited or reproduced.
+# 3. Build the minimap2 index for the long-read path. Named as a file rather than
+#    a directory, which is what longread_hostremoval_index expects.
+MINIMAP2_COMMAND="minimap2 -t $THREADS -d $MINIMAP2_INDEX $MINIMAP2_PRESET $REFERENCE"
+
+log "Building the minimap2 index..."
+if ! apptainer exec -B /data "$MINIMAP2_CONTAINER" $MINIMAP2_COMMAND; then
+    rm -f "$MINIMAP2_INDEX"
+    fail "minimap2 indexing failed for $NAME."
+fi
+
+[[ -s "$MINIMAP2_INDEX" ]] || fail "minimap2 reported success but wrote no .mmi file."
+
+# 4. Record what was built, so the reference can be audited or reproduced.
 BOWTIE2_VERSION=$(apptainer exec "$BOWTIE2_CONTAINER" bowtie2-build --version 2>/dev/null | head -1) \
     || BOWTIE2_VERSION="unknown"
+MINIMAP2_VERSION=$(apptainer exec "$MINIMAP2_CONTAINER" minimap2 --version 2>/dev/null | head -1) \
+    || MINIMAP2_VERSION="unknown"
 
 jq -n \
     --arg name "$NAME" \
     --arg reference "$REFERENCE" \
-    --arg index "$INDEX_DIR" \
     --arg reference_md5 "$(md5sum "$REFERENCE" | cut -d" " -f1)" \
+    --arg bowtie2_index "$INDEX_DIR" \
+    --arg bowtie2_container "$BOWTIE2_CONTAINER" \
+    --arg bowtie2_version "$BOWTIE2_VERSION" \
+    --arg bowtie2_command "$BUILD_COMMAND" \
+    --arg minimap2_index "$MINIMAP2_INDEX" \
+    --arg minimap2_container "$MINIMAP2_CONTAINER" \
+    --arg minimap2_version "$MINIMAP2_VERSION" \
+    --arg minimap2_command "$MINIMAP2_COMMAND" \
     --arg built_utc "$(date -u "+%Y-%m-%dT%H:%M:%SZ")" \
     --arg built_by "$(whoami)" \
-    --arg container "$BOWTIE2_CONTAINER" \
-    --arg tool_version "$BOWTIE2_VERSION" \
-    --arg command "$BUILD_COMMAND" \
     --argjson sources "$SOURCES_JSON" \
-    '{name: $name, reference: $reference, index: $index, reference_md5: $reference_md5,
+    '{name: $name, reference: $reference, reference_md5: $reference_md5,
       sources: $sources, built_utc: $built_utc, built_by: $built_by,
-      container: $container, tool_version: $tool_version, command: $command}' \
+      bowtie2: {index: $bowtie2_index, container: $bowtie2_container,
+                tool_version: $bowtie2_version, command: $bowtie2_command},
+      minimap2: {index: $minimap2_index, container: $minimap2_container,
+                 tool_version: $minimap2_version, command: $minimap2_command}}' \
     > "$MANIFEST"
 
 log "Built $NAME:"
 log "  hostremoval_reference:       $REFERENCE"
 log "  shortread_hostremoval_index: $INDEX_DIR"
+log "  longread_hostremoval_index:  $MINIMAP2_INDEX"
 log "  manifest:                    $MANIFEST"

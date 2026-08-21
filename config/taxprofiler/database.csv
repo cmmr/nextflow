@@ -1,4 +1,4 @@
 tool,db_name,db_params,db_type,db_path
-kraken2,pluspf_20260626,,short,/data/prod/nextflow/db/kraken2/pluspf_20260626
+kraken2,pluspf_20260626,,short;long,/data/prod/nextflow/db/kraken2/pluspf_20260626
 bracken,pluspf_20260626,;-r 150,short,/data/prod/nextflow/db/kraken2/pluspf_20260626
 metaphlan,mpa_vJun23_CHOCOPhlAnSGB_202403,,short,/data/prod/nextflow/db/metaphlan/mpa_vJun23_CHOCOPhlAnSGB_202403

@@ -258,9 +258,10 @@ default.
 
 Currently defined: **16SV1V3** (27f/534r), **16SV3V5** (357f/926r),
 **16SV4** (515f/806r), **16SV5V6** (806f/1053r) — all nf-core/ampliseq 2.18.0
-against SILVA 138.2 — and **TAXPROFILER**, nf-core/taxprofiler 2.0.1 running
-kraken2, bracken and metaphlan over shotgun reads; see
-[docs/taxprofiler.md](docs/taxprofiler.md).
+against SILVA 138.2 — and **TAXPROFILER** (PhiX only), **TAXPROFILER_HUMAN**
+and **TAXPROFILER_MOUSE**, all nf-core/taxprofiler 2.0.1 running kraken2,
+bracken and metaphlan over shotgun reads and differing only in which host genome
+is depleted; see [docs/taxprofiler.md](docs/taxprofiler.md).
 
 **Pipeline files are named in upper case.** `wrike_task_handler.sh` uppercases
 whatever the user typed and looks for exactly that filename, so `taxprofiler` on

@@ -8,27 +8,37 @@ Everything here is taxprofiler-specific. For how a request becomes a run at all,
 see the [README](../README.md).
 
 
-## The pipeline
+## The pipeline variants
 
-There is one taxprofiler pipeline, `TAXPROFILER`.
+Three pipelines share one pair of scripts and one database sheet, and differ
+only in which host genome their reads are depleted against:
 
-**It depletes against every common host at once — human, mouse, macaque and
-PhiX in a single pass — rather than offering a choice per species.** One
-combined reference costs a small amount of extra microbial loss — the genome
-features that spuriously attract microbial reads are
-conserved between mammals, so the union overlaps heavily rather than adding up —
-and in exchange it deletes an entire failure mode: a mouse study can no longer
-be depleted against a human genome with nothing in the report saying so. For a
-pipeline chosen from a request-form dropdown, that trade is worth making.
+| Pipeline | Depleted against | Reference |
+| --- | --- | --- |
+| `TAXPROFILER` | PhiX only | `phix` |
+| `TAXPROFILER_HUMAN` | human + PhiX | `chm13v2phix` |
+| `TAXPROFILER_MOUSE` | mouse + PhiX | `grcm39phix` |
 
-If false positives ever become a real concern, masking the reference against
-bacterial genomes buys back roughly an order of magnitude, which dwarfs the
-difference between one host and three.
+Every variant strips PhiX, since the Illumina spike-in is never part of the
+sample and PlusPF contains viral genomes that would otherwise classify it.
 
-Adding a host means rebuilding the combined reference and pointing a new
-`TAXPROFILER_02` at it, rather than adding a parallel pipeline.
+**The split is deliberate, and the reason is the methods section.** One combined
+mammalian reference would be marginally more robust to a requester picking the
+wrong variant — the features that spuriously attract microbial reads are largely
+shared between mammals, so depleting against several costs little. But it would
+also mean reporting that an environmental sample had been depleted against human
+and mouse, which is not a claim worth defending to a reviewer. Host depletion
+should name the host the sample came from.
 
-`TAXPROFILER_01.sh` carries its full parameter set rather than sourcing a shared
+The cost is that **picking the wrong variant fails quietly**: a mouse study run
+through `TAXPROFILER_HUMAN` is depleted against the wrong genome and nothing in
+the report says so. That is an operator choice recorded on the Wrike task, which
+is a better place for it than buried in a reference nobody reads.
+
+Adding a host is a new `TAXPROFILER_<host>` plus one reference build, and
+touches none of the pipelines already defined.
+
+Each `_01` file carries its full parameter set rather than sourcing a shared
 base, the same trade the four 16S pipelines make: a run from a year ago still
 reproduces exactly.
 
@@ -45,6 +55,28 @@ for itself:
   runs itself, after per-run QC, so entries sharing a sample name become separate
   rows numbered `run_1`, `run_2`, … The count in `sample_count.txt` is therefore
   *distinct samples*, not rows.
+- **Both paired and single-end input are accepted.** A line is
+  `sample fastq_1 fastq_2` or `sample fastq_1`. A sample's runs must all be one
+  or the other, which is what taxprofiler's own cross-row check enforces, so a
+  sample that mixes them is rejected here with a clearer message.
+- **`instrument_platform` is measured, not declared.** taxprofiler acts on it
+  for exactly one decision — short-read path or long-read path — so the median
+  read length answers it directly: above 1000 bp is `OXFORD_NANOPORE`, anything
+  else `ILLUMINA`. No Illumina instrument reaches 1000 bp. A header format would
+  have been the obvious signal and is the worse one, since SRA round-trips and
+  read-renaming tools erase it. Setting `INSTRUMENT_PLATFORM` in the environment
+  pins the value and skips detection, e.g. for `PACBIO_SMRT`. Long reads
+  presented as a pair are rejected: taxprofiler errors on a long-read row that
+  names a second FASTQ, and paired long reads do not exist.
+- **Sample names are kept as submitted wherever possible.** taxprofiler forbids
+  only whitespace in a sample name, but the name ends up in output filenames
+  that reach unquoted shell contexts inside the nf-core modules, so anything
+  outside `[A-Za-z0-9._-]` becomes an underscore and a leading dash is prefixed.
+  Dots and dashes survive, so `P3.stool.T1` and `Sample-01` reach the report as
+  submitted. Each rename is logged. This is looser than the ampliseq converter,
+  which has to satisfy ampliseq's own stricter rule.
+- **Bracken's read length is measured, not assumed** — see
+  [Databases and resource limits](#databases-and-resource-limits).
 - **Every read is staged into `raw-sequences/`**, as
   `<sample>_<run>_{1,2}.fq.gz`. taxprofiler reads gzipped FASTQ only, so `.bz2`
   and plain FASTQ are recompressed; already-gzipped inputs are symlinked rather
@@ -78,27 +110,36 @@ database names from `database.csv`:
 
 ### Host removal
 
-Host depletion runs on Bowtie2 against a single combined reference built into
+Host depletion runs on Bowtie2 against one reference per variant, built into
 `db/hostremoval/`:
 
 ```
 db/hostremoval/
-  human_mouse_macaque_phix.fa             hostremoval_reference
-  human_mouse_macaque_phix/               shortread_hostremoval_index
-  human_mouse_macaque_phix.manifest.json  provenance
+  <name>.fa             hostremoval_reference
+  <name>/               shortread_hostremoval_index   (bowtie2)
+  <name>.mmi            longread_hostremoval_index    (minimap2, -x map-ont)
+  <name>.manifest.json  provenance
 ```
 
-taxprofiler takes exactly one reference and one index — `hostremoval_reference`
-is a single `file()` and the index channel is `.first()`-ed — so several
-genomes become one reference by concatenation, not by supplying several
-databases. It is also why PhiX cannot be added to a finished index: a bowtie2
-index is an FM-index over the whole concatenated text, with no append or merge.
+built for `phix`, `chm13v2phix` and `grcm39phix`. **Both indexes are built for
+every reference**, because the platform is read from the data rather than from
+the pipeline, so either path may be taken on any run. The minimap2 index is a
+file rather than a directory, which is what `longread_hostremoval_index`
+expects, and `-x map-ont` matches what taxprofiler's own `MINIMAP2_INDEX` would
+have produced — an `.mmi` is only valid for the preset it was built with.
 
-At 9.0 Gbp the combined reference is over bowtie2's 4.295 Gbp (2^32) small-index
-threshold, so it builds a **large index** — `.bt2l` files, roughly 13 GB, and a
-longer build. Both `BOWTIE2_ALIGN` and
-[`build_host_reference.sh`](../scripts/build_host_reference.sh) detect either
-format, so nothing else changes.
+taxprofiler takes exactly one reference and one index — `hostremoval_reference`
+is a single `file()` and the index channel is `.first()`-ed — so a host plus
+PhiX is one concatenated reference rather than two databases. It is also why
+PhiX cannot be added to a finished index: a bowtie2 index is an FM-index over
+the whole concatenated text, with no append or merge, so adding anything means
+rebuilding. Including PhiX at build time is free either way, at 5.4 kbp against
+3 Gbp.
+
+Each reference stays under bowtie2's 4.295 Gbp small-index threshold, so all
+three build ordinary `.bt2` files. `BOWTIE2_ALIGN` finds the basename itself
+with `find -L ./ -name "*.rev.1.bt2"`, so an index only has to be alone in its
+directory; the name is free.
 
 ### Databases and resource limits
 
@@ -107,15 +148,41 @@ Profiling databases come from
 
 | tool | db_name | notes |
 | --- | --- | --- |
-| kraken2 | `pluspf_20260626` | RefSeq archaea, bacteria, viral, plasmid, human, UniVec_Core, protozoa, fungi |
+| kraken2 | `pluspf_20260626` | RefSeq archaea, bacteria, viral, plasmid, human, UniVec_Core, protozoa, fungi. `db_type` is `short;long` |
 | bracken | `pluspf_20260626` | same directory; `db_params` is `;-r 150` |
 | metaphlan | `mpa_vJun23_CHOCOPhlAnSGB_202403` | newest database MetaPhlAn 4.1.1 accepts |
 
 **Bracken's `db_params` must contain a semicolon**, which splits kraken2's
-parameters from bracken's — `;-r 150` is default kraken2 settings with a 150 bp
-read length. The PlusPF archive ships distributions for 50, 75, 100, 150, 200,
-250 and 300-mers, so `-r` can be changed to any of those without rebuilding
-anything.
+parameters from bracken's. That is the only part of the field that is required —
+`db_params` is empty on the other two rows.
+
+**The `-r 150` in that file is only a fallback.** Bracken's read length is
+measured per run rather than assumed: `taxprofiler_samplesheet.sh` samples the
+staged R1 files, takes the modal read length, picks the closest
+`databaseNNNmers.kmer_distrib` the Kraken2 database actually ships, and writes
+`taxprofiler_database.csv` into the run directory with that `-r`. The pipeline
+names *that* sheet, not this one.
+
+PlusPF carries distributions for 50, 75, 100, 150, 200, 250 and 300-mers, so
+selection has something to choose from; with a single distribution the step is a
+no-op. Anything before the semicolon is kraken2's and is copied through
+untouched, as are any bracken flags other than `-r`.
+
+A read length more than 15% away from the closest available distribution is
+warned about on the Wrike task — relative rather than absolute, because 15 bp
+off matters at 35 bp reads and does not at 250 bp. Every failure in this step
+falls back to the sheet as written: a run is still worth doing with the recorded
+default.
+
+**The generated sheet is the record of what ran**, carrying the exact database
+names, paths and parameters, so `taxprofiler_upload.sh` copies it into the
+results beside the `nextflow_command.sh` and `taxprofiler_args.yaml` that
+`wrike_job.sh` puts there. The run directory is deleted once a run succeeds, so
+a sheet that is not copied is gone.
+
+The input samplesheet is deliberately left behind: it names the requester's own
+paths on the cluster, and unlike the database sheet it says nothing about how
+the numbers were produced.
 
 `taxpasta_taxonomy_dir` points at the kraken2 database directory rather than a
 separately downloaded taxdump: the PlusPF archive carries `nodes.dmp` and
@@ -177,7 +244,7 @@ taxprofiler 2.0.1 pins 4.1.1, whose newest supported database is
 fetch a database it cannot read. Moving past this needs a newer taxprofiler, not
 a newer database.
 
-### Building the host reference
+### Building the host references
 
 [`build_host_reference.sh`](../scripts/build_host_reference.sh) takes a name and
 one or more NCBI assembly accessions, downloads each, verifies it against NCBI's
@@ -185,23 +252,35 @@ one or more NCBI assembly accessions, downloads each, verifies it against NCBI's
 and writes the manifest. Accessions are resolved against NCBI's directory
 listing, since the FTP path carries the assembly name as well as the accession.
 
-| Component | Accession | Assembly | Size |
-| --- | --- | --- | --- |
-| human | `GCF_009914755.1` | T2T-CHM13v2.0 | 3.117 Gbp |
-| mouse | `GCF_000001635.27` | GRCm39 | 2.728 Gbp |
-| macaque | `GCF_049350105.2` | T2T-MMU8v2.0 | 3.115 Gbp |
-| PhiX | `GCF_000819615.1` | ViralProj14015 | 5.4 kbp |
+| Reference | Accessions |
+| --- | --- |
+| `phix` | `GCF_000819615.1` — Escherichia phage phiX174, 5.4 kbp |
+| `chm13v2phix` | `GCF_009914755.1` (T2T-CHM13v2.0, 3.117 Gbp) + PhiX |
+| `grcm39phix` | `GCF_000001635.27` (GRCm39, 2.728 Gbp) + PhiX |
 
-Mouse and macaque are NCBI's current reference assemblies for their taxa.
-Human is the deliberate exception: NCBI still designates GRCh38.p14 the
-reference for annotation continuity, but T2T-CHM13v2.0 is gapless and therefore
-captures the centromeric and satellite reads GRCh38 lets through to be
-misclassified as microbial. Host reads are discarded rather than analysed, so
-completeness is what matters.
+GRCm39 is NCBI's current reference assembly for mouse. Human is the deliberate
+exception: NCBI still designates GRCh38.p14 the human reference for annotation
+continuity, but T2T-CHM13v2.0 is gapless and therefore captures the centromeric
+and satellite reads GRCh38 lets through to be misclassified as microbial. Host
+reads are discarded rather than analysed, so completeness is what matters.
+
+PhiX alone takes seconds; either mammalian genome takes one to two hours and
+produces roughly 4 GB of index.
 
 ```bash
-sbatch --job-name=ref-hostmix --cpus-per-task=32 --mem=128G --time=48:00:00 --output=/data/prod/nextflow/log/ref_%j.out /data/prod/nextflow/scripts/build_host_reference.sh human_mouse_macaque_phix GCF_009914755.1 GCF_000001635.27 GCF_049350105.2 GCF_000819615.1
+sbatch --job-name=ref-phix --cpus-per-task=32 --mem=64G --time=12:00:00 --output=/data/prod/nextflow/log/ref_%j.out /data/prod/nextflow/scripts/build_host_reference.sh phix GCF_000819615.1
 ```
+
+```bash
+sbatch --job-name=ref-chm13v2phix --cpus-per-task=32 --mem=64G --time=12:00:00 --output=/data/prod/nextflow/log/ref_%j.out /data/prod/nextflow/scripts/build_host_reference.sh chm13v2phix GCF_009914755.1 GCF_000819615.1
+```
+
+```bash
+sbatch --job-name=ref-grcm39phix --cpus-per-task=32 --mem=64G --time=12:00:00 --output=/data/prod/nextflow/log/ref_%j.out /data/prod/nextflow/scripts/build_host_reference.sh grcm39phix GCF_000001635.27 GCF_000819615.1
+```
+
+Adding a host later is one more invocation plus a `TAXPROFILER_<host>` pair;
+neither touches an existing pipeline or reference.
 
 An existing reference is never overwritten; remove `<name>.fa` and `<name>/` to
 rebuild.
@@ -212,7 +291,7 @@ rebuild.
 ls -lh /data/prod/nextflow/db/hostremoval/*/ && jq -r '.name, (.sources[].url)' /data/prod/nextflow/db/*/*.manifest.json /data/prod/nextflow/db/hostremoval/*.manifest.json
 ```
 
-A bowtie2 index is six files — `.1` through `.4` plus `.rev.1` and `.rev.2`,
-with an `l` suffix on the large index. `build_host_reference.sh` fails rather
+A bowtie2 index is six files — `.1` through `.4` plus `.rev.1` and `.rev.2`.
+`build_host_reference.sh` fails rather
 than reporting success if `.rev.1.bt2*` is missing, since that is the file
 `BOWTIE2_ALIGN` globs for.

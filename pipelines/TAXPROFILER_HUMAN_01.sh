@@ -24,6 +24,7 @@ shortread_hostremoval_index: "$NEXTFLOW_DIR/db/hostremoval/chm13v2phix"
 perform_longread_qc: true
 perform_longread_hostremoval: true
 longread_hostremoval_index: "$NEXTFLOW_DIR/db/hostremoval/chm13v2phix.mmi"
+perform_runmerging: true
 run_kraken2: true
 run_bracken: true
 run_metaphlan: true

@@ -14,8 +14,9 @@
 # taxprofiler's own cross-row check enforces.
 #
 # Lines sharing a sample name become separate rows numbered run_1, run_2, ...
-# rather than being merged; taxprofiler concatenates a sample's runs itself after
-# per-run QC.
+# rather than being merged here. The pipelines set perform_runmerging, so
+# taxprofiler concatenates a sample's runs itself after per-run QC and host
+# removal; without that parameter each run would be profiled separately.
 #
 # taxprofiler reads gzipped FASTQ only, so every read ends up in ./raw-sequences/
 # as <sample>_<run>_{1,2}.fq.gz: already-gzipped inputs are symlinked, .bz2 and

@@ -7,3 +7,6 @@ opt/
 secrets/
 tmp/
 .claude/
+site/
+docs/images/
+__pycache__/

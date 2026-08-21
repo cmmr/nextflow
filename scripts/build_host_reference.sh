@@ -52,7 +52,9 @@ source /data/prod/nextflow/.env
 # The builds taxprofiler 2.0.1's BOWTIE2_BUILD and MINIMAP2_INDEX use, so an
 # index built here matches the aligner that reads it
 readonly BOWTIE2_CONTAINER="docker://community.wave.seqera.io/library/bowtie2_htslib_samtools_pigz:edeb13799090a2a6"
-readonly MINIMAP2_CONTAINER="docker://biocontainers/minimap2:2.29--h577a1d6_0"
+# quay.io, not the bare biocontainers/... the nf-core module names: that string
+# is a Docker Hub reference, and Docker Hub does not carry the conda build tags.
+readonly MINIMAP2_CONTAINER="docker://quay.io/biocontainers/minimap2:2.29--h577a1d6_0"
 
 # taxprofiler's MINIMAP2_INDEX sets this; an .mmi is only valid for the preset it
 # was built with
@@ -83,6 +85,15 @@ done
 
 for tool in curl jq md5sum apptainer; do
     command -v "$tool" > /dev/null || fail "Required tool '$tool' is not installed."
+done
+
+# Resolve both containers before doing any work. The minimap2 index is built
+# last, so without this an unreachable image is only discovered after the
+# bowtie2 build has already spent an hour or two.
+for container in "$BOWTIE2_CONTAINER" "$MINIMAP2_CONTAINER"; do
+    log "Checking $container..."
+    apptainer exec "$container" true > /dev/null 2>&1 \
+        || fail "Could not pull the container '$container'."
 done
 
 REFERENCE="$OUT_DIR/$NAME.fa"

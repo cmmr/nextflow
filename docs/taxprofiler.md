@@ -199,7 +199,10 @@ sets nothing taxprofiler reads.
 Kraken2, MetaPhlAn and the host-depletion aligner are sized against the node
 rather than left on nf-core's `process_high` label. 16 cpus each puts two of any
 of them on a 32-core node with no cores stranded. Kraken2's memory is the figure
-to watch: it reads `hash.k2d` into its own heap, and PlusPF's is roughly 90 GB.
+to watch: it reads `hash.k2d` into its own heap, and PlusPF's is 110 GB, so the
+reservation is 128 GB. **Re-check it against `ls -l` on `hash.k2d` whenever the
+database is updated** — a reservation below the hash size is an OOM kill, not a
+slow run.
 
 Nothing copies a database. Nextflow stages inputs as absolute symlinks
 (`stageInMode` defaults to `symlink`) and `scratch` copies only declared

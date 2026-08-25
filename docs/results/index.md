@@ -54,8 +54,15 @@ at the end, which covers a failure earlier on and marks the point where the
 address stops being a promise. All of them build it through `run_results_url`,
 so a task can never point somewhere its results are not.
 
-The prefix is deleted only by `wrike_delete_handler.sh`, when the task it belongs
-to is deleted or unfiled. A request that failed keeps its page saying so.
+The whole prefix is deleted only by `wrike_delete_handler.sh`, when the task it
+belongs to is deleted or unfiled. A request that failed keeps its page saying so.
+
+**The other way a dashboard ends is its expiration date.** `wrike_expiration.sh`
+empties the prefix of everything but the run's records once the window the
+requester asked for has passed, and republishes `index.html` from
+[`templates/expired.html`](../../templates/expired.html) — so the link still
+leads somewhere, and still says what the run was and how to repeat it. See
+[Expiring a dashboard](../operations/expiration.md).
 
 The numbers come from parsing nextflow's console output, which `wrike_job.sh`
 tees to `nextflow.out`. Nextflow has no live status API outside Seqera Platform:

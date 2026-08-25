@@ -29,7 +29,11 @@
 # business, and this script knows no pipeline from another. There is no free-text
 # parameter field, so a requester can only ask for what that list offers.
 #
-# The one answer it does read is "Pipeline", whose options are
+# Two answers are read here rather than left to a pipeline. "Availability" says
+# how long the results are kept, and becomes the "Expiration" date on the task
+# that wrike_expiration.sh acts on once it passes.
+#
+# The other is "Pipeline", whose options are
 # "<name> :: <what it is for>" and whose first word names a file in pipelines/ -
 # except "prev_run_id", which instead means the settings come from the run named
 # in "Previous Run ID". That run's published pipeline_manifest.json is fetched
@@ -42,8 +46,9 @@
 # Requires:  jq, sbatch/squeue (Slurm), aws, openssl (via derive_uid), curl (via
 #            call_wrike_api)
 # Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, RUN_ID_SALT,
-#            WRIKE_S3_RESULTS_URL_CFID, WRIKE_FORM_ANSWERS and its helpers, and
-#            the log/warn/fail/derive_uid/run_results_url helpers, all from .env
+#            WRIKE_S3_RESULTS_URL_CFID, WRIKE_EXPIRATION_CFID, WRIKE_FORM_ANSWERS
+#            and its helpers, and the log/warn/fail/derive_uid/run_results_url
+#            helpers, all from .env
 
 set -euo pipefail
 
@@ -243,7 +248,17 @@ for ANSWER_KEY in "${!WRIKE_ANSWERS[@]}"; do
     fi
 done
 
-# 5. A request naming a previous run reproduces it. That run's manifest decides
+# 5. Put the retention window on the task, as the date its dashboard is torn
+#    down on. wrike_expiration.sh reads this field once a day; a task without one
+#    - which is what "Unlimited" and a request that never answered the question
+#    leave - is kept indefinitely. Best effort, like the results URL: a field
+#    that will not write is not worth refusing a good request over.
+EXPIRES_ON=$(wrike_expiration_date "$(wrike_answer availability)")
+
+update_wrike_custom_field "$WRIKE_EXPIRATION_CFID" "$EXPIRES_ON" \
+    || warn "Could not set the expiration date on task $TASK_ID."
+
+# 6. A request naming a previous run reproduces it. That run's manifest decides
 #    which pipeline is used, so it is fetched before the name is resolved.
 RERUN_UID=""
 RERUN_INPUT=$(wrike_answer previous_run)
@@ -321,14 +336,14 @@ if [[ ! "$PIPELINE_UPPER" =~ ^[A-Z0-9_]+$ || ! -f "$PIPELINE_SCRIPT" ]]; then
     reject "$REPLY" "Invalid pipeline requested (${PIPELINE_SHOWN:-none})."
 fi
 
-# 6. Leave the checked answers in the run directory. Recorded rather than
+# 7. Leave the checked answers in the run directory. Recorded rather than
 #    interpreted: which answers mean anything is a pipeline's business, and
 #    nothing here knows one pipeline from another.
 for ANSWER_KEY in "${!WRIKE_ANSWERS[@]}"; do
     printf '%s\t%s\n' "$ANSWER_KEY" "${WRIKE_ANSWERS[$ANSWER_KEY]}"
 done | sort > "$RUN_DIR/$WRIKE_FORM_ANSWERS_FILE"
 
-# 7. Require exactly one samplesheet on the task. AttachmentAdded is a separate
+# 8. Require exactly one samplesheet on the task. AttachmentAdded is a separate
 #    webhook event from the TaskCreated that got us here, and Wrike promises no
 #    order, so give the file a few seconds to appear. Requests from `run` attach
 #    before filing the task, so for those this loop succeeds on the first attempt.
@@ -368,17 +383,17 @@ if [[ ! "$ATTACHMENT_NAME" =~ \.(txt|tsv|out)$ ]]; then
     reject "$REPLY" "Invalid extension on file $ATTACHMENT_NAME."
 fi
 
-# 8. Move the task's status on, before submission: the job starts by overwriting it.
+# 9. Move the task's status on, before submission: the job starts by overwriting it.
 if ! update_wrike_pipeline_progress "Queued"; then
     fail_with_apology "Could not set the task's status"
 fi
 
-# 9. Submit the job, then a follow-up job that reports the outcome either way.
-#    Both are named after the uid so wrike_delete_handler.sh can scancel them,
-#    and both run in RUN_DIR. sbatch options must precede the script name.
+# 10. Submit the job, then a follow-up job that reports the outcome either way.
+#     Both are named after the uid so wrike_delete_handler.sh can scancel them,
+#     and both run in RUN_DIR. sbatch options must precede the script name.
 #
-#    Queue depth is cosmetic, so a failing squeue must not take the submission
-#    with it.
+#     Queue depth is cosmetic, so a failing squeue must not take the submission
+#     with it.
 JOBS_AHEAD=$(squeue -h -t PENDING | wc -l) || JOBS_AHEAD="an unknown number of"
 
 if JOB_ID=$(sbatch --parsable --job-name="nf-$RUN_ID" --chdir="$RUN_DIR" \

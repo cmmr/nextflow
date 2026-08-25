@@ -41,6 +41,10 @@ caller, and then sources three things:
   - `WRIKE_PIPELINE_NAME_CFID`, `WRIKE_S3_RESULTS_URL_CFID` — custom fields the
     bot writes the pipeline name and results URL into, which is part of what the
     Wrike Dashboards view renders
+  - `WRIKE_EXPIRATION_CFID` — the date a finished run's dashboard is torn down
+    on, written from the request form's "Availability" answer and read back daily
+    by `wrike_expiration.sh`; see
+    [Expiring a dashboard](operations/expiration.md)
   - `WRIKE_CUSTOM_STATUS_IDS` — the status map described in
     [Progress is the task's Status](wrike/status.md)
   - `WRIKE_NXFPIPE_SPACE_ID`, `WRIKE_NXFPIPE_WORKFLOW_ID`,

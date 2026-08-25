@@ -59,6 +59,7 @@ nav:
   - Operations:
       - operations/index.md
       - The daemon: operations/daemon.md
+      - Expiring a dashboard: operations/expiration.md
       - Running a pipeline by hand: operations/running-by-hand.md
       - Cluster requirements: operations/cluster-requirements.md
 

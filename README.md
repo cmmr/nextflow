@@ -28,7 +28,7 @@ to `main`.
 | [Pipelines](https://cmmr.github.io/nextflow/pipelines/) | The pipeline file format, versioning, and adding one |
 | [Results](https://cmmr.github.io/nextflow/results/) | The published landing page, progress view, and folder listings |
 | [Wrike](https://cmmr.github.io/nextflow/wrike/account/) | The bot account, task status, webhook bridge, API responses |
-| [Operations](https://cmmr.github.io/nextflow/operations/) | The daemon, the logs, running a pipeline by hand |
+| [Operations](https://cmmr.github.io/nextflow/operations/) | The daemon, the expiration timer, the logs, running a pipeline by hand |
 
 ## Running a pipeline
 

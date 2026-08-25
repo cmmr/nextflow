@@ -62,9 +62,11 @@ request resolves them, so recreating a field in Wrike needs no change here, and
 there are no IDs to paste. A question Wrike does not have is simply unanswered,
 and the pipeline uses its own default.
 
-Two fields are still addressed by ID, because nothing reads them back:
-`WRIKE_S3_RESULTS_URL_CFID`, the landing page link, and the workflow's custom
-statuses.
+Three fields are still addressed by ID: `WRIKE_S3_RESULTS_URL_CFID`, the landing
+page link; `WRIKE_EXPIRATION_CFID`, the date below; and the workflow's custom
+statuses. The first is only ever written. The other two are read back, but by a
+daily pass over every task at once rather than per request, so resolving a title
+each time would buy nothing.
 
 ### The pipeline question
 
@@ -87,7 +89,15 @@ the form and `WRIKE_FORM_ANSWERS` — see
 
 ### Availability
 
-Recorded on the run and in its `pipeline_manifest.json`, and **nothing enforces
-it yet**. The form promises that results are deleted from S3 and the dashboard
-replaced with an expired placeholder once the window passes; that reaper does not
-exist.
+The one answer besides "Pipeline" that the handler reads rather than leaving to a
+pipeline. `wrike_task_handler.sh` turns it into a date — today plus the number of
+months it names — and writes that to the task's **"Expiration"** custom field
+(`WRIKE_EXPIRATION_CFID`); "Unlimited" leaves the field blank, which means kept
+indefinitely. It is also recorded in the run's `pipeline_manifest.json`.
+
+`wrike_expiration.sh` reads that field off every task in "Dashboards" once a day:
+two weeks out it comments, mentioning the assignees; on the date it deletes the
+published results, leaves an expired page in their place, and sets the task's
+Status to `Expired`. **The date on the task is what it acts on**, so changing
+"Expiration" is how a dashboard is kept longer. See
+[Expiring a dashboard](../operations/expiration.md).

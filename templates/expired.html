@@ -1,0 +1,165 @@
+<!doctype html>
+<!--
+  expired.html - The page left where an expired dashboard was.
+
+  Rendered by scripts/wrike_expiration.sh once a run's retention window has
+  passed. It replaces the landing page at
+  s3://$AWS_S3_BUCKET/nxf/<run_id>/index.html, and everything the landing page
+  pointed at is gone by the time this is uploaded - the reads archive, the
+  report, the abundance tables. What survives beside it is the run's own record:
+  pipeline_manifest.json and the rest, enough to run the same configuration
+  again.
+
+  So this page says what the run was rather than showing what it produced, and
+  the buttons lead to those records rather than to results.
+
+  Placeholders are TASK_NAME, RUN_ID, COMPLETED, SAMPLE_COUNT, EXPIRED and
+  DOWNLOADS, each wrapped in doubled underscores. They are deliberately not
+  spelled that way in this comment - the renderer substitutes the whole file,
+  comment included, and would fill these in too. The task name is user-authored
+  text and is HTML-escaped on the way in; COMPLETED, SAMPLE_COUNT and DOWNLOADS
+  are markup the renderer builds itself, and are empty for a run that has no
+  completion date, no recorded sample count, or nothing left to download.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TASK_NAME__</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --header-bg: #f4f6f8;
+    --border: #d7dde3;
+    --text: #1b2733;
+    --muted: #5c6b7a;
+    --accent: #1f6feb;
+    --accent-text: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12171d;
+      --header-bg: #1a2129;
+      --border: #2c3742;
+      --text: #e6edf3;
+      --muted: #9aa7b4;
+      --accent: #3b82f6;
+      --accent-text: #ffffff;
+    }
+  }
+
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Helvetica, Arial, sans-serif;
+  }
+
+  header {
+    flex: 0 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px 24px;
+    padding: 14px 22px;
+    background: var(--header-bg);
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+  header .meta {
+    margin: 3px 0 0;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  header .meta code {
+    font: inherit;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  /* One button per record that survived the tear-down, so the count varies */
+  .downloads {
+    flex: 0 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  a.download {
+    padding: 8px 14px;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    color: var(--accent);
+    background: transparent;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  a.download:hover { filter: brightness(1.08); }
+
+  main {
+    flex: 1 1 auto;
+    overflow: auto;
+    padding: 22px;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+
+  h2 {
+    margin: 0 0 10px;
+    font-size: 20px;
+    font-weight: 600;
+  }
+  p { margin: 0 0 14px; }
+  .muted { color: var(--muted); }
+  .runid {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>__TASK_NAME__</h1>
+    <!-- The completion date and the sample count each bring their own
+         separator, so either can render as nothing -->
+    <p class="meta">__COMPLETED__uid <code>__RUN_ID__</code> __SAMPLE_COUNT__</p>
+  </div>
+  <div class="downloads">__DOWNLOADS__</div>
+</header>
+
+<main>
+  <div class="wrap">
+    <h2>This dashboard expired on __EXPIRED__.</h2>
+
+    <p>The results it presented &mdash; the report, the abundance tables, and the
+    sequencing data &mdash; have been deleted to free up storage. The record of
+    how this run was set up is kept, so the same analysis can be run again on the
+    same data or on new data.</p>
+
+    <p>To do that, submit a new request, choose
+    <code>prev_run_id</code> as the pipeline, and give
+    <span class="runid">__RUN_ID__</span> as the previous run ID. It will run
+    with exactly the settings this run used.</p>
+
+    <p class="muted">A dashboard expires on the date its Wrike task carries in
+    "Expiration", which is set from the "Availability" answer on the request
+    form. Changing that date before it passes keeps the dashboard up; once the
+    results are deleted, only a new run brings them back.</p>
+  </div>
+</main>
+
+</body>
+</html>

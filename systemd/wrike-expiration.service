@@ -1,0 +1,19 @@
+[Unit]
+Description=Retire Wrike dashboards past their expiration date
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/data/prod/nextflow/scripts/wrike_expiration.sh
+WorkingDirectory=/data/prod/nextflow
+
+# A user unit does not read the login shell. Nothing here talks to Slurm, so
+# unlike the listener this needs no module load slurm standing in; aws, jq and
+# curl are in /usr/bin.
+Environment=PATH=/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin
+
+SyslogIdentifier=wrike-expiration
+
+# Started by wrike-expiration.timer, which is the unit to enable. Left out of
+# any target of its own so nothing else starts it at boot.

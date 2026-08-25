@@ -43,5 +43,8 @@ the daemon log:
 WARNING: No Wrike custom status is mapped to "Pre-Processing"; progress not reported.
 ```
 
-The workflow also defines `Expired` and `Cancelled`. Both are mapped and
-available, but nothing sets them yet.
+The workflow also defines `Expired` and `Cancelled`. `Expired` is what
+`wrike_expiration.sh` leaves a task at once it has deleted the run's published
+results — see [Expiring a dashboard](../operations/expiration.md) — and it is set
+from the login node rather than from a run directory, since by then the run is
+long over. `Cancelled` is mapped and available, but nothing sets it.

@@ -1,5 +1,9 @@
 # Operating it
 
+Two things run on a schedule of their own: the daemon, continuously, and
+[the expiration pass](expiration.md), once a day under a systemd timer. Both are
+user units on one login node.
+
 The daemon is the only long-lived process. It never returns, and handles
 `INT`/`TERM` cleanly, so it runs under systemd as a **user** unit —
 [`systemd/wrike-sqs-listener.service`](../../systemd/wrike-sqs-listener.service).
@@ -24,6 +28,17 @@ executes it fresh per message:
 
 ```bash
 systemctl --user restart wrike-sqs-listener
+```
+
+The daily pass that retires dashboards past their expiration date logs the same
+way, under its own unit:
+
+```bash
+systemctl --user list-timers wrike-expiration.timer
+```
+
+```bash
+journalctl --user -u wrike-expiration --since "7 days ago"
 ```
 
 Slurm output goes to `$NEXTFLOW_DIR/log/job_<uid>_<jobid>.out` and

@@ -16,6 +16,7 @@ scripts/
   wrike_delete_handler.sh  Tears a run down. Login node.
   wrike_job.sh             Runs one pipeline end to end. Slurm batch job.
   wrike_followup.sh        Reports the outcome to Wrike. Slurm batch job.
+  wrike_expiration.sh      Retires dashboards past their date. Daily, login node.
   nextflow_progress.sh     Publishes the live progress page. Backgrounded by wrike_job.sh.
   index_directories.sh     Writes a listing page into every results folder. Pipeline-agnostic.
   ampliseq_samplesheet.sh  PRE_PROCESS_CMDS for the ampliseq pipeline.
@@ -38,14 +39,18 @@ config/               Nextflow config, passed to `nextflow run -c`.
 
 templates/            Web pages published to S3 alongside a run's results.
   progress.html       Live progress page template. Pipeline-agnostic.
+  expired.html        The page left where an expired dashboard was. Likewise.
   listing.html        Folder listing page template. Likewise.
   ampliseq/
     index.html        Landing page template for a published ampliseq run.
   taxprofiler/
     index.html        Landing page template for a published taxprofiler run.
 
-systemd/              The daemon's supervisor.
+systemd/              The units systemd runs: the daemon, and the daily
+                      expiration timer.
   wrike-sqs-listener.service  systemd user unit for wrike_sqs_listener.sh.
+  wrike-expiration.service    systemd user unit for wrike_expiration.sh, started
+  wrike-expiration.timer      by this timer, once a day.
 
 images/               Assets that are not part of any published page.
   bot_100px.png       Cluster Bot's Wrike avatar. The small one is in this README.
@@ -72,6 +77,7 @@ docs/                 Source of the documentation site; one page per file.
   operations/
     index.md          Controlling the daemon, and where the logs and run state are.
     daemon.md         Installing, supervising, and troubleshooting the daemon.
+    expiration.md     The daily pass that retires dashboards past their date.
     running-by-hand.md  The `run` CLI, and why it files a task rather than running one.
     cluster-requirements.md  What has to be installed on the cluster.
 

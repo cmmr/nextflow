@@ -124,7 +124,10 @@ be found.
 
 Every run writes `pipeline_manifest.json` before nextflow starts and publishes it
 with its results, at `nxf/<uid>/pipeline_manifest.json`. It records the pipeline
-version, the nextflow command line, and every parameter as resolved.
+version, the nextflow command line, and every parameter as resolved — plus the
+sample count, which rides along because this file outlives the results it was
+published with: it is one of the few things
+[an expired dashboard](../operations/expiration.md) keeps.
 
 A request that picks `prev_run_id` on the form and names a run in the "Previous
 Run ID" field — or `run --rerun <run_id> samples.txt` — is handled by fetching

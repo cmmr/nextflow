@@ -1,0 +1,16 @@
+[Unit]
+Description=Daily check of Wrike dashboard expiration dates
+
+[Timer]
+# Early enough that a tear-down is done before the working day, and after any
+# nightly backup window.
+OnCalendar=*-*-* 06:30:00
+
+# A login node that was down at 06:30 runs the check when it comes back, rather
+# than skipping the day - which for a two-week warning is a day of notice lost.
+Persistent=true
+
+Unit=wrike-expiration.service
+
+[Install]
+WantedBy=timers.target

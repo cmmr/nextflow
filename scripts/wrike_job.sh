@@ -196,6 +196,10 @@ fi
 # Everything needed to run this again: the pipeline version, its command line,
 # and every parameter as resolved. wrike_task_handler.sh reads this back off S3
 # when a later request asks to reproduce this run.
+#
+# The sample count rides along because this file outlives the results:
+# wrike_expiration.sh reads it for the page it leaves where an expired dashboard
+# was, long after sample_count.txt went with the run directory.
 jq -n \
     --argjson schema 1 \
     --arg run_id "${PWD##*/}" \
@@ -207,6 +211,7 @@ jq -n \
     --arg rerun_of "$PIPELINE_RERUN_UID" \
     --arg region "$([[ -r region.txt ]] && head -1 region.txt || true)" \
     --arg availability "$(form_answer availability)" \
+    --arg sample_count "$([[ -r sample_count.txt ]] && head -1 sample_count.txt || true)" \
     --argjson nextflow_args "$(printf '%s\n' "${NEXTFLOW_ARGS[@]}" \
         | jq -R -s 'split("\n") | map(select(length > 0))')" \
     --argjson params "$(params_json)" \
@@ -215,7 +220,9 @@ jq -n \
       params_file: $params_file, nextflow_args: $nextflow_args, params: $params}
      | if $region       != "" then . + {region: $region}             else . end
      | if $availability != "" then . + {availability: $availability} else . end
-     | if $rerun_of != "" then . + {rerun_of: $rerun_of} else . end' \
+     | if $rerun_of != "" then . + {rerun_of: $rerun_of} else . end
+     | if ($sample_count | test("^[0-9]+$"))
+       then . + {sample_count: ($sample_count | tonumber)} else . end' \
     > "$RUN_MANIFEST"
 
 # Write the resolved command to a script and execute that, rather than running

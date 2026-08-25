@@ -1,0 +1,99 @@
+site_name: CMMR Nextflow
+site_description: Amplicon (16S) and WGS pipelines for CMMR, driven from Wrike.
+site_url: https://cmmr.github.io/nextflow/
+repo_url: https://github.com/cmmr/nextflow
+repo_name: cmmr/nextflow
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  logo: images/bot_100px.png
+  favicon: images/bot_100px.png
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.top
+    - navigation.sections
+    - navigation.indexes
+    - toc.follow
+    - content.code.copy
+    - content.action.edit
+    - search.suggest
+    - search.highlight
+
+nav:
+  - Overview: index.md
+  - Conventions: conventions.md
+  - Repository layout: layout.md
+  - Configuration: configuration.md
+  - Pipelines:
+      - pipelines/index.md
+      - ampliseq: pipelines/ampliseq.md
+      - taxprofiler: pipelines/taxprofiler.md
+  - Results:
+      - results/index.md
+      - Browsable folders: results/browsable-folders.md
+      - CloudFront: results/cloudfront.md
+  - Wrike:
+      - The Wrike side: wrike/account.md
+      - Task status: wrike/status.md
+      - Webhook bridge: wrike/webhook_bridge.md
+      - API responses: wrike/responses.md
+  - Operations:
+      - operations/index.md
+      - The daemon: operations/daemon.md
+      - Expiring a dashboard: operations/expiration.md
+      - Running a pipeline by hand: operations/running-by-hand.md
+      - Cluster requirements: operations/cluster-requirements.md
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+plugins:
+  - search
+
+hooks:
+  - docs_hooks.py
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/cmmr/nextflow

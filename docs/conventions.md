@@ -47,4 +47,7 @@ These carry most of the system's state, and nothing works if you break them:
   *version* (`AMPLISEQ_01`, never the `AMPLISEQ` shortcut), the nextflow
   arguments, and every parameter as finally resolved. A request naming a previous
   run ID is answered by fetching this file, so a run that never finished — and
-  therefore never published — cannot be reproduced.
+  therefore never published — cannot be reproduced. It also outlives the results:
+  [expiring a dashboard](operations/expiration.md) deletes everything under the
+  prefix except this file and the rest of the run's record, which is what lets an
+  expired run still be repeated.

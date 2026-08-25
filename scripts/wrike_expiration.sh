@@ -1,0 +1,466 @@
+#!/bin/bash
+#
+# wrike_expiration.sh - Retire dashboards whose retention window has run out.
+#
+# Author: Daniel Smith
+# Date:   August 25th, 2026
+#
+# Runs once a day on the login node, under systemd/wrike-expiration.timer. Reads
+# the "Expiration" date off every task in "Dashboards" - which
+# wrike_task_handler.sh wrote there from the request form's "Availability"
+# answer - and acts on the two dates that matter:
+#
+#   two weeks out      comment on the task, mentioning its assignees, so someone
+#                      can push the date out before anything is deleted
+#   reached or passed  delete the published results, leave an expired page where
+#                      the dashboard was, and set the task's status to "Expired"
+#
+# Only a task whose status is "Completed" is looked at: those are the runs with a
+# dashboard to lose. A task with no Expiration date is kept indefinitely, which
+# is what "Unlimited" leaves.
+#
+# What survives the tear-down is the run's own record - pipeline_manifest.json
+# above all, which is what a request naming this run as its "Previous Run ID" is
+# rebuilt from - so an expired run can still be repeated even though its results
+# are gone. KEEP_PATTERNS is that list, matched against the top level of the
+# run's prefix only, so nothing in a subfolder survives.
+#
+# Nothing here is fatal to the pass. A task that cannot be read, torn down, or
+# commented on is logged and left for tomorrow, and the remaining tasks are still
+# handled - which is also what makes the tear-down safe to interrupt: a run whose
+# results were only half deleted is not marked "Expired", so the next pass
+# finishes the job.
+#
+# Usage:     wrike_expiration.sh             # act
+#            wrike_expiration.sh --dry-run   # report what it would do, change nothing
+# Requires:  aws, jq, GNU date, curl (via call_wrike_api), openssl (via derive_uid)
+# Reads:     templates/expired.html
+# Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, RUN_ID_SALT,
+#            WRIKE_DASHBOARDS_FOLDER_ID, WRIKE_EXPIRATION_CFID,
+#            WRIKE_CUSTOM_STATUS_IDS, WRIKE_BOT_USER_ID, the Wrike helpers and
+#            the log/warn/fail/derive_uid/escape_html helpers, all from .env
+
+set -euo pipefail
+
+source /data/prod/nextflow/.env
+
+# The page left where the dashboard was
+readonly EXPIRED_TEMPLATE="$NEXTFLOW_DIR/templates/expired.html"
+
+# How far ahead of the date the warning comment goes out
+readonly WARNING_DAYS=14
+
+# A dashboard is never torn down less than this long after its run finished,
+# whatever the Expiration date says. A run that took longer than the window it
+# was given would otherwise be expired the day it was published, with the warning
+# arriving alongside the deletion rather than ahead of it.
+readonly MINIMUM_NOTICE_DAYS=$WARNING_DAYS
+
+# aws s3api delete-objects takes at most this many keys per call
+readonly DELETE_BATCH=1000
+
+# Tasks per page. A folder hands its tasks back a page at a time once this is
+# asked for; without it Wrike decides, and says nothing about what it left out.
+readonly PAGE_SIZE=1000
+
+# What a torn-down run keeps, as globs matched against the key below the run's
+# prefix: enough to set the same run up again, and nothing carrying the results
+# themselves. pipeline_manifest.json is the one that matters - a "Previous Run
+# ID" request is rebuilt from it - and the rest are the record of what ran.
+readonly KEEP_PATTERNS=(
+    "pipeline_manifest.json"
+    "rerun_manifest.json"
+    "nextflow_command.sh"
+    "form_answers.tsv"
+    "region.txt"
+    "region_detection.txt"
+    "*.yaml"
+)
+
+DRY_RUN=false
+
+case "${1:-}" in
+    "")         ;;
+    --dry-run)  DRY_RUN=true ;;
+    *)          fail "Usage: $0 [--dry-run]" ;;
+esac
+
+# Every task in "Dashboards", one compact JSON object per line, carrying the
+# three optional fields this needs: the custom fields the Expiration date is
+# among, the assignees a warning mentions, and the completion date the expired
+# page is headed with.
+list_dashboard_tasks() {
+    local token="" response
+    local -a args
+
+    while true; do
+        args=(-G
+            --data-urlencode 'fields=["customFields","responsibleIds","completedDate"]'
+            --data-urlencode "pageSize=$PAGE_SIZE")
+
+        if [[ -n "$token" ]]; then
+            args+=(--data-urlencode "nextPageToken=$token")
+        fi
+
+        response=$(call_wrike_api GET "folders/$WRIKE_DASHBOARDS_FOLDER_ID/tasks" "${args[@]}") \
+            || return 1
+
+        echo "$response" | jq -c '.data[]?'
+
+        token=$(echo "$response" | jq -r '.nextPageToken // empty')
+        [[ -n "$token" ]] || break
+    done
+}
+
+# Whole days from midnight today to the date given, negative once it is past.
+# Both sides are midnight, so this is an exact number of days rather than a
+# rounded interval.
+days_until() {
+    local target today
+
+    target=$(date -d "$1" +%s) || return 1
+    today=$(date -d "$(date +%F)" +%s) || return 1
+
+    echo $(( (target - today) / 86400 ))
+}
+
+# A date as the pages and comments here spell it, e.g. "September 8, 2026"
+show_date() {
+    date -d "$1" '+%B %-d, %Y'
+}
+
+# True when the key, given relative to the run's prefix, is one of the records
+# kept. Only the top level is offered a match: a path with a separator in it is
+# inside a results folder, and all of those go.
+key_is_kept() {
+    local relative="$1" pattern
+
+    [[ "$relative" != */* ]] || return 1
+
+    for pattern in "${KEEP_PATTERNS[@]}"; do
+        # shellcheck disable=SC2053  # the right side is a glob on purpose
+        if [[ "$relative" == $pattern ]]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+# One delete-objects call. It answers 200 with any per-key failures listed in the
+# body rather than in its status, so the body is what decides whether this
+# worked.
+delete_batch() {
+    local payload output errors
+
+    payload=$(printf '%s\n' "$@" \
+        | jq -R -s 'split("\n") | map(select(length > 0) | {Key: .}) | {Objects: ., Quiet: true}')
+
+    if ! output=$(aws s3api delete-objects --bucket "$AWS_S3_BUCKET" --delete "$payload" 2>&1); then
+        warn "S3 refused a delete request: $output"
+        return 1
+    fi
+
+    errors=$(echo "$output" | jq -r '[.Errors[]?] | length' 2>/dev/null) || errors=""
+
+    if [[ -n "$errors" && "$errors" != "0" ]]; then
+        warn "S3 kept $errors object(s) it would not delete: $(echo "$output" | jq -c '.Errors')"
+        return 1
+    fi
+}
+
+# Delete keys in the batches aws takes them in. A batch that fails abandons the
+# rest: a partly torn-down run is left unmarked, and the next pass starts again
+# on whatever is still there.
+delete_keys() {
+    local -a batch=()
+    local key
+
+    for key in "$@"; do
+        batch+=("$key")
+
+        if (( ${#batch[@]} == DELETE_BATCH )); then
+            delete_batch "${batch[@]}" || return 1
+            batch=()
+        fi
+    done
+
+    if (( ${#batch[@]} > 0 )); then
+        delete_batch "${batch[@]}" || return 1
+    fi
+
+    return 0
+}
+
+# The number of samples the run analysed, for the page that replaces its
+# dashboard. pipeline_manifest.json has carried it since August 2026; for a run
+# published before that, it is read back out of the landing page about to be
+# deleted, which is the only other place the figure was written down. Prints
+# nothing when neither has it.
+recorded_sample_count() {
+    local prefix="$1" manifest count=""
+
+    if manifest=$(aws s3 cp "s3://$AWS_S3_BUCKET/$prefix/pipeline_manifest.json" - 2>/dev/null); then
+        count=$(echo "$manifest" | jq -r '.sample_count // empty') || count=""
+    fi
+
+    if [[ ! "$count" =~ ^[0-9]+$ ]]; then
+        count=$(aws s3 cp "s3://$AWS_S3_BUCKET/$prefix/index.html" - 2>/dev/null \
+            | grep -o -m1 '[0-9]\+ samples\?' \
+            | grep -o '^[0-9]\+') || count=""
+    fi
+
+    if [[ "$count" =~ ^[0-9]+$ ]]; then
+        printf '%s' "$count"
+    fi
+
+    return 0
+}
+
+# Render templates/expired.html for one run. Whatever records survived are named
+# after the date, one download button each.
+render_expired_page() {
+    local title="$1" run_id="$2" completed="$3" samples="$4" expired="$5"
+    shift 5
+
+    local page completed_html="" samples_html="" downloads="" file
+
+    page=$(<"$EXPIRED_TEMPLATE")
+
+    : "${title:=Sequencing results}"
+
+    # Wrike stamps a completion in UTC, so it is read back in UTC rather than
+    # shifted into this host's timezone and possibly into the day before.
+    if [[ -n "$completed" ]]; then
+        completed_html="Completed $(date -u -d "$completed" '+%B %-d, %Y') &middot; "
+    fi
+
+    # The sample count carries its own separator, so a run whose count was never
+    # recorded leaves that part of the line out.
+    if [[ "$samples" =~ ^[0-9]+$ ]] && (( samples > 0 )); then
+        samples_html="&middot; $samples samples"
+        (( samples == 1 )) && samples_html="&middot; 1 sample"
+    fi
+
+    for file in "$@"; do
+        downloads+="<a class=\"download\" href=\"$(escape_html "$file")\" download>"
+        downloads+="$(escape_html "$file")</a>"
+    done
+
+    # Replacements are variable expansions rather than literal text, so bash
+    # inserts them as-is - no second pass over backslashes, which a task name is
+    # free to contain.
+    page=${page//__TASK_NAME__/$(escape_html "$title")}
+    page=${page//__RUN_ID__/$run_id}
+    page=${page//__COMPLETED__/$completed_html}
+    page=${page//__SAMPLE_COUNT__/$samples_html}
+    page=${page//__EXPIRED__/$(escape_html "$(show_date "$expired")")}
+    page=${page//__DOWNLOADS__/$downloads}
+
+    printf '%s\n' "$page"
+}
+
+# Tell the assignees the date is coming, once per date rather than once a day.
+# The comment already on the task is the whole record kept of having warned: a
+# date moved out is a date this has not warned about, so it warns again, and one
+# moved back to a date already warned about does not warn twice.
+warn_of_expiration() {
+    local task_json="$1" expires="$2" days="$3"
+    local shown marker comments mentions when reply
+
+    shown=$(show_date "$expires")
+    marker="expire on $shown"
+
+    if ! comments=$(call_wrike_api GET "tasks/$TASK_ID/comments" -G -d "plainText=true"); then
+        warn "Could not read the comments on task $TASK_ID; its expiration notice waits for tomorrow."
+        return 0
+    fi
+
+    if echo "$comments" | jq -e --arg author "$WRIKE_BOT_USER_ID" --arg marker "$marker" \
+            'any(.data[]?; .authorId == $author and (.text | contains($marker)))' > /dev/null; then
+        return 0
+    fi
+
+    if [[ "$DRY_RUN" == true ]]; then
+        log "[dry run] Would tell task $TASK_ID that its dashboard expires on $shown, in $days days."
+        return 0
+    fi
+
+    # Empty for a task nobody is assigned to, in which case the message simply
+    # starts with its own first word.
+    mentions=$(wrike_task_mentions "$task_json") || mentions=""
+
+    when="in $days days"
+    (( days == 1 )) && when="tomorrow"
+
+    reply="${mentions:+$mentions }Heads up: the results dashboard for this task is scheduled to"
+    reply+=" $marker, $when."
+    reply+=" On that date its report and sequencing data are deleted to free up storage,"
+    reply+=" and the dashboard link is replaced by a page saying so."
+    reply+=" To keep it up for longer, change this task's \"Expiration\" date to a later one"
+    reply+=" - any date still ahead of the day I look is left alone."
+    reply+=" Either way the settings this run used are kept, so it can always be run again."
+
+    add_wrike_task_html_comment "$reply" \
+        || warn "Could not post the expiration notice on task $TASK_ID."
+
+    log "Warned task $TASK_ID that its dashboard expires on $shown ($days days)."
+}
+
+# Tear one dashboard down: delete everything published for the run except its
+# records, leave the expired page where the landing page was, and mark the task.
+#
+# Everything is read before anything is deleted, and a step that fails returns
+# without marking the task, so the next pass picks the run up where this one left
+# it.
+expire_task() {
+    local task_json="$1" expired="$2"
+    local run_id prefix listing title completed samples shown reply relative key
+    local -a keys=() kept=() doomed=()
+
+    # An empty uid would make the prefix below the whole bucket, and everything
+    # under it is about to be deleted.
+    if ! run_id=$(derive_uid "$TASK_ID"); then
+        warn "Could not derive the uid for task $TASK_ID; its dashboard is left alone."
+        return 0
+    fi
+
+    prefix="$S3_RUN_PREFIX/$run_id"
+    shown=$(show_date "$expired")
+
+    if ! listing=$(aws s3api list-objects-v2 --bucket "$AWS_S3_BUCKET" \
+            --prefix "$prefix/" --output json 2>&1); then
+        warn "Could not list s3://$AWS_S3_BUCKET/$prefix/; task $TASK_ID waits for tomorrow: $listing"
+        return 0
+    fi
+
+    mapfile -t keys < <(echo "$listing" | jq -r '.Contents[]?.Key')
+
+    for key in ${keys[@]+"${keys[@]}"}; do
+        relative=${key#"$prefix/"}
+
+        if key_is_kept "$relative"; then
+            kept+=("$relative")
+        else
+            doomed+=("$key")
+        fi
+    done
+
+    # Read before the deletion, since the landing page is one of the things it
+    # takes and is where an older run's sample count is written down.
+    title=$(echo "$task_json" | jq -r '.title // empty')
+    completed=$(echo "$task_json" | jq -r '.completedDate // empty')
+    samples=$(recorded_sample_count "$prefix")
+
+    if [[ "$DRY_RUN" == true ]]; then
+        log "[dry run] Task $TASK_ID (uid $run_id) expired on $shown:" \
+            "would delete ${#doomed[@]} object(s) under s3://$AWS_S3_BUCKET/$prefix/," \
+            "keeping ${kept[*]:-nothing}."
+        return 0
+    fi
+
+    if (( ${#doomed[@]} > 0 )) && ! delete_keys "${doomed[@]}"; then
+        warn "Could not empty s3://$AWS_S3_BUCKET/$prefix/; task $TASK_ID is left as it is."
+        return 0
+    fi
+
+    # The expired page takes the key the landing page had, which the deletion
+    # above just emptied - so the link on the task, and any link a reader kept,
+    # still lead to an explanation rather than to a NoSuchKey.
+    #
+    # --content-type because reading the body from stdin leaves aws nothing to
+    # guess from, and a page served as binary downloads instead of rendering.
+    if ! render_expired_page "$title" "$run_id" "$completed" "$samples" "$expired" \
+            ${kept[@]+"${kept[@]}"} \
+            | aws s3 cp - "s3://$AWS_S3_BUCKET/$prefix/index.html" \
+                --content-type "text/html" > /dev/null; then
+        warn "The results for task $TASK_ID were deleted, but the page explaining that was not published."
+    fi
+
+    reply="This dashboard reached its expiration date of $shown, so its report and sequencing"
+    reply+=" data have been deleted to free up storage. The results link now leads to a page"
+    reply+=" saying so."
+    reply+=$'\n\n'"The record of how this run was set up is kept. To run the same analysis"
+    reply+=" again - on this data or on new data - submit a request choosing \"prev_run_id\""
+    reply+=" as the pipeline and \"$run_id\" as the previous run ID."
+
+    add_wrike_task_comment "$reply" \
+        || warn "Could not comment the tear-down on task $TASK_ID."
+
+    update_wrike_task_status "Expired" \
+        || warn "Could not set task $TASK_ID to \"Expired\"."
+
+    log "Expired task $TASK_ID (uid $run_id): deleted ${#doomed[@]} object(s), kept ${#kept[@]}."
+}
+
+if [[ ! -r "$EXPIRED_TEMPLATE" ]]; then
+    fail "No template at $EXPIRED_TEMPLATE; there would be nothing to leave in place of a deleted dashboard."
+fi
+
+if ! TASKS=$(list_dashboard_tasks); then
+    fail "Could not list the tasks in \"Dashboards\"; nothing checked."
+fi
+
+CHECKED=0
+WARNED=0
+EXPIRED=0
+
+# TASK_ID is what every Wrike helper below acts on, so it is set per task rather
+# than passed in.
+while IFS= read -r TASK; do
+    [[ -n "$TASK" ]] || continue
+
+    TASK_ID=$(echo "$TASK" | jq -r '.id // empty')
+
+    if ! is_valid_wrike_id "$TASK_ID"; then
+        warn "A task in \"Dashboards\" has no usable ID; skipping it."
+        continue
+    fi
+
+    # Only a finished run has a dashboard to lose. A task still working, failed,
+    # cancelled, or already expired is left alone whatever its date says.
+    if [[ "$(echo "$TASK" | jq -r '.customStatusId // empty')" \
+          != "${WRIKE_CUSTOM_STATUS_IDS[Completed]}" ]]; then
+        continue
+    fi
+
+    EXPIRES=$(echo "$TASK" | jq -r --arg id "$WRIKE_EXPIRATION_CFID" \
+        '.customFields[]? | select(.id == $id) | .value // empty')
+
+    # An unset field is "Unlimited": kept until someone deletes the task. The
+    # shape is checked because the value is read from Wrike and handed to date.
+    if [[ ! "$EXPIRES" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+        continue
+    fi
+
+    CHECKED=$(( CHECKED + 1 ))
+
+    if ! DAYS_LEFT=$(days_until "$EXPIRES"); then
+        warn "Task $TASK_ID carries an expiration date I cannot read (\"$EXPIRES\"); skipping it."
+        continue
+    fi
+
+    # The date the run is actually held to, which is its own unless it finished
+    # too recently for the warning to have been any use.
+    EXPIRES_ON="$EXPIRES"
+    COMPLETED_ON=$(echo "$TASK" | jq -r '.completedDate // empty')
+
+    if [[ -n "$COMPLETED_ON" ]] && COMPLETED_DAY=$(date -u -d "$COMPLETED_ON" +%F); then
+        NOTICE_LEFT=$(( MINIMUM_NOTICE_DAYS + $(days_until "$COMPLETED_DAY") ))
+
+        if (( NOTICE_LEFT > DAYS_LEFT )); then
+            DAYS_LEFT=$NOTICE_LEFT
+            EXPIRES_ON=$(date -d "$COMPLETED_DAY +$MINIMUM_NOTICE_DAYS days" +%F)
+        fi
+    fi
+
+    if (( DAYS_LEFT <= 0 )); then
+        expire_task "$TASK" "$EXPIRES_ON"
+        EXPIRED=$(( EXPIRED + 1 ))
+    elif (( DAYS_LEFT <= WARNING_DAYS )); then
+        warn_of_expiration "$TASK" "$EXPIRES_ON" "$DAYS_LEFT"
+        WARNED=$(( WARNED + 1 ))
+    fi
+done <<< "$TASKS"
+
+log "Checked $CHECKED completed dashboard(s) with an expiration date: $WARNED near the date, $EXPIRED torn down."

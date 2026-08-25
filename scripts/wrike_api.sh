@@ -28,6 +28,12 @@ export WRIKE_NXFPIPE_REQUEST_FORM_ID="IEAAIKU5LIACYIUI"
 export WRIKE_DASHBOARDS_FOLDER_ID="MQAAAAEN9zQV"
 export WRIKE_S3_RESULTS_URL_CFID="IEAAIKU5JUANAH3J"
 
+# The date a finished run's dashboard is torn down on. wrike_task_handler.sh
+# writes it from the request form's "Availability" answer, and
+# wrike_expiration.sh reads every task's copy once a day. An empty field means
+# the results are kept indefinitely, which is what "Unlimited" leaves.
+export WRIKE_EXPIRATION_CFID="IEAAIKU5JUANEX3T"
+
 # Every question on the "Bioinformatics Pipeline" request form, as
 # key | its title in Wrike | the answers this system accepts.
 #
@@ -242,6 +248,58 @@ add_wrike_task_comment() {
       -d "plainText=true" \
       --data-urlencode "text=$message" \
       > /dev/null
+}
+
+# The same, for a message carrying markup - which a mention is the only reason
+# to want. Wrike takes plainText=true literally and would post the tags as
+# characters, so this omits it; a caller mixing in text of its own escapes it
+# with escape_html first.
+add_wrike_task_html_comment() {
+    local message="$*"
+
+    call_wrike_api POST "tasks/$TASK_ID/comments" \
+      --data-urlencode "text=$message" \
+      > /dev/null
+}
+
+# A task's assignees as the markup Wrike renders a mention from, space
+# separated. Wrike reads the contact ID out of rel and draws the name itself;
+# what is between the tags is only what a reader sees where it cannot.
+#
+# Prints nothing for a task nobody is assigned to, so a message built on this
+# starts with its own first word.
+wrike_task_mentions() {
+    local task_json="$1"
+    local ids contacts
+
+    ids=$(echo "$task_json" | jq -r '[.responsibleIds[]?] | join(",")')
+
+    [[ -n "$ids" ]] || return 0
+
+    contacts=$(call_wrike_api GET "contacts/$ids") || return 1
+
+    echo "$contacts" | jq -r '
+        [ .data[]
+        | "<a class=\"stream-user-id\" rel=\"\(.id)\">@\((.firstName + " " + .lastName) | @html)</a>" ]
+        | join(" ")'
+}
+
+# The date an "Availability" answer runs out on, spelled as Wrike writes a Date
+# field: yyyy-mm-dd. "1 Month" through "24 Months" are read for their leading
+# number; "Unlimited", an unanswered question, and anything else print nothing,
+# which is how the field is left unset.
+#
+# The arithmetic is date's own, so a window opened on the 31st can land a day or
+# two into the month after the one it names - the run is kept a little longer,
+# never less.
+wrike_expiration_date() {
+    local months
+
+    read -r months _ <<< "$1"
+
+    [[ "$months" =~ ^[0-9]+$ ]] || return 0
+
+    date -d "+$months months" "+%F"
 }
 
 # Read the request form's answers off a task into WRIKE_ANSWERS, keyed as in

@@ -31,6 +31,8 @@ flowchart TD
     J --> S3
     F --> R["Reply comment<br/>+ Status on the task"]
     X --> CL["scancel jobs, delete S3 results,<br/>delete run directory"]
+    E["wrike_expiration.sh<br/><i>daily timer, login node</i>"] -->|"reads every task's<br/>Expiration date"| T
+    E -.->|"warns, then deletes all but<br/>the run's records"| S3
 ```
 
 1. **Wrike → SQS.** A webhook on the "Dashboards" folder publishes JSON to an API
@@ -133,6 +135,16 @@ flowchart TD
    in several folders at once — every task `run` submits keeps its staging space
    as a parent — and unfiling one of those must not tear down a run that is still
    on the dashboard.
+
+7. **Expiration.** The request form asks how long the dashboard should stay up,
+   and the handler writes that as an "Expiration" date on the task.
+   [`wrike_expiration.sh`](../scripts/wrike_expiration.sh) reads those dates once
+   a day: two weeks out it comments on the task, mentioning its assignees; on the
+   date it deletes the published results, leaves an expired page in their place,
+   and sets the Status to `Expired`. The run's own records — `pipeline_manifest.json`
+   above all — are kept, so an expired run can still be repeated. It is the one
+   part of the system that no webhook drives; see
+   [Expiring a dashboard](operations/expiration.md).
 
 ## Where to go next
 

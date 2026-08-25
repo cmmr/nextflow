@@ -139,7 +139,8 @@ flowchart TD
 7. **Expiration.** The request form asks how long the dashboard should stay up,
    and the handler writes that as an "Expiration" date on the task.
    [`wrike_expiration.sh`](../scripts/wrike_expiration.sh) reads those dates once
-   a day: two weeks out it comments on the task, mentioning its assignees; on the
+   a day: two weeks out it comments on the task, mentioning whoever raised it and
+   anyone following it; on the
    date it deletes the published results, leaves an expired page in their place,
    and sets the Status to `Expired`. The run's own records — `pipeline_manifest.json`
    above all — are kept, so an expired run can still be repeated. It is the one

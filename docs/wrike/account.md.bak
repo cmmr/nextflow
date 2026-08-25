@@ -96,8 +96,9 @@ months it names — and writes that to the task's **"Expiration"** custom field
 indefinitely. It is also recorded in the run's `pipeline_manifest.json`.
 
 `wrike_expiration.sh` reads that field off every task in "Dashboards" once a day:
-two weeks out it comments, mentioning the author and the task's followers; on the
-date it deletes the published results, leaves an expired page in their place, and
-sets the task's Status to `Expired`. **The date on the task is what it acts on**, so changing
+two weeks out it comments, mentioning the author and the task/s followers; on
+the date it deletes the
+published results, leaves an expired page in their place, and sets the task's
+Status to `Expired`. **The date on the task is what it acts on**, so changing
 "Expiration" is how a dashboard is kept longer. See
 [Expiring a dashboard](../operations/expiration.md).

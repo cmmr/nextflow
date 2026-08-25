@@ -262,26 +262,35 @@ add_wrike_task_html_comment() {
       > /dev/null
 }
 
-# A task's assignees as the markup Wrike renders a mention from, space
-# separated. Wrike reads the contact ID out of rel and draws the name itself;
-# what is between the tags is only what a reader sees where it cannot.
+# Everyone a notice on a task should reach - whoever raised it, and anyone
+# following it - as the markup Wrike renders a mention from, space separated.
 #
-# Prints nothing for a task nobody is assigned to, so a message built on this
-# starts with its own first word.
+# Wrike draws the name itself from what is in rel: a contact ID, or one of its
+# two reserved quasi-contacts, @followers and @assignees. There is no @author, so
+# the author is mentioned by ID. What is between the tags is only what a reader
+# sees where the mention cannot be drawn.
+#
+# Not the assignees: the bot is assigned every task here, and mentioning itself
+# notifies nobody. For the same reason it is dropped from the author list - it is
+# the author of every task `run` files - leaving @followers to carry those.
 wrike_task_mentions() {
     local task_json="$1"
-    local ids contacts
+    local ids contacts named=""
 
-    ids=$(echo "$task_json" | jq -r '[.responsibleIds[]?] | join(",")')
+    ids=$(echo "$task_json" | jq -r --arg bot "$WRIKE_BOT_USER_ID" \
+        '[.authorIds[]? | select(. != $bot)] | join(",")')
 
-    [[ -n "$ids" ]] || return 0
+    if [[ -n "$ids" ]]; then
+        contacts=$(call_wrike_api GET "contacts/$ids") || return 1
 
-    contacts=$(call_wrike_api GET "contacts/$ids") || return 1
+        named=$(echo "$contacts" | jq -r '
+            [ .data[]
+            | "<a class=\"stream-user-id avatar\" rel=\"\(.id)\">@\((.firstName + " " + .lastName) | @html)</a>" ]
+            | join(" ")')
+    fi
 
-    echo "$contacts" | jq -r '
-        [ .data[]
-        | "<a class=\"stream-user-id\" rel=\"\(.id)\">@\((.firstName + " " + .lastName) | @html)</a>" ]
-        | join(" ")'
+    printf '%s<a class="stream-user-id avatar quasi-contact" rel="@followers">@followers</a>' \
+        "${named:+$named }"
 }
 
 # The date an "Availability" answer runs out on, spelled as Wrike writes a Date

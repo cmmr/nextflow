@@ -52,6 +52,11 @@ readonly ECOLI_16S_LENGTH=1542
 readonly ECOLI_515F="GTG[CT]CAGC[AC]GCCGCGGTAA"
 readonly ECOLI_515F_POSITION=515
 
+# What counts as a 16S gene when picking one out of a genome's rRNA annotations.
+# The eight below run 1476-1556 bp; a 23S is nearer 2900 and a 5S nearer 120.
+readonly MIN_16S_LENGTH=1400
+readonly MAX_16S_LENGTH=1700
+
 # One genome per phylum a 16S survey is likely to return, plus an archaeon
 readonly DEFAULT_ACCESSIONS=(
     "$ECOLI_ACCESSION"  # Escherichia coli K-12 MG1655       Pseudomonadota
@@ -132,28 +137,57 @@ resolve_assembly_dir() {
     printf '%s/%s' "$base" "$dir"
 }
 
-# Append the longest [product=16S ribosomal RNA] record of an
-# _rna_from_genomic.fna to the landmark FASTA, and put that gene's own header and
-# length in info_file for the manifest. Longest rather than first, so a copy
-# truncated at a contig edge cannot become the landmark.
+# Append the longest 16S rRNA gene of an _rna_from_genomic.fna to the landmark
+# FASTA, and put that gene's own header and length in info_file for the manifest.
+#
+# Matched on gbkey plus "16S" anywhere in the product, because NCBI does not
+# spell it one way - these eight genomes alone carry "16S ribosomal RNA", "16S
+# Ribosomal RNA" and "ribosomal RNA-16S". The length bounds are what stop that
+# loose match ever taking a 23S or a 5S.
+#
+# Longest rather than first, so a copy truncated at a contig edge cannot become
+# the landmark. When nothing matches, info_file gets the rRNA products that were
+# there instead, which is what the caller reports.
 extract_16s() {
     local rna_file="$1"
     local id="$2"
     local info_file="$3"
 
-    gunzip -c "$rna_file" | awk -v id="$id" -v info="$info_file" '
+    gunzip -c "$rna_file" | awk -v id="$id" -v info="$info_file" \
+        -v minlen="$MIN_16S_LENGTH" -v maxlen="$MAX_16S_LENGTH" '
+        function product(header) {
+            if (match(header, /\[product=[^]]*\]/) == 0) return ""
+            return substr(header, RSTART + 9, RLENGTH - 10)
+        }
+
         /^>/ {
-            keep = ($0 ~ /\[product=16S ribosomal RNA\]/)
-            if (keep) { n++; header[n] = substr($0, 2); seq[n] = "" }
+            keep = 0
+
+            if ($0 ~ /\[gbkey=rRNA\]/) {
+                seen[product($0)] = 1
+
+                if (product($0) ~ /16[Ss]/) {
+                    keep = 1
+                    n++
+                    header[n] = substr($0, 2)
+                    seq[n] = ""
+                }
+            }
             next
         }
         keep { seq[n] = seq[n] $0 }
         END {
             best = 0
             for (i = 1; i <= n; i++) {
-                if (length(seq[i]) > length(seq[best])) best = i
+                len = length(seq[i])
+                if (len < minlen || len > maxlen) continue
+                if (best == 0 || len > length(seq[best])) best = i
             }
-            if (best == 0) exit 1
+
+            if (best == 0) {
+                for (p in seen) printf "%s\n", p > info
+                exit 1
+            }
 
             printf ">%s\n%s\n", id, toupper(seq[best])
             printf "%s\t%d\n", header[best], length(seq[best]) > info
@@ -195,7 +229,15 @@ for accession in "${ACCESSIONS[@]}"; do
 
     if ! extract_16s "$RNA_GZ" "$accession" "$WORK_DIR/gene_info.tsv" \
             >> "$WORK_DIR/landmarks.fasta"; then
-        fail "No 16S ribosomal RNA gene is annotated in $accession."
+        REASON="No rRNA gene of $MIN_16S_LENGTH-$MAX_16S_LENGTH bp is annotated as 16S"
+        REASON+=" in $accession."
+
+        if [[ -s "$WORK_DIR/gene_info.tsv" ]]; then
+            REASON+=$'\n'"Its rRNA genes are annotated as:"
+            REASON+=$'\n'"$(sed 's/^/  /' "$WORK_DIR/gene_info.tsv")"
+        fi
+
+        fail "$REASON"
     fi
 
     IFS=$'\t' read -r GENE_HEADER GENE_LENGTH < "$WORK_DIR/gene_info.tsv"

@@ -258,8 +258,7 @@ render_expired_page() {
     printf '%s\n' "$page"
 }
 
-# Tell the author and the task's followers the date is coming, once per date
-# rather than once a day.
+# Tell the author and the task/s followers the date is coming, once per date rather than once a day.
 # The comment already on the task is the whole record kept of having warned: a
 # date moved out is a date this has not warned about, so it warns again, and one
 # moved back to a date already warned about does not warn twice.

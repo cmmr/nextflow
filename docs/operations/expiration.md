@@ -35,7 +35,7 @@ expired, or have no date are left alone.
 
 | When | What happens |
 | --- | --- |
-| 14 days out or nearer | A comment on the task, mentioning its assignees, naming the date and saying how to change it |
+| 14 days out or nearer | A comment on the task, mentioning its author and `@followers`, naming the date and saying how to change it |
 | The date has arrived or passed | The published results are deleted, an expired page is left in their place, a comment says so, and the task's Status becomes `Expired` |
 
 The warning goes out **once per date, not once a day**. The comment already on

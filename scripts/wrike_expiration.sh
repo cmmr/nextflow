@@ -85,17 +85,19 @@ case "${1:-}" in
     *)          fail "Usage: $0 [--dry-run]" ;;
 esac
 
-# Every task in "Dashboards", one compact JSON object per line, carrying the
-# three optional fields this needs: the custom fields the Expiration date is
-# among, the assignees a warning mentions, and the completion date the expired
-# page is headed with.
+# Every task in "Dashboards", one compact JSON object per line, carrying the two
+# optional fields this needs: the custom fields the Expiration date is among, and
+# the assignees a warning mentions. The completion date the expired page is
+# headed with, and the status, are in every task Wrike hands back - and asking
+# for either by name is a 400, since only the fields Wrike calls optional may
+# appear here.
 list_dashboard_tasks() {
     local token="" response
     local -a args
 
     while true; do
         args=(-G
-            --data-urlencode 'fields=["customFields","responsibleIds","completedDate"]'
+            --data-urlencode 'fields=["customFields","responsibleIds"]'
             --data-urlencode "pageSize=$PAGE_SIZE")
 
         if [[ -n "$token" ]]; then

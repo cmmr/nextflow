@@ -19,6 +19,8 @@
 #   status.txt   the last stage wrike_job.sh reached; "Completed" only on success
 #   message.out  optional user-facing explanation, left by fail wherever the run
 #                went wrong
+#   notes.txt    anything a stage wanted reported whether or not the run failed,
+#                such as the 16S region ampliseq_detect_region.sh measured
 #
 # A successful run has already published to S3, so its run directory is removed.
 # A failed one is kept for inspection.
@@ -66,6 +68,9 @@ if [[ "$STATUS" == "Completed" ]]; then
     update_wrike_pipeline_progress "Completed"
 
     REPLY="The pipeline completed successfully."
+    if [[ -s "notes.txt" ]]; then
+        REPLY+=$'\n'"$(<notes.txt)"
+    fi
     if [[ -s "message.out" ]]; then
         REPLY+=$'\n'"$(<message.out)"
     fi
@@ -82,6 +87,9 @@ update_wrike_pipeline_progress "Failed"
 
 # ${STATUS,,} lowercases, e.g. "...while the pipeline was pre-processing."
 REPLY="An error occurred while the pipeline was ${STATUS,,}."
+if [[ -s "notes.txt" ]]; then
+    REPLY+=$'\n'"$(<notes.txt)"
+fi
 if [[ -s "message.out" ]]; then
     REPLY+=$'\n'"$(<message.out)"
 fi

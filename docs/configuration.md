@@ -50,8 +50,8 @@ caller, and then sources three things:
 
 **`.env` deliberately does not touch `PATH`.** Everything in this project is
 invoked by its absolute path — `"$NEXTFLOW_DIR/scripts/wrike_job.sh"`, and
-likewise for the handlers the daemon dispatches and the `PRE_PROCESS_CMD` /
-`POST_PROCESS_CMD` a pipeline names. That costs a little verbosity and buys two
+likewise for the handlers the daemon dispatches and the `PRE_PROCESS_CMDS` /
+`POST_PROCESS_CMDS` a pipeline names. That costs a little verbosity and buys two
 things: a bare word in these scripts is recognizably a shell function rather
 than an executable, and nothing depends on an inherited `PATH` being right —
 including `sbatch`, whose willingness to search `PATH` for a batch script varies

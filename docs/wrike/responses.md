@@ -6,6 +6,12 @@ bot reads and writes. Kept here so the IDs hardcoded in
 [`scripts/wrike_api.sh`](../../scripts/wrike_api.sh) can be checked against what
 Wrike actually holds — see [Progress is the task's Status](status.md).
 
+The request form capture below is **out of date** — it predates the
+`<name> :: <description>` pipeline options and the follow-up questions the form
+now asks. What the system actually reads is
+[the request form's questions](account.md#the-request-forms-questions), which is
+kept in step with `WRIKE_FORM_ANSWERS` rather than with this capture.
+
 ## Set env variables
 
 Sourcing `.env` pulls in both halves: `WRIKE_API_TOKEN` from `secrets/.env`, and
@@ -193,7 +199,7 @@ call_wrike_api GET "/spaces/$WRIKE_NXFPIPE_SPACE_ID/workflows"
           "standardName": false,
           "standard": false,
           "id": "IEAAIKU5JMHRVOM3",
-          "name": "Archived",
+          "name": "Expired",
           "color": "Brown",
           "group": "Completed",
           "hidden": false

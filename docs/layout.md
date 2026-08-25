@@ -9,6 +9,7 @@ run                   CLI entry point. Files a Wrike request, then gets out of t
 
 scripts/
   utilities.sh             log, warn, fail, and the uid helpers. Sourced by .env.
+  pipeline_params.sh       The parameter map a params file is built from. Likewise.
   wrike_api.sh             Wrike REST helpers and object IDs. Likewise sourced.
   wrike_sqs_listener.sh    The daemon. Polls SQS, routes events.
   wrike_task_handler.sh    Validates a form request, submits it. Login node.
@@ -17,11 +18,13 @@ scripts/
   wrike_followup.sh        Reports the outcome to Wrike. Slurm batch job.
   nextflow_progress.sh     Publishes the live progress page. Backgrounded by wrike_job.sh.
   index_directories.sh     Writes a listing page into every results folder. Pipeline-agnostic.
-  ampliseq_samplesheet.sh  PRE_PROCESS_CMD for the ampliseq pipelines.
-  ampliseq_upload.sh       POST_PROCESS_CMD for the ampliseq pipelines.
-  taxprofiler_samplesheet.sh  PRE_PROCESS_CMD for the taxprofiler pipelines.
-  taxprofiler_upload.sh       POST_PROCESS_CMD for the taxprofiler pipelines.
+  ampliseq_samplesheet.sh  PRE_PROCESS_CMDS for the ampliseq pipeline.
+  ampliseq_detect_region.sh   Likewise; measures which 16S region was sequenced.
+  ampliseq_upload.sh       POST_PROCESS_CMDS for the ampliseq pipeline.
+  taxprofiler_samplesheet.sh  PRE_PROCESS_CMDS for the taxprofiler pipelines.
+  taxprofiler_upload.sh       POST_PROCESS_CMDS for the taxprofiler pipelines.
   build_host_reference.sh     Builds a host-depletion reference. Setup, not part of a run.
+  build_16s_reference.sh      Builds the 16S landmarks the region detector aligns to. Likewise.
   fetch_taxprofiler_db.sh     Downloads a taxprofiler database. Likewise.
 
 pipelines/            One file per pipeline; see docs/pipelines/index.md.
@@ -55,7 +58,7 @@ docs/                 Source of the documentation site; one page per file.
   configuration.md    .env and everything it sources.
   pipelines/
     index.md          The pipeline file format, naming, and adding one.
-    ampliseq.md       The ampliseq pre/post steps.
+    ampliseq.md       The ampliseq pre/post steps, and how the 16S region is detected.
     taxprofiler.md    The taxprofiler pipelines, their databases and host references.
   results/
     index.md          The published landing page and the live progress view.

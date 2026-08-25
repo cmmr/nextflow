@@ -26,3 +26,68 @@ A "Nextflow Pipelines" space holds the
 Pipeline" request form that creates tasks in it — see
 [the Wrike API responses](responses.md) for the form's definition. Everything
 the bot sees, it sees because the request form put it in that folder.
+
+## The request form's questions
+
+Every question is listed in `WRIKE_FORM_ANSWERS` in
+[`wrike_api.sh`](../../scripts/wrike_api.sh), as `key | title in Wrike | allowed answers`:
+
+| Key | Question | Answers |
+| --- | --- | --- |
+| `pipeline` | Pipeline | `ampliseq`, `taxprofiler`, `prev_run_id` |
+| `availability` | Availability | 1, 3, 6, 12, 24 Months, or Unlimited |
+| `previous_run` | Previous Run ID | a run's uid — checked by shape, not by list |
+| `host` | Host Depletion | None, PhiX, Human + PhiX, Mouse + PhiX |
+| `settings` | Settings | Default, Custom |
+| `dada_ref` | Primary ASV Taxonomic Database (DADA2) | 11 values, SILVA as `silva=138.2` |
+| `qiime_ref` | Secondary QIIME2 Taxonomic Database | silva=138, greengenes2=2024.09 |
+| `kraken2_ref` | Read-Based Taxonomic Database (Kraken2) | silva=138, rdp=18, greengenes=13.5, standard=20240904 |
+| `picrust` | Functional Profiling (PICRUSt2) | No, Yes |
+| `exclude_taxa` | Taxa Exclusion Filter | mitochondria, chloroplast, Francisella |
+
+**An answer that is not on its list is refused.** Every one of these ends up in a
+nextflow command line, so `wrike_task_handler.sh` checks each against the list
+above and rejects the request otherwise, naming the answers that would have
+worked. There is no free-text parameter field: what a requester can ask for is
+exactly what is listed here. A checkbox answer arrives comma-separated and every
+part has to be allowed.
+
+Checked answers are written verbatim to `form_answers.tsv` in the run directory
+and left there. Nothing in the handler interprets one — pipelines read them with
+`form_answer`, so which answers mean anything stays a
+[pipeline's business](../pipelines/index.md#the-form-s-answers).
+
+**Fields are matched by title, not by ID.** One `GET /customfields` call per
+request resolves them, so recreating a field in Wrike needs no change here, and
+there are no IDs to paste. A question Wrike does not have is simply unanswered,
+and the pipeline uses its own default.
+
+Two fields are still addressed by ID, because nothing reads them back:
+`WRIKE_S3_RESULTS_URL_CFID`, the landing page link, and the workflow's custom
+statuses.
+
+### The pipeline question
+
+Its options carry a description after the name:
+
+```
+ampliseq    :: 16S full length or variable region amplicons
+taxprofiler :: WGS metagenomic profiling
+prev_run_id :: process new data using the same settings as before
+```
+
+**Only the first word is read**, so the descriptions can be reworded freely. The
+first two resolve to `pipelines/AMPLISEQ.sh` and `pipelines/TAXPROFILER.sh`; the
+third names no pipeline, and means the settings come from the run named in
+"Previous Run ID".
+
+Adding a fourth option means adding `pipelines/<NAME>.sh` and the option to both
+the form and `WRIKE_FORM_ANSWERS` — see
+[Adding a pipeline](../pipelines/index.md#adding-a-pipeline).
+
+### Availability
+
+Recorded on the run and in its `pipeline_manifest.json`, and **nothing enforces
+it yet**. The form promises that results are deleted from S3 and the dashboard
+replaced with an expired placeholder once the window passes; that reaper does not
+exist.

@@ -5,18 +5,23 @@
 # Author: Daniel Smith
 # Date:   August 12th, 2026
 #
-# Reads the lab's standard whitespace-delimited samplesheet (sample, fastq_1,
-# fastq_2 per line, no header) and writes ./ampliseq_samplesheet.tsv, doing the
-# three things ampliseq will not do for itself:
+# Reads the lab's standard whitespace-delimited samplesheet (sample, fastq_1 and
+# optionally fastq_2 per line, no header) and writes ./ampliseq_samplesheet.tsv,
+# doing the three things ampliseq will not do for itself:
 #
 #  - Recompresses .bz2 and uncompressed FASTQ files to .gz, which is all ampliseq reads.
-#  - Merges FASTQ files that share a sample name into one pair of files, since
-#    ampliseq requires sample names to be unique.
+#  - Merges FASTQ files that share a sample name into one file, or one pair of
+#    files, since ampliseq requires sample names to be unique.
 #  - Renames samples that ampliseq would reject: names must be alphanumeric or
 #    underscore, and must not start with a digit.
 #
-# Every sample ends up as exactly one pair of files in ./raw-sequences/, named
-# <sample>_1.fq.gz and <sample>_2.fq.gz, and the samplesheet points there.
+# A line with no fastq_2 is single-end - a MinION run, or single-end Illumina -
+# and the fastq_2 column is left off the sheet entirely. ampliseq requires only
+# sample and fastq_1, but it derives one read layout for the whole pipeline
+# rather than one per sample, so a run that mixes the two is refused here.
+#
+# Every sample ends up as exactly one file, or one pair, in ./raw-sequences/,
+# named <sample>_1.fq.gz and <sample>_2.fq.gz, and the samplesheet points there.
 # Already-gzipped inputs are symlinked rather than copied; only merged and
 # non-gzip inputs are written out. ampliseq_upload.sh archives this directory for
 # clients, and zip stores what a symlink points at, so the archive holds real data.
@@ -27,7 +32,7 @@
 #
 # Usage:     ampliseq_samplesheet.sh [input_samplesheet]
 #            defaults to ./original_samplesheet.tsv, as downloaded by wrike_job.sh
-# Called by: wrike_job.sh, as the PRE_PROCESS_CMD of the ampliseq pipelines
+# Called by: wrike_job.sh, as a PRE_PROCESS_CMDS entry of the ampliseq pipeline
 # Requires:  pigz and md5sum from PATH; $NEXTFLOW_DIR/bin/lbzip2 additionally
 #            for .bz2 inputs
 # Env:       the log and fail helpers, sourced from .env
@@ -104,6 +109,11 @@ declare -a SAMPLE_ORDER=()
 declare -A SAMPLE_FQ1_MAP=()
 declare -A SAMPLE_FQ2_MAP=()
 
+# "paired" or "single", decided by the first line that names files and required
+# of every line after it. ampliseq_detect_region.sh reads it back off the sheet's
+# own header rather than from a file of its own.
+READ_LAYOUT=""
+
 # 1. Read and validate the samplesheet line by line.
 # The || clause picks up a final line that is missing its trailing newline.
 line=""
@@ -124,8 +134,25 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$sample" == \#* ]] && continue
     [[ $line_number -eq 1 && "${sample,,}" == "sample" ]] && continue
 
-    if [[ -z "$fq1" || -z "$fq2" ]]; then
+    if [[ -z "$fq1" ]]; then
         fail "Invalid line format in samplesheet: '$line'"
+    fi
+
+    # One read layout for the whole run, since that is all ampliseq has
+    if [[ -z "$fq2" ]]; then
+        line_layout="single"
+    else
+        line_layout="paired"
+    fi
+
+    if [[ -z "$READ_LAYOUT" ]]; then
+        READ_LAYOUT="$line_layout"
+    elif [[ "$READ_LAYOUT" != "$line_layout" ]]; then
+        REASON="Samplesheet line $line_number is $line_layout-end,"
+        REASON+=" but the lines before it are $READ_LAYOUT-end."
+        REASON+=$'\n'"Every sample in one run has to have the same number of FASTQ files,"
+        REASON+=" because ampliseq analyses the whole run one way or the other."
+        fail "$REASON"
     fi
 
     # lbzip2 is only needed when a .bz2 input turns up, so it is checked here
@@ -137,7 +164,10 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     fi
 
     [[ -r "$fq1" ]] || fail "Input FASTQ file '$fq1' does not exist or is not readable."
-    [[ -r "$fq2" ]] || fail "Input FASTQ file '$fq2' does not exist or is not readable."
+
+    if [[ "$READ_LAYOUT" == "paired" ]]; then
+        [[ -r "$fq2" ]] || fail "Input FASTQ file '$fq2' does not exist or is not readable."
+    fi
 
     # Sanitize the sample name into what ampliseq accepts
     clean_sample=${sample//[^a-zA-Z0-9_]/_}
@@ -160,17 +190,21 @@ done < "$INPUT_SAMPLESHEET"
 
 [[ ${#SAMPLE_ORDER[@]} -gt 0 ]] || fail "No samples found in '$INPUT_SAMPLESHEET'."
 
-# 2. Generate the ampliseq TSV
-printf "sample\tfastq_1\tfastq_2\trun\n" > "$OUT_TSV"
+# 2. Generate the ampliseq TSV. A single-end run has no fastq_2 column at all,
+#    rather than an empty one.
+if [[ "$READ_LAYOUT" == "paired" ]]; then
+    printf "sample\tfastq_1\tfastq_2\trun\n" > "$OUT_TSV"
+else
+    printf "sample\tfastq_1\trun\n" > "$OUT_TSV"
+fi
 
 for clean_sample in "${SAMPLE_ORDER[@]}"; do
     read -ra fq1_list <<< "${SAMPLE_FQ1_MAP[$clean_sample]}"
-    read -ra fq2_list <<< "${SAMPLE_FQ2_MAP[$clean_sample]}"
 
     num_files=${#fq1_list[@]}
 
-    # Every sample lands at the same predictable pair of paths, whether its files
-    # were merged, recompressed, or linked
+    # Every sample lands at the same predictable path, whether its files were
+    # merged, recompressed, or linked
     final_fq1="$FASTQ_DIR/${clean_sample}_1.fq.gz"
     final_fq2="$FASTQ_DIR/${clean_sample}_2.fq.gz"
 
@@ -178,10 +212,18 @@ for clean_sample in "${SAMPLE_ORDER[@]}"; do
     if [[ "$num_files" -gt 1 ]]; then
         log "Merging $num_files duplicate entries for sample '$clean_sample'..."
         stream_to_gz "$final_fq1" "${fq1_list[@]}"
-        stream_to_gz "$final_fq2" "${fq2_list[@]}"
     else
         link_or_compress "${fq1_list[0]}" "$final_fq1"
-        link_or_compress "${fq2_list[0]}" "$final_fq2"
+    fi
+
+    if [[ "$READ_LAYOUT" == "paired" ]]; then
+        read -ra fq2_list <<< "${SAMPLE_FQ2_MAP[$clean_sample]}"
+
+        if [[ "$num_files" -gt 1 ]]; then
+            stream_to_gz "$final_fq2" "${fq2_list[@]}"
+        else
+            link_or_compress "${fq2_list[0]}" "$final_fq2"
+        fi
     fi
 
     # 2b. Derive the 'run' ID ampliseq uses to batch samples for error-model
@@ -195,7 +237,11 @@ for clean_sample in "${SAMPLE_ORDER[@]}"; do
     done
     run_hash=$(echo -n "$dir_concat" | md5sum | cut -c1-8)
 
-    printf "%s\t%s\t%s\t%s\n" "$clean_sample" "$final_fq1" "$final_fq2" "run_$run_hash" >> "$OUT_TSV"
+    if [[ "$READ_LAYOUT" == "paired" ]]; then
+        printf "%s\t%s\t%s\t%s\n" "$clean_sample" "$final_fq1" "$final_fq2" "run_$run_hash" >> "$OUT_TSV"
+    else
+        printf "%s\t%s\t%s\n" "$clean_sample" "$final_fq1" "run_$run_hash" >> "$OUT_TSV"
+    fi
 done
 
 # The count after merging, which is the number of samples the run actually
@@ -203,4 +249,4 @@ done
 # page simply omits the figure if this file is missing.
 printf '%s\n' "${#SAMPLE_ORDER[@]}" > "$SAMPLE_COUNT_FILE"
 
-log "Successfully generated ampliseq samplesheet: $OUT_TSV (${#SAMPLE_ORDER[@]} samples)"
+log "Successfully generated ampliseq samplesheet: $OUT_TSV (${#SAMPLE_ORDER[@]} $READ_LAYOUT-end samples)"

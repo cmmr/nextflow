@@ -23,16 +23,27 @@
 # wrike_followup.sh removes it. So a rejected request still has a page saying so
 # and a directory to look in, and the results link is on the task from the start.
 #
+# Every answer on the request form is checked against the list wrike_api.sh
+# allows and then written, unaltered, to form_answers.tsv in the run directory.
+# Nothing here interprets one: which answers mean anything is a pipeline's
+# business, and this script knows no pipeline from another. There is no free-text
+# parameter field, so a requester can only ask for what that list offers.
+#
+# The one answer it does read is "Pipeline", whose options are
+# "<name> :: <what it is for>" and whose first word names a file in pipelines/ -
+# except "prev_run_id", which instead means the settings come from the run named
+# in "Previous Run ID". That run's published pipeline_manifest.json is fetched
+# into rerun_manifest.json for wrike_job.sh to rebuild from.
+#
 # Usage:     wrike_task_handler.sh <sqs_message_body_json>
 # Called by: wrike_sqs_listener.sh
 # Submits:   wrike_job.sh, then wrike_followup.sh (dependent on the first)
 # Runs:      scripts/nextflow_progress.sh, to publish the results page
 # Requires:  jq, sbatch/squeue (Slurm), aws, openssl (via derive_uid), curl (via
 #            call_wrike_api)
-# Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX,
-#            RUN_ID_SALT, WRIKE_PIPELINE_NAME_CFID, WRIKE_S3_RESULTS_URL_CFID,
-#            the Wrike helper functions and the log/warn/fail/derive_uid/
-#            run_results_url helpers, all from .env
+# Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, RUN_ID_SALT,
+#            WRIKE_S3_RESULTS_URL_CFID, WRIKE_FORM_ANSWERS and its helpers, and
+#            the log/warn/fail/derive_uid/run_results_url helpers, all from .env
 
 set -euo pipefail
 
@@ -43,9 +54,8 @@ source /data/prod/nextflow/.env
 ATTACHMENT_TRIES=5
 ATTACHMENT_WAIT=3
 
-# How much of the pipeline field to quote back to the user. The field is free
-# text, so a bad value could be an entire pasted document.
-PIPELINE_ECHO_CHARS=50
+# How much of an answer to quote back to the user when refusing it
+ANSWER_ECHO_CHARS=50
 
 if [[ $# -ne 1 ]]; then
     fail "Usage: $0 <sqs_message_body_json>"
@@ -122,19 +132,23 @@ REPLY+=" Watch this task's \"Status\" to follow the job's progress,"
 REPLY+=" and I'll comment here as soon as there's anything to report."
 add_wrike_task_comment "$REPLY" || true
 
-# 1. Read the task: the requested pipeline, from the custom field the form fills
-#    in and `run` sets directly, and the title, which heads the results page. The
-#    pipeline field is free text, so keep its first line only, without
-#    surrounding whitespace.
+# 1. Read the task: the request form's answers, and the title, which heads the
+#    results page.
 if ! TASK_JSON=$(call_wrike_api GET "tasks/$TASK_ID"); then
     fail_with_apology "Could not read the task"
 fi
 
-PIPELINE_FIELD=$(echo "$TASK_JSON" \
-    | jq -r --arg cfid "$WRIKE_PIPELINE_NAME_CFID" \
-        '.data[0].customFields[]? | select(.id == $cfid) | .value // empty')
+if ! read_wrike_answers "$TASK_JSON"; then
+    fail_with_apology "Could not read the request form's custom fields"
+fi
 
-read -r PIPELINE_INPUT <<< "$PIPELINE_FIELD"
+#    The "Pipeline" options are "<name> :: <what it is for>", so only the first
+#    word names anything. Normalized here so it is checked like every other answer.
+read -r PIPELINE_INPUT _ <<< "$(wrike_answer pipeline)"
+
+if [[ -n "$PIPELINE_INPUT" ]]; then
+    WRIKE_ANSWERS[pipeline]="$PIPELINE_INPUT"
+fi
 
 # One line: the title goes into an HTML header. Best effort - the pages fall back
 # to a generic heading.
@@ -175,8 +189,10 @@ printf '%s\n' "$TASK_NAME" > "$WRIKE_TASK_NAME_FILE"
 # Open the channel back to the requester: fail writes to message.out wherever it
 # exists, so anything that goes wrong from here on - here, in wrike_job.sh, or in
 # a pipeline's pre/post-process scripts - reaches the user when wrike_followup.sh
-# posts it at the end of the job.
+# posts it at the end of the job. notes.txt is the same channel for a run that
+# succeeds, which stages append to rather than overwrite.
 : > message.out
+: > notes.txt
 
 # The run's own record of how far it has got, which the page below reads
 echo "Validating" > status.txt
@@ -215,8 +231,67 @@ publish_progress_page
 update_wrike_custom_field "$WRIKE_S3_RESULTS_URL_CFID" "$RESULTS_URL" \
     || warn "Could not set the results URL on task $TASK_ID."
 
-# 4. Resolve the requested name to a script in pipelines/, upper-cased so "16Sv4",
-#    "16sv4", and "16SV4" all resolve to pipelines/16SV4.sh.
+# 4. Check every answer against the list the form offers. These values reach a
+#    nextflow command line, so anything not offered is refused rather than
+#    passed on. "Previous Run ID" has no list and is checked by shape below.
+for ANSWER_KEY in "${!WRIKE_ANSWERS[@]}"; do
+    if ! wrike_answer_allowed "$ANSWER_KEY" "${WRIKE_ANSWERS[$ANSWER_KEY]}"; then
+        REPLY="I don't recognize \"${WRIKE_ANSWERS[$ANSWER_KEY]:0:$ANSWER_ECHO_CHARS}\""
+        REPLY+=" as an answer. Please submit a new request choosing one of:"
+        REPLY+=$'\n'"$(wrike_answer_options "$ANSWER_KEY")"
+        reject "$REPLY" "Answer to \"$ANSWER_KEY\" is not one the form offers."
+    fi
+done
+
+# 5. A request naming a previous run reproduces it. That run's manifest decides
+#    which pipeline is used, so it is fetched before the name is resolved.
+RERUN_UID=""
+RERUN_INPUT=$(wrike_answer previous_run)
+
+if [[ "$PIPELINE_INPUT" == "$WRIKE_RERUN_ANSWER" && -z "$RERUN_INPUT" ]]; then
+    REPLY="You asked to reuse an earlier run's settings, but didn't say which run."
+    REPLY+=" Please submit a new request with its run ID - the eight characters in"
+    REPLY+=" its results link, for example the \"$RUN_ID\" in $RESULTS_URL."
+    reject "$REPLY" "Rerun requested with no previous run ID."
+fi
+
+if [[ "$PIPELINE_INPUT" == "$WRIKE_RERUN_ANSWER" ]]; then
+    #    Accepts a uid or the results URL it appears in, since that link is what
+    #    the requester was given
+    RERUN_UID=${RERUN_INPUT,,}
+    RERUN_UID=${RERUN_UID##*"$S3_RUN_PREFIX"/}
+    RERUN_UID=${RERUN_UID%%/*}
+
+    if ! is_valid_uid "$RERUN_UID"; then
+        REPLY="\"$RERUN_INPUT\" is not a run ID."
+        REPLY+=" A run ID is the eight characters in its results link,"
+        REPLY+=" for example the \"$RUN_ID\" in $RESULTS_URL."
+        REPLY+=" Please submit a new request with that, or with none at all."
+        reject "$REPLY" "Malformed previous run ID ($RERUN_INPUT)."
+    fi
+
+    #    A run's manifest is written before nextflow starts and published with
+    #    its results, so a run that never finished has none
+    if ! aws s3 cp "s3://$AWS_S3_BUCKET/$S3_RUN_PREFIX/$RERUN_UID/pipeline_manifest.json" \
+            "$RUN_DIR/rerun_manifest.json" > /dev/null 2>&1; then
+        REPLY="I have no record of how run \"$RERUN_UID\" was set up, so I cannot repeat it."
+        REPLY+=" That happens when the run never finished."
+        REPLY+=" Please submit a new request naming a different run, or none at all."
+        reject "$REPLY" "No pipeline_manifest.json published for run $RERUN_UID."
+    fi
+
+    if ! PIPELINE_INPUT=$(jq -er '.pipeline' "$RUN_DIR/rerun_manifest.json"); then
+        REPLY="The record of run \"$RERUN_UID\" does not say which pipeline it used,"
+        REPLY+=" so I cannot repeat it. Please submit a new request naming a different run,"
+        REPLY+=" or none at all."
+        reject "$REPLY" "rerun_manifest.json for run $RERUN_UID names no pipeline."
+    fi
+
+    log "Task $TASK_ID reproduces run $RERUN_UID, which ran $PIPELINE_INPUT."
+fi
+
+#    Resolve the requested name to a script in pipelines/, upper-cased so
+#    "ampliseq", "Ampliseq" and "AMPLISEQ" all resolve to pipelines/AMPLISEQ.sh.
 PIPELINE_UPPER=${PIPELINE_INPUT^^}
 PIPELINE_SCRIPT="$NEXTFLOW_DIR/pipelines/$PIPELINE_UPPER.sh"
 
@@ -231,9 +306,12 @@ if [[ ! "$PIPELINE_UPPER" =~ ^[A-Z0-9_]+$ || ! -f "$PIPELINE_SCRIPT" ]]; then
         VALID_PIPELINES+="${script%.sh} "
     done
 
-    PIPELINE_SHOWN=${PIPELINE_INPUT:0:$PIPELINE_ECHO_CHARS}
+    PIPELINE_SHOWN=${PIPELINE_INPUT:0:$ANSWER_ECHO_CHARS}
 
-    if [[ -z "$PIPELINE_INPUT" ]]; then
+    if [[ -n "$RERUN_UID" ]]; then
+        REPLY="Run \"$RERUN_UID\" used a pipeline named \"$PIPELINE_SHOWN\","
+        REPLY+=" which no longer exists here, so I cannot repeat it."
+    elif [[ -z "$PIPELINE_INPUT" ]]; then
         REPLY="You didn't tell me which pipeline to run."
     else
         REPLY="I couldn't find a pipeline named \"$PIPELINE_SHOWN\"."
@@ -243,7 +321,14 @@ if [[ ! "$PIPELINE_UPPER" =~ ^[A-Z0-9_]+$ || ! -f "$PIPELINE_SCRIPT" ]]; then
     reject "$REPLY" "Invalid pipeline requested (${PIPELINE_SHOWN:-none})."
 fi
 
-# 5. Require exactly one samplesheet on the task. AttachmentAdded is a separate
+# 6. Leave the checked answers in the run directory. Recorded rather than
+#    interpreted: which answers mean anything is a pipeline's business, and
+#    nothing here knows one pipeline from another.
+for ANSWER_KEY in "${!WRIKE_ANSWERS[@]}"; do
+    printf '%s\t%s\n' "$ANSWER_KEY" "${WRIKE_ANSWERS[$ANSWER_KEY]}"
+done | sort > "$RUN_DIR/$WRIKE_FORM_ANSWERS_FILE"
+
+# 7. Require exactly one samplesheet on the task. AttachmentAdded is a separate
 #    webhook event from the TaskCreated that got us here, and Wrike promises no
 #    order, so give the file a few seconds to appear. Requests from `run` attach
 #    before filing the task, so for those this loop succeeds on the first attempt.
@@ -283,16 +368,12 @@ if [[ ! "$ATTACHMENT_NAME" =~ \.(txt|tsv|out)$ ]]; then
     reject "$REPLY" "Invalid extension on file $ATTACHMENT_NAME."
 fi
 
-# 6. Move the task's pipeline name and status on from where step 2 left them.
-#    Both must be set before submission, because the job starts by overwriting
-#    them. Writing the name back normalizes whatever the user typed to the name
-#    that resolved.
-if ! update_wrike_pipeline_name "$PIPELINE_UPPER" \
-        || ! update_wrike_pipeline_progress "Queued"; then
-    fail_with_apology "Could not set the task's pipeline name and status"
+# 8. Move the task's status on, before submission: the job starts by overwriting it.
+if ! update_wrike_pipeline_progress "Queued"; then
+    fail_with_apology "Could not set the task's status"
 fi
 
-# 7. Submit the job, then a follow-up job that reports the outcome either way.
+# 9. Submit the job, then a follow-up job that reports the outcome either way.
 #    Both are named after the uid so wrike_delete_handler.sh can scancel them,
 #    and both run in RUN_DIR. sbatch options must precede the script name.
 #
@@ -301,7 +382,7 @@ fi
 JOBS_AHEAD=$(squeue -h -t PENDING | wc -l) || JOBS_AHEAD="an unknown number of"
 
 if JOB_ID=$(sbatch --parsable --job-name="nf-$RUN_ID" --chdir="$RUN_DIR" \
-        "$NEXTFLOW_DIR/scripts/wrike_job.sh" "$PIPELINE_UPPER" "$ATTACHMENT_ID"); then
+        "$NEXTFLOW_DIR/scripts/wrike_job.sh" "$PIPELINE_UPPER" "$ATTACHMENT_ID" "$RERUN_UID"); then
 
     # afterany, not afterok, so failures are reported to the user too. A
     # follow-up that fails to submit is not fatal - the pipeline is already
@@ -313,12 +394,15 @@ if JOB_ID=$(sbatch --parsable --job-name="nf-$RUN_ID" --chdir="$RUN_DIR" \
         warn "Follow-up submission failed for task $TASK_ID; job $JOB_ID will run unreported."
     fi
 
-    # Bring the page up to the "Queued" step 6 just set. nextflow_progress.sh
+    # Bring the page up to the "Queued" step 8 just set. nextflow_progress.sh
     # takes over once the pipeline is under way.
     publish_progress_page
 
     REPLY="Success! Your job for the $PIPELINE_UPPER pipeline was successfully"
     REPLY+=" submitted to the cluster using the attached samplesheet."
+    if [[ -n "$RERUN_UID" ]]; then
+        REPLY+=" It runs with exactly the settings run $RERUN_UID used."
+    fi
     REPLY+=" There are currently $JOBS_AHEAD pending jobs ahead of yours in the queue."
     REPLY+=$'\n\n'"You can follow along here, and this is where your results will"
     REPLY+=" appear once the run finishes:"$'\n'"$RESULTS_URL"

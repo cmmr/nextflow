@@ -28,7 +28,23 @@ These carry most of the system's state, and nothing works if you break them:
   wherever it finds it — which is what makes any script in the run, down to a
   pipeline's own pre- and post-process steps, able to explain itself to the
   requester without knowing anything about Wrike.
+- **The request form's answers reach a pipeline through the run directory.**
+  `wrike_task_handler.sh` checks each against the list Wrike offers and writes
+  the survivors to `form_answers.tsv`; pipelines read them with `form_answer`.
+  The handler never interprets one, which is what keeps it ignorant of pipelines
+  and keeps each pipeline version owning its own parameter names.
+- **The run directory is also where a stage reports success.** `notes.txt` is
+  created empty beside `message.out`, and stages *append* to it — the region
+  `ampliseq_detect_region.sh` measured arrives that way. `wrike_followup.sh`
+  posts it whether the run succeeded or failed, where `message.out` explains
+  only failures.
 - **`nextflow_command.sh` is the record.** `wrike_job.sh` writes the fully
   expanded nextflow command to that file and then executes it, rather than
   running nextflow directly — so the record can never drift from what actually
   ran. It is copied into the published results.
+- **`pipeline_manifest.json` is what a rerun is rebuilt from.** Written beside
+  it, published to `nxf/<uid>/pipeline_manifest.json`, and holding the pipeline
+  *version* (`AMPLISEQ_01`, never the `AMPLISEQ` shortcut), the nextflow
+  arguments, and every parameter as finally resolved. A request naming a previous
+  run ID is answered by fetching this file, so a run that never finished — and
+  therefore never published — cannot be reproduced.

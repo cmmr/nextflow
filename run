@@ -21,11 +21,17 @@
 # token cannot stand in for it.
 #
 # Usage:     run <pipeline> <samplesheet>
-#            e.g. run 16Sv4 /path/to/somesamples.txt
+#            e.g. run ampliseq /path/to/somesamples.txt
+#
+#            Minimally maintained. The request form is the supported way in, and
+#            it asks questions this cannot - host depletion, retention, which
+#            reference databases - so a request filed here takes each pipeline's
+#            own defaults for all of them. Reproducing an earlier run needs the
+#            form too.
 # Triggers:  wrike_task_handler.sh, by way of the Wrike webhook and SQS
 # Requires:  curl and jq (via call_wrike_api)
 # Env:       WRIKE_API_TOKEN, NEXTFLOW_DIR, WRIKE_DASHBOARDS_FOLDER_ID,
-#            WRIKE_PIPELINE_NAME_CFID, the Wrike helper functions and the
+#            WRIKE_FORM_ANSWERS, the Wrike helper functions and the
 #            log/warn/fail helpers, from .env
 #
 # Exits 0 once the request is filed - not once the pipeline finishes. The bot
@@ -118,8 +124,15 @@ if [[ -z "$STAGING_SPACE_ID" ]]; then
     fail "The bot's Wrike account has no Personal space to stage the request in."
 fi
 
-# 4. Build the task there.
-CUSTOM_FIELDS=$(jq -nc --arg id "$WRIKE_PIPELINE_NAME_CFID" --arg value "$PIPELINE_UPPER" \
+# 4. Build the task there. The pipeline goes in lower case, as the form's options
+#    spell it; the handler reads only the first word either way.
+PIPELINE_CFID=$(wrike_custom_field_id "Pipeline") || PIPELINE_CFID=""
+
+if [[ -z "$PIPELINE_CFID" ]]; then
+    fail "Wrike has no \"Pipeline\" custom field to put the request in."
+fi
+
+CUSTOM_FIELDS=$(jq -nc --arg id "$PIPELINE_CFID" --arg value "${PIPELINE_INPUT,,}" \
     '[{id: $id, value: $value}]')
 
 # The task is the bot's, so the description is where the person behind the

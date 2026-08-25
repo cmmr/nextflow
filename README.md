@@ -5,7 +5,7 @@
 Amplicon (16S) and WGS pipelines for CMMR, driven from Wrike.
 
 A user submits the **"Bioinformatics Pipeline"** Wrike request form, naming a
-pipeline and attaching a samplesheet — or runs **`run 16Sv4 samples.txt`** on the
+pipeline and attaching a samplesheet — or runs **`run ampliseq samples.txt`** on the
 login node, which files the same request. A few seconds later the bot replies on
 the resulting task that the job is queued; when it finishes, the task carries a
 link to an S3-hosted report and a zip of the raw reads. Everything in between is
@@ -33,7 +33,7 @@ to `main`.
 ## Running a pipeline
 
 ```bash
-/data/prod/nextflow/run 16Sv4 /path/to/somesamples.txt
+/data/prod/nextflow/run ampliseq /path/to/somesamples.txt
 ```
 
 `run` files a Wrike request and exits; progress, rejections, and the final

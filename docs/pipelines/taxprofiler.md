@@ -2,7 +2,7 @@
 
 Shotgun metagenomic profiling with
 [nf-core/taxprofiler](https://nf-co.re/taxprofiler), running kraken2, bracken and
-metaphlan over the same lab samplesheet the ampliseq pipelines take.
+metaphlan over the same lab samplesheet the ampliseq pipeline takes.
 
 Everything here is taxprofiler-specific. For how a request becomes a run at all,
 see the [README](../index.md).
@@ -12,7 +12,7 @@ see the [README](../index.md).
 
 | Component | Version | Where |
 | --- | --- | --- |
-| nf-core/taxprofiler | **2.0.1** | pinned in each `pipelines/TAXPROFILER*_01.sh` |
+| nf-core/taxprofiler | **2.0.1** | pinned in `pipelines/TAXPROFILER_01.sh`, by the commit the tag points at |
 | Kraken2 database | **PlusPF 2026-06-26** | `db/kraken2/pluspf_20260626` (111 GB) |
 | Bracken distributions | 50, 75, 100, 150, 200, 250, 300-mers | same directory |
 | MetaPhlAn database | **mpa_vJun23_CHOCOPhlAnSGB_202403** | `db/metaphlan/…` (33 GB) |
@@ -41,36 +41,45 @@ date.
   kill, not a slow run — re-check on any database update.
 
 
-## The pipelines
+## The pipeline
 
-Three pipelines share one pair of scripts and one database sheet, and differ only
-in which host genome their reads are depleted against:
+One pipeline, `TAXPROFILER`. Choosing it on the request form asks a follow-up
+question — which host to deplete against — and the answer is what
+[`TAXPROFILER_01.sh`](../../pipelines/TAXPROFILER_01.sh) turns into a reference:
 
-| Pipeline | Depleted against | Reference |
+| Answer | Depleted against | Reference |
 | --- | --- | --- |
-| `TAXPROFILER` | PhiX only | `phix` |
-| `TAXPROFILER_HUMAN` | human + PhiX | `chm13v2phix` |
-| `TAXPROFILER_MOUSE` | mouse + PhiX | `grcm39phix` |
+| `None` | nothing; host removal is skipped | — |
+| `PhiX` | PhiX only | `phix` |
+| `Human + PhiX` | T2T-CHM13v2.0 + PhiX | `chm13v2phix` |
+| `Mouse + PhiX` | GRCm39 + PhiX | `grcm39phix` |
 
-Every variant strips PhiX, since the Illumina spike-in is never part of the
-sample and PlusPF contains viral genomes that would otherwise classify it.
+The pipeline reads it with `form_answer host`, lowercases it and takes the first
+word, so `Human + PhiX` arrives at `chm13v2phix`. An unanswered question means
+`PhiX`. The answer was already checked against the four the form offers, so an
+unrecognized one means those two lists have drifted apart.
 
-**The split is deliberate, and the reason is the methods section.** One combined
-mammalian reference would be more robust to a requester picking the wrong
-variant — the features that spuriously attract microbial reads are largely shared
-between mammals, so depleting against several costs little. But it would also
-mean reporting that an environmental sample had been depleted against human and
-mouse, which is not a claim worth defending to a reviewer.
+**Every depleting answer also strips PhiX**, since the Illumina spike-in is never
+part of the sample and PlusPF contains viral genomes that would otherwise
+classify it. `None` is the exception, and means exactly that.
 
-The cost is that **picking the wrong variant fails quietly**: a mouse study run
-through `TAXPROFILER_HUMAN` is depleted against the wrong genome and nothing in
-the report says so. That is an operator choice recorded on the Wrike task, which
-is a better place for it than buried in a reference nobody reads.
+**One combined mammalian reference is deliberately not offered.** It would be
+more robust to a requester answering wrongly — the features that spuriously
+attract microbial reads are largely shared between mammals, so depleting against
+several costs little. But it would also mean reporting that an environmental
+sample had been depleted against human *and* mouse, which is not a claim worth
+defending to a reviewer.
 
-Adding a host is a new `TAXPROFILER_<host>` plus one reference build, and touches
-none of the pipelines already defined. Each `_01` file carries its full parameter
-set rather than sourcing a shared base, the same trade the four 16S pipelines
-make: a run from a year ago still reproduces exactly.
+The cost is that **answering wrongly fails quietly**: a mouse study depleted
+against human is depleted against the wrong genome and nothing in the report says
+so. The answer is recorded on the Wrike task and in the run's
+`pipeline_manifest.json`, which is a better place for it than buried in a
+reference nobody reads.
+
+Adding a host is one `case` arm plus one reference build. The resolved reference
+paths land in `taxprofiler_args.yaml` and in the manifest, so a
+[rerun](index.md#reproducing-an-earlier-run) reproduces the host that was used
+rather than re-reading the question.
 
 
 ## Preparing a run
@@ -207,8 +216,8 @@ taxprofiler does not run Bracken on long reads.
 
 **The generated sheet is the record of what ran**, carrying the exact database
 names, paths and parameters, so `taxprofiler_upload.sh` copies it into the
-results beside the `nextflow_command.sh` and `taxprofiler_args.yaml` that
-`wrike_job.sh` puts there. The run directory is deleted once a run succeeds, so a
+results beside the `nextflow_command.sh`, `taxprofiler_args.yaml` and
+`pipeline_manifest.json` that `wrike_job.sh` puts there. The run directory is deleted once a run succeeds, so a
 sheet that is not copied is gone. The input samplesheet is deliberately left
 behind: it names the requester's own paths on the cluster, and says nothing about
 how the numbers were produced.
@@ -282,7 +291,8 @@ sbatch --job-name=db-metaphlan --cpus-per-task=4 --mem=8G --time=24:00:00 --outp
 
 ### 3. Host reference — PhiX only
 
-Seconds. Used by `TAXPROFILER`.
+Seconds. Used by the "PhiX" answer, and by "Human + PhiX" and "Mouse + PhiX" as one
+half of their combined references.
 
 ```bash
 sbatch --job-name=ref-phix --cpus-per-task=32 --mem=64G --time=12:00:00 --output=/data/prod/nextflow/log/ref_%j.out /data/prod/nextflow/scripts/build_host_reference.sh phix GCF_000819615.1
@@ -290,7 +300,7 @@ sbatch --job-name=ref-phix --cpus-per-task=32 --mem=64G --time=12:00:00 --output
 
 ### 4. Host reference — human + PhiX
 
-One to two hours, ~4 GB of index. Used by `TAXPROFILER_HUMAN`.
+One to two hours, ~4 GB of index. Used by the "Human + PhiX" answer.
 
 ```bash
 sbatch --job-name=ref-chm13v2phix --cpus-per-task=32 --mem=64G --time=12:00:00 --output=/data/prod/nextflow/log/ref_%j.out /data/prod/nextflow/scripts/build_host_reference.sh chm13v2phix GCF_009914755.1 GCF_000819615.1
@@ -298,7 +308,7 @@ sbatch --job-name=ref-chm13v2phix --cpus-per-task=32 --mem=64G --time=12:00:00 -
 
 ### 5. Host reference — mouse + PhiX
 
-Same again. Used by `TAXPROFILER_MOUSE`.
+Same again. Used by the "Mouse + PhiX" answer.
 
 ```bash
 sbatch --job-name=ref-grcm39phix --cpus-per-task=32 --mem=64G --time=12:00:00 --output=/data/prod/nextflow/log/ref_%j.out /data/prod/nextflow/scripts/build_host_reference.sh grcm39phix GCF_000001635.27 GCF_000819615.1
@@ -320,18 +330,21 @@ jq -r '"\(.name)\t\([.sources[].url] | join(" "))"' /data/prod/nextflow/db/*/*.m
 the `.mmi` is missing, since those are what `BOWTIE2_ALIGN` and `MINIMAP2_ALIGN`
 look for.
 
-### 7. Register the pipelines in Wrike
+### 7. Register the pipeline in Wrike
 
-Add `TAXPROFILER`, `TAXPROFILER_HUMAN` and `TAXPROFILER_MOUSE` as options on the
-"Pipeline Name" custom field of the "Bioinformatics Pipeline" request form.
-Nothing runs until this is done — `wrike_task_handler.sh` matches the submitted
-name against `pipelines/`, and the form is where a requester picks it.
+`taxprofiler` is one of the "Pipeline Name" options on the "Bioinformatics
+Pipeline" request form, and picking it asks the "Host Depletion" follow-up
+question. Both are [set up on the Wrike side](../wrike/account.md#the-request-forms-questions);
+nothing runs until they are, since the form is where a requester picks a pipeline
+and `wrike_task_handler.sh` matches what they picked against `pipelines/`.
 
 ### Adding a host later
 
-One more reference build plus a `TAXPROFILER_<host>` pair copied from an existing
-one with three lines changed. Neither touches a pipeline or reference already in
-place.
+One more reference build, plus one `case` arm in
+[`TAXPROFILER_01.sh`](../../pipelines/TAXPROFILER_01.sh) and one more option on the
+"Host Depletion" field. Neither touches a reference already in place, and runs
+that chose a different host reproduce unchanged — their manifests name the
+reference by path, not by the answer that selected it.
 
 ```bash
 sbatch --job-name=ref-newhost --cpus-per-task=32 --mem=64G --time=12:00:00 --output=/data/prod/nextflow/log/ref_%j.out /data/prod/nextflow/scripts/build_host_reference.sh <name> <host_accession> GCF_000819615.1

@@ -41,7 +41,7 @@
 #
 # Usage:     taxprofiler_samplesheet.sh [input_samplesheet]
 #            defaults to ./original_samplesheet.tsv, as downloaded by wrike_job.sh
-# Called by: wrike_job.sh, as the PRE_PROCESS_CMD of the taxprofiler pipelines
+# Called by: wrike_job.sh, as the PRE_PROCESS_CMDS entry of the taxprofiler pipelines
 # Requires:  pigz, awk, sort and uniq from PATH; $NEXTFLOW_DIR/bin/lbzip2
 #            additionally for .bz2 inputs
 # Reads:     config/taxprofiler/database.csv, the database sheet it specializes

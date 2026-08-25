@@ -23,7 +23,7 @@
 #
 # Usage:     ampliseq_upload.sh [results_dir]
 #            defaults to ./results, the outdir set in the ampliseq params file
-# Called by: wrike_job.sh, as the POST_PROCESS_CMD of the ampliseq pipelines
+# Called by: wrike_job.sh, as the POST_PROCESS_CMDS entry of the ampliseq pipeline
 # Requires:  aws, zip, curl and jq (via the Wrike helpers)
 # Reads:     templates/ampliseq/index.html, the landing page template
 # Runs:      index_directories.sh, over the results folder

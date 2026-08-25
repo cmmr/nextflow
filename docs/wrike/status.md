@@ -43,5 +43,5 @@ the daemon log:
 WARNING: No Wrike custom status is mapped to "Pre-Processing"; progress not reported.
 ```
 
-The workflow also defines `Archived` and `Cancelled`. Both are mapped and
+The workflow also defines `Expired` and `Cancelled`. Both are mapped and
 available, but nothing sets them yet.

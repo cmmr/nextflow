@@ -4,7 +4,7 @@ Nothing to set up: `run` acts as the bot, like everything else here, and the bot
 may create tasks.
 
 ```bash
-/data/prod/nextflow/run 16Sv4 /path/to/somesamples.txt
+/data/prod/nextflow/run ampliseq /path/to/somesamples.txt
 ```
 
 The task it files is therefore authored by the bot **on the caller's behalf**,
@@ -60,3 +60,14 @@ result is identical from the webhook down.
 `run` validates the pipeline name and the samplesheet locally first, using the
 same rules as the handler, so an obvious mistake fails in your terminal instead
 of a round trip through Wrike.
+
+
+## It is minimally maintained
+
+The request form is the supported way in. It asks questions `run` does not —
+host depletion, how long results are kept, which reference databases, and which
+earlier run to reproduce — so a request filed here takes each pipeline's own
+defaults for all of them, and reproducing a run needs the form.
+
+That is a deliberate trade rather than an oversight: keeping a second front door
+in step with the form costs more than the CLI is worth.

@@ -3,23 +3,27 @@
   expired.html - The page left where an expired dashboard was.
 
   Rendered by scripts/wrike_expiration.sh once a run's retention window has
-  passed. It replaces the landing page at
-  s3://$AWS_S3_BUCKET/nxf/<run_id>/index.html, and everything the landing page
-  pointed at is gone by the time this is uploaded - the reads archive, the
-  report, the abundance tables. What survives beside it is the run's own record:
-  pipeline_manifest.json and the rest, enough to run the same configuration
-  again.
+  passed, in place of the landing page at
+  s3://$AWS_S3_BUCKET/nxf/<run_id>/index.html. Everything that page pointed at is
+  gone by the time this is uploaded.
 
-  So this page says what the run was rather than showing what it produced, and
-  the buttons lead to those records rather than to results.
+  This page is read by the client whose data it was, arriving at a link that
+  worked last time they used it - so it is written for them and not for us. No
+  file names, no pipeline names, no instructions phrased as though they were the
+  ones who submitted the job. It says what is gone, when, and who to ask.
 
-  Placeholders are TASK_NAME, RUN_ID, COMPLETED, SAMPLE_COUNT, EXPIRED and
-  DOWNLOADS, each wrapped in doubled underscores. They are deliberately not
-  spelled that way in this comment - the renderer substitutes the whole file,
-  comment included, and would fill these in too. The task name is user-authored
-  text and is HTML-escaped on the way in; COMPLETED, SAMPLE_COUNT and DOWNLOADS
-  are markup the renderer builds itself, and are empty for a run that has no
-  completion date, no recorded sample count, or nothing left to download.
+  It deliberately does not offer to put the results back. The configuration is
+  kept, but repeating an analysis needs the original sequencing files, which are
+  not stored here and may not exist anywhere - so anything the client does next
+  starts with a conversation, not with this page.
+
+  Placeholders are TASK_NAME, RUN_ID, COMPLETED, SAMPLE_COUNT and EXPIRED, each
+  wrapped in doubled underscores. They are deliberately not spelled that way in
+  this comment - the renderer substitutes the whole file, comment included, and
+  would fill these in too. The task name is user-authored text and is
+  HTML-escaped on the way in; COMPLETED and SAMPLE_COUNT are markup the renderer
+  builds itself, and are empty for a run with no completion date or no recorded
+  sample count.
 -->
 <html lang="en">
 <head>
@@ -31,21 +35,21 @@
     color-scheme: light dark;
     --bg: #ffffff;
     --header-bg: #f4f6f8;
+    --notice-bg: #fdf6e7;
+    --notice-border: #e6c67a;
     --border: #d7dde3;
     --text: #1b2733;
     --muted: #5c6b7a;
-    --accent: #1f6feb;
-    --accent-text: #ffffff;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #12171d;
       --header-bg: #1a2129;
+      --notice-bg: #2a2313;
+      --notice-border: #6b5726;
       --border: #2c3742;
       --text: #e6edf3;
       --muted: #9aa7b4;
-      --accent: #3b82f6;
-      --accent-text: #ffffff;
     }
   }
 
@@ -56,17 +60,12 @@
     flex-direction: column;
     background: var(--bg);
     color: var(--text);
-    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
           Helvetica, Arial, sans-serif;
   }
 
   header {
     flex: 0 0 auto;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px 24px;
     padding: 14px 22px;
     background: var(--header-bg);
     border-bottom: 1px solid var(--border);
@@ -87,77 +86,71 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
 
-  /* One button per record that survived the tear-down, so the count varies */
-  .downloads {
-    flex: 0 0 auto;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-  a.download {
-    padding: 8px 14px;
-    border: 1px solid var(--accent);
-    border-radius: 6px;
-    color: var(--accent);
-    background: transparent;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 13px;
-    font-weight: 600;
-    text-decoration: none;
-    white-space: nowrap;
-  }
-  a.download:hover { filter: brightness(1.08); }
-
   main {
     flex: 1 1 auto;
     overflow: auto;
-    padding: 22px;
+    padding: 30px 22px;
   }
-  .wrap { max-width: 760px; margin: 0 auto; }
+  .wrap { max-width: 640px; margin: 0 auto; }
 
-  h2 {
-    margin: 0 0 10px;
+  .notice {
+    padding: 18px 20px;
+    margin: 0 0 26px;
+    background: var(--notice-bg);
+    border: 1px solid var(--notice-border);
+    border-radius: 8px;
+  }
+  .notice h2 {
+    margin: 0 0 8px;
     font-size: 20px;
     font-weight: 600;
   }
-  p { margin: 0 0 14px; }
-  .muted { color: var(--muted); }
-  .runid {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  .notice p { margin: 0; }
+
+  h3 {
+    margin: 24px 0 8px;
+    font-size: 15px;
     font-weight: 600;
   }
+  p { margin: 0 0 14px; }
+  .muted { color: var(--muted); font-size: 14px; }
 </style>
 </head>
 <body>
 
 <header>
-  <div>
-    <h1>__TASK_NAME__</h1>
-    <!-- The completion date and the sample count each bring their own
-         separator, so either can render as nothing -->
-    <p class="meta">__COMPLETED__uid <code>__RUN_ID__</code> __SAMPLE_COUNT__</p>
-  </div>
-  <div class="downloads">__DOWNLOADS__</div>
+  <h1>__TASK_NAME__</h1>
+  <!-- The completion date and the sample count each bring their own separator,
+       so either can render as nothing -->
+  <p class="meta">__COMPLETED__reference <code>__RUN_ID__</code> __SAMPLE_COUNT__</p>
 </header>
 
 <main>
   <div class="wrap">
-    <h2>This dashboard expired on __EXPIRED__.</h2>
 
-    <p>The results it presented &mdash; the report, the abundance tables, and the
-    sequencing data &mdash; have been deleted to free up storage. The record of
-    how this run was set up is kept, so the same analysis can be run again on the
-    same data or on new data.</p>
+    <div class="notice">
+      <h2>These results are no longer available online</h2>
+      <p>This page held the results of a sequencing analysis. They were kept
+      online for the storage period arranged when the analysis was requested,
+      which ended on <strong>__EXPIRED__</strong>.</p>
+    </div>
 
-    <p>To do that, submit a new request, choose
-    <code>prev_run_id</code> as the pipeline, and give
-    <span class="runid">__RUN_ID__</span> as the previous run ID. It will run
-    with exactly the settings this run used.</p>
+    <h3>What this means</h3>
 
-    <p class="muted">A dashboard expires on the date its Wrike task carries in
-    "Expiration", which is set from the "Availability" answer on the request
-    form. Changing that date before it passes keeps the dashboard up; once the
-    results are deleted, only a new run brings them back.</p>
+    <p>The report that was on this page, and the sequencing data files that could
+    be downloaded from it, have been removed from our storage. Anything that was
+    downloaded while the page was up is unaffected &mdash; if you or a colleague
+    saved a copy, you still have it.</p>
+
+    <h3>If you still need these results</h3>
+
+    <p>Please get in touch with your contact at the CMMR, quoting the reference
+    above. We can talk through what is still possible.</p>
+
+    <p class="muted">We keep a record of how this analysis was set up, but that
+    is not the same as being able to put this page back: repeating the analysis
+    would need the original sequencing files, which are not stored here.</p>
+
   </div>
 </main>
 

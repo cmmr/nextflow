@@ -220,13 +220,13 @@ recorded_sample_count() {
     return 0
 }
 
-# Render templates/expired.html for one run. Whatever records survived are named
-# after the date, one download button each.
+# Render templates/expired.html for one run. The records that survive are not
+# named on it: the page is read by the client whose results these were, and a
+# list of the files we kept for ourselves would only puzzle them.
 render_expired_page() {
     local title="$1" run_id="$2" completed="$3" samples="$4" expired="$5"
-    shift 5
 
-    local page completed_html="" samples_html="" downloads="" file
+    local page completed_html="" samples_html=""
 
     page=$(<"$EXPIRED_TEMPLATE")
 
@@ -245,11 +245,6 @@ render_expired_page() {
         (( samples == 1 )) && samples_html="&middot; 1 sample"
     fi
 
-    for file in "$@"; do
-        downloads+="<a class=\"download\" href=\"$(escape_html "$file")\" download>"
-        downloads+="$(escape_html "$file")</a>"
-    done
-
     # Replacements are variable expansions rather than literal text, so bash
     # inserts them as-is - no second pass over backslashes, which a task name is
     # free to contain.
@@ -258,7 +253,6 @@ render_expired_page() {
     page=${page//__COMPLETED__/$completed_html}
     page=${page//__SAMPLE_COUNT__/$samples_html}
     page=${page//__EXPIRED__/$(escape_html "$(show_date "$expired")")}
-    page=${page//__DOWNLOADS__/$downloads}
 
     printf '%s\n' "$page"
 }
@@ -268,7 +262,7 @@ render_expired_page() {
 # date moved out is a date this has not warned about, so it warns again, and one
 # moved back to a date already warned about does not warn twice.
 warn_of_expiration() {
-    local task_json="$1" expires="$2" days="$3"
+    local task_json="$1" expires="$2" days="$3" on_task="$4"
     local shown marker comments mentions when reply
 
     shown=$(show_date "$expires")
@@ -300,6 +294,15 @@ warn_of_expiration() {
     reply+=" $marker, $when."
     reply+=" On that date its report and sequencing data are deleted to free up storage,"
     reply+=" and the dashboard link is replaced by a page saying so."
+
+    # Said out loud, because otherwise the date above contradicts the one on the
+    # task for no visible reason.
+    if [[ "$on_task" != "$expires" ]]; then
+        reply+=" This task's \"Expiration\" reads $(show_date "$on_task"), which has already"
+        reply+=" passed or is nearer than that; a dashboard is always kept for"
+        reply+=" $MINIMUM_NOTICE_DAYS days after its run finishes, so the date above is the one"
+        reply+=" it is held to."
+    fi
     reply+=" To keep it up for longer, change this task's \"Expiration\" date to a later one"
     reply+=" - any date still ahead of the day I look is left alone."
     reply+=" Either way the settings this run used are kept, so it can always be run again."
@@ -374,7 +377,6 @@ expire_task() {
     # --content-type because reading the body from stdin leaves aws nothing to
     # guess from, and a page served as binary downloads instead of rendering.
     if ! render_expired_page "$title" "$run_id" "$completed" "$samples" "$expired" \
-            ${kept[@]+"${kept[@]}"} \
             | aws s3 cp - "s3://$AWS_S3_BUCKET/$prefix/index.html" \
                 --content-type "text/html" > /dev/null; then
         warn "The results for task $TASK_ID were deleted, but the page explaining that was not published."
@@ -461,7 +463,7 @@ while IFS= read -r TASK; do
         expire_task "$TASK" "$EXPIRES_ON"
         EXPIRED=$(( EXPIRED + 1 ))
     elif (( DAYS_LEFT <= WARNING_DAYS )); then
-        warn_of_expiration "$TASK" "$EXPIRES_ON" "$DAYS_LEFT"
+        warn_of_expiration "$TASK" "$EXPIRES_ON" "$DAYS_LEFT" "$EXPIRES"
         WARNED=$(( WARNED + 1 ))
     fi
 done <<< "$TASKS"

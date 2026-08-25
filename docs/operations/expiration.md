@@ -68,8 +68,17 @@ Only the top level of the prefix is offered a match, so every results folder —
 `index.html` is deleted with the rest and immediately republished from
 [`templates/expired.html`](../../templates/expired.html), so the results link on
 the task, and any link a reader kept, still lead to an explanation rather than to
-a `NoSuchKey`. That page carries the task title, the uid, the completion date and
-the sample count, says when the dashboard expired, and links the records above.
+a `NoSuchKey`. That page carries the task title, the reference, the completion
+date and the sample count, and says when the results came down.
+
+**It is written for the client, not for us.** Whoever opens that link is most
+likely the person whose data it was, arriving at an address that worked last
+time — so the page names no files, no pipeline, and nothing from the table above,
+and it asks them to contact their CMMR contact rather than telling them to
+submit anything. It also does not offer to put the results back: the
+configuration survives, but repeating an analysis needs the original sequencing
+files, which are not stored here and may not exist anywhere. The records above
+are kept for us, and are still at their own keys under the prefix.
 
 The sample count comes from `pipeline_manifest.json`, which has carried it since
 August 2026; for a run published before that it is read back out of the landing

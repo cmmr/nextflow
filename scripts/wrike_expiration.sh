@@ -55,8 +55,7 @@ readonly WARNING_DAYS=14
 # whatever the Expiration date says. A run that took longer than the window it
 # was given would otherwise be expired the day it was published, with the warning
 # arriving alongside the deletion rather than ahead of it.
-#readonly MINIMUM_NOTICE_DAYS=$WARNING_DAYS
-readonly MINIMUM_NOTICE_DAYS=0
+readonly MINIMUM_NOTICE_DAYS=$WARNING_DAYS
 
 # aws s3api delete-objects takes at most this many keys per call
 readonly DELETE_BATCH=1000

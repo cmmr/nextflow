@@ -38,10 +38,10 @@ params_set taxpasta_taxonomy_dir            "$NEXTFLOW_DIR/db/kraken2/pluspf_202
 params_set taxpasta_add_name                true
 params_set taxpasta_add_rank                true
 
-# "Host Depletion" answers "None", "PhiX", "Human + PhiX" and "Mouse + PhiX", so
-# the first word names the host and the rest is the PhiX every depleting answer
-# includes. PhiX when unanswered.
-TAXPROFILER_HOST=$(form_answer host)
+# "Taxprofiler --hostremoval_reference" answers "None", "PhiX", "Human + PhiX"
+# and "Mouse + PhiX", so the first word names the host and the rest is the PhiX
+# every depleting answer includes. PhiX when unanswered.
+TAXPROFILER_HOST=$(form_answer hostremoval_reference)
 TAXPROFILER_HOST=${TAXPROFILER_HOST:-PhiX}
 TAXPROFILER_HOST=${TAXPROFILER_HOST,,}
 TAXPROFILER_HOST=${TAXPROFILER_HOST%% *}

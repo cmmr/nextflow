@@ -54,7 +54,7 @@ question — which host to deplete against — and the answer is what
 | `Human + PhiX` | T2T-CHM13v2.0 + PhiX | `chm13v2phix` |
 | `Mouse + PhiX` | GRCm39 + PhiX | `grcm39phix` |
 
-The pipeline reads it with `form_answer host`, lowercases it and takes the first
+The pipeline reads it with `form_answer hostremoval_reference`, lowercases it and takes the first
 word, so `Human + PhiX` arrives at `chm13v2phix`. An unanswered question means
 `PhiX`. The answer was already checked against the four the form offers, so an
 unrecognized one means those two lists have drifted apart.
@@ -336,8 +336,8 @@ look for.
 
 ### 7. Register the pipeline in Wrike
 
-`taxprofiler` is one of the "Pipeline Name" options on the "Bioinformatics
-Pipeline" request form, and picking it asks the "Host Depletion" follow-up
+`taxprofiler` is one of the "Nextflow Pipeline" options on the "Bioinformatics
+Pipeline" request form, and picking it asks the "Taxprofiler --hostremoval_reference" follow-up
 question. Both are [set up on the Wrike side](../wrike/account.md#the-request-forms-questions);
 nothing runs until they are, since the form is where a requester picks a pipeline
 and `wrike_task_handler.sh` matches what they picked against `pipelines/`.
@@ -346,7 +346,8 @@ and `wrike_task_handler.sh` matches what they picked against `pipelines/`.
 
 One more reference build, plus one `case` arm in
 [`TAXPROFILER_01.sh`](../../pipelines/TAXPROFILER_01.sh) and one more option on the
-"Host Depletion" field. Neither touches a reference already in place, and runs
+"Taxprofiler --hostremoval_reference" field. Neither touches a reference already
+in place, and runs
 that chose a different host reproduce unchanged — their manifests name the
 reference by path, not by the answer that selected it.
 

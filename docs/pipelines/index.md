@@ -55,26 +55,32 @@ more than one value.
 A pipeline reads the request form with `form_answer <key>`, which returns an
 answer `wrike_task_handler.sh` has already
 [checked against the list](../wrike/account.md#the-request-forms-questions) the
-form offers, or nothing when the question went unanswered. A pipeline turns those
-into whatever parameters it uses:
+form offers, or nothing when the question went unanswered.
+
+Most fields are titled after the parameter they set — `Ampliseq
+--dada_ref_taxonomy` — so their key *is* the parameter name and applying them is
+a loop:
 
 ```bash
-if [[ "$(form_answer settings)" == "Custom" ]]; then
-    AMPLISEQ_ANSWER=$(form_answer dada_ref)
+for AMPLISEQ_PARAM in dada_ref_taxonomy qiime_ref_taxonomy kraken2_ref_taxonomy exclude_taxa; do
+    AMPLISEQ_ANSWER=$(form_answer "$AMPLISEQ_PARAM")
+
     if [[ -n "$AMPLISEQ_ANSWER" ]]; then
-        params_set dada_ref_taxonomy "$AMPLISEQ_ANSWER"
+        params_set "$AMPLISEQ_PARAM" "$AMPLISEQ_ANSWER"
     fi
-fi
+done
 ```
 
-**The mapping lives in the pipeline, not in the handler**, which knows no
-pipeline from another. That is also what keeps the answers versioned: this
-revision of ampliseq calls its primers `primer_fwd` and `primer_rev` where the
-last one called them `FW_primer` and `RV_primer`, and only the pipeline file has
-to know which.
+**An unanswered question means the pipeline's own default**, and that is the
+normal case: the form leaves an optional question off the task entirely when the
+requester takes `Settings: Default`, so there is nothing for the system to gate
+on and no `Settings` field to read.
 
-`Settings: Default` is what a requester picks to leave the pipeline's own
-defaults alone; `Custom` is what makes the database and filter answers apply.
+**The mapping lives in the pipeline, not in the handler**, which knows no
+pipeline from another. Taxprofiler's one answer needs it — `Human + PhiX` becomes
+five parameters — and it is also what keeps answers versioned: this revision of
+ampliseq calls its primers `primer_fwd` and `primer_rev` where the last called
+them `FW_primer` and `RV_primer`, and only the pipeline file has to know which.
 
 **Each versioned pipeline pins its own nextflow arguments as well as its
 defaults.** Nothing about the command line is defaulted by `wrike_job.sh`.
@@ -112,7 +118,7 @@ Currently defined:
   [the ampliseq pipeline](ampliseq.md).
 - **TAXPROFILER** — nf-core/taxprofiler 2.0.1 running kraken2, bracken and
   metaphlan over shotgun reads. Which host genome is depleted first is the form's
-  "Host Depletion" follow-up answer rather than a separate pipeline. See
+  "Taxprofiler --hostremoval_reference" answer rather than a separate pipeline. See
   [the taxprofiler pipeline](taxprofiler.md).
 
 **Pipeline files are named in upper case.** `wrike_task_handler.sh` uppercases
@@ -129,10 +135,10 @@ sample count, which rides along because this file outlives the results it was
 published with: it is one of the few things
 [an expired dashboard](../operations/expiration.md) keeps.
 
-A request that picks `prev_run_id` on the form and names a run in the "Previous
-Run ID" field — or `run --rerun <run_id> samples.txt` — is handled by fetching
+A request that picks `prev_run_id` on the form and names a run in "Nextflow
+Previous Run ID" — or `run --rerun <run_id> samples.txt` — is handled by fetching
 that manifest from S3 and using it in place of everything the request would
-otherwise decide, the "Host Depletion" answer included. The
+otherwise decide, the host reference included. The
 requester supplies new samples; nothing else about the analysis changes. For
 ampliseq that also means region detection is skipped, since the primers are
 already fixed.
@@ -146,6 +152,7 @@ the request is rejected saying so.
    `PIPELINE_NAME="<name>_01"`.
 2. Add `pipelines/<NAME>.sh` containing
    `source "$NEXTFLOW_DIR/pipelines/<NAME>_01.sh"`.
-3. Add `<NAME>` as an option to Wrike's "Pipeline Name" custom field.
+3. Add `<NAME>` as an option to Wrike's "Nextflow Pipeline" field, and to
+   `WRIKE_FORM_ANSWERS`.
 4. Add `docs/pipelines/<name>.md` describing it, and list the page under
    `Pipelines` in [`mkdocs.yml`](../../mkdocs.yml).

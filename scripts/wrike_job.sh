@@ -210,7 +210,7 @@ jq -n \
     --arg params_file "$PARAMS_FILE" \
     --arg rerun_of "$PIPELINE_RERUN_UID" \
     --arg region "$([[ -r region.txt ]] && head -1 region.txt || true)" \
-    --arg availability "$(form_answer availability)" \
+    --arg retention "$(form_answer retention)" \
     --arg sample_count "$([[ -r sample_count.txt ]] && head -1 sample_count.txt || true)" \
     --argjson nextflow_args "$(printf '%s\n' "${NEXTFLOW_ARGS[@]}" \
         | jq -R -s 'split("\n") | map(select(length > 0))')" \
@@ -219,7 +219,7 @@ jq -n \
       recorded_utc: $recorded_utc, pipeline: $pipeline, pipeline_name: $pipeline_name,
       params_file: $params_file, nextflow_args: $nextflow_args, params: $params}
      | if $region       != "" then . + {region: $region}             else . end
-     | if $availability != "" then . + {availability: $availability} else . end
+     | if $retention    != "" then . + {retention: $retention}       else . end
      | if $rerun_of != "" then . + {rerun_of: $rerun_of} else . end
      | if ($sample_count | test("^[0-9]+$"))
        then . + {sample_count: ($sample_count | tonumber)} else . end' \

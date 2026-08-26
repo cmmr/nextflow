@@ -41,33 +41,20 @@ params_set report_title          "Amplicon sequencing analysis"
 params_set report_css            "$NEXTFLOW_DIR/templates/ampliseq/report.css"
 params_set report_abstract       "$NEXTFLOW_DIR/templates/ampliseq/abstract.md"
 
-# "Settings" gates the rest of the form: on "Default" the answers below are left
-# where the requester found them and the defaults above stand. Every answer was
-# checked against the list wrike_api.sh offers before it got here.
-if [[ "$(form_answer settings)" == "Custom" ]]; then
-    AMPLISEQ_ANSWER=$(form_answer dada_ref)
-    if [[ -n "$AMPLISEQ_ANSWER" ]]; then
-        params_set dada_ref_taxonomy "$AMPLISEQ_ANSWER"
-    fi
+# The form's optional questions are titled after the parameters they set, and a
+# question the requester left at its default is not on the task at all. Every
+# answer was checked against the list wrike_api.sh offers before it got here.
+for AMPLISEQ_PARAM in dada_ref_taxonomy qiime_ref_taxonomy kraken2_ref_taxonomy exclude_taxa; do
+    AMPLISEQ_ANSWER=$(form_answer "$AMPLISEQ_PARAM")
 
-    AMPLISEQ_ANSWER=$(form_answer qiime_ref)
     if [[ -n "$AMPLISEQ_ANSWER" ]]; then
-        params_set qiime_ref_taxonomy "$AMPLISEQ_ANSWER"
+        params_set "$AMPLISEQ_PARAM" "$AMPLISEQ_ANSWER"
     fi
+done
 
-    AMPLISEQ_ANSWER=$(form_answer kraken2_ref)
-    if [[ -n "$AMPLISEQ_ANSWER" ]]; then
-        params_set kraken2_ref_taxonomy "$AMPLISEQ_ANSWER"
-    fi
-
-    AMPLISEQ_ANSWER=$(form_answer exclude_taxa)
-    if [[ -n "$AMPLISEQ_ANSWER" ]]; then
-        params_set exclude_taxa "$AMPLISEQ_ANSWER"
-    fi
-
-    if [[ "$(form_answer picrust)" == "Yes" ]]; then
-        params_set picrust true
-    fi
+# The one that is a switch rather than a value
+if [[ "$(form_answer picrust)" == "Yes" ]]; then
+    params_set picrust true
 fi
 
 # Changing either would leave ampliseq reading a samplesheet nothing wrote, or

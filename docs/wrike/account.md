@@ -33,55 +33,80 @@ Every question is listed in `WRIKE_FORM_ANSWERS` in
 [`wrike_api.sh`](../../scripts/wrike_api.sh), as
 `key | title in Wrike | custom field ID | allowed answers`:
 
-| Key | Question | Answers |
+| Key | Custom field | Answers |
 | --- | --- | --- |
-| `pipeline` | Pipeline | `ampliseq`, `taxprofiler`, `prev_run_id` |
-| `availability` | Availability | 1, 3, 6, 12, 24 Months, or Unlimited |
-| `previous_run` | Previous Run ID | a run's uid — checked by shape, not by list |
-| `host` | Host Depletion | None, PhiX, Human + PhiX, Mouse + PhiX |
-| `settings` | Settings | Default, Custom |
-| `dada_ref` | Primary ASV Taxonomic Database (DADA2) | 11 values, SILVA as `silva=138.2` |
-| `qiime_ref` | Secondary QIIME2 Taxonomic Database | silva=138, greengenes2=2024.09 |
-| `kraken2_ref` | Read-Based Taxonomic Database (Kraken2) | silva=138, rdp=18, greengenes=13.5, standard=20240904 |
-| `picrust` | Functional Profiling (PICRUSt2) | No, Yes |
-| `exclude_taxa` | Taxa Exclusion Filter | mitochondria, chloroplast, Francisella |
+| `pipeline` | Nextflow Pipeline | `ampliseq`, `taxprofiler`, `prev_run_id` |
+| `retention` | Dashboard Retention | 1, 3, 6, 12, 24 Months, or Unlimited |
+| `previous_run` | Nextflow Previous Run ID | a run's uid — checked by shape, not by list |
+| `dada_ref_taxonomy` | Ampliseq --dada_ref_taxonomy | 11 values, SILVA as `silva=138.2` |
+| `qiime_ref_taxonomy` | Ampliseq --qiime_ref_taxonomy | silva=138, greengenes2=2024.09 |
+| `kraken2_ref_taxonomy` | Ampliseq --kraken2_ref_taxonomy | silva=138, rdp=18, greengenes=13.5, standard=20240904 |
+| `picrust` | Ampliseq --picrust | No, Yes |
+| `exclude_taxa` | Ampliseq --exclude_taxa | mitochondria, chloroplast, Francisella |
+| `hostremoval_reference` | Taxprofiler --hostremoval_reference | None, PhiX, Human + PhiX, Mouse + PhiX |
 
-**An answer that is not on its list is refused.** Every one of these ends up in a
-nextflow command line, so `wrike_task_handler.sh` checks each against the list
-above and rejects the request otherwise, naming the answers that would have
-worked. There is no free-text parameter field: what a requester can ask for is
-exactly what is listed here. A checkbox answer arrives comma-separated and every
-part has to be allowed.
+**Every key but the first three names the nextflow parameter its field is titled
+after**, so a pipeline applies one by asking for its own parameter name — see
+[the form's answers](../pipelines/index.md#the-forms-answers).
+
+**An optional question the requester leaves at its default is not on the task at
+all.** That is what the form's `Settings: Default` does, and it is why an absent
+answer means "the pipeline's own default" rather than an error. There is no
+`Settings` field for the system to read, and none is needed.
+
+### Answers are checked twice
+
+Every answer ends up in a nextflow parameters file, so `wrike_task_handler.sh`
+rejects the request unless it passes both of:
+
+1. **Shape.** Only the characters that appear in the answers above, plus the `:`
+   and `/` of a results link — `[A-Za-z0-9 ,.:+=/_-]`, no `..`, at most 256
+   characters. This one applies to *every* answer, including
+   `previous_run`, which has no list of its own.
+2. **The list.** Exact membership, naming the answers that would have worked. A
+   multiple-choice answer arrives comma-separated and every part has to be
+   allowed.
+
+**The first check is the one that does not trust Wrike.** The lists are
+exact-match, so while Wrike sends only what its dropdowns offer the character
+check adds nothing — but that is an assumption rather than a guarantee. A
+dropdown can be switched to free text in one click, `Nextflow Pipeline` already
+accepts values outside its list (`allowOtherValues`), and a custom field can be
+written by anything holding a token. Neither check is load-bearing alone.
+
+A malformed answer is refused without being quoted back on the task, so nothing
+unchecked is reflected into a Wrike comment; `request.json` in the run directory
+has it if you need to see it.
+
+There is no free-text parameter field: what a requester can ask for is exactly
+what is listed above.
 
 Checked answers are written verbatim to `form_answers.tsv` in the run directory
 and left there. Nothing in the handler interprets one — pipelines read them with
 `form_answer`, so which answers mean anything stays a
-[pipeline's business](../pipelines/index.md#the-form-s-answers).
+[pipeline's business](../pipelines/index.md#the-forms-answers).
 
-**Fields are addressed by ID, not by title.** This Wrike account carries over a
-hundred custom fields from every CMMR workflow, and several share a title —
-including a `Pipeline` belonging to another team, where ours is `Pipeline Name`.
-Matching on the title reads theirs, silently, and the answer comes back empty.
-Get an ID with:
+**Fields are addressed by ID, not by title.** The account carries over a hundred
+custom fields from every CMMR workflow and several share a title, so matching on
+one can silently read another team's field. These nine all live in the "Nextflow
+Pipelines" space:
 
 ```bash
-call_wrike_api GET customfields | jq -r '.data[] | "\(.id)\t\(.title)"'
+call_wrike_api GET spaces/$WRIKE_NXFPIPE_SPACE_ID/customfields \
+    | jq -r '.data[] | "\(.id)\t\(.title)"'
 ```
 
-**Only `Pipeline Name` has a field so far.** The other eight questions have an
-empty ID in `WRIKE_FORM_ANSWERS`, which means their answers never reach the task:
-they read as unanswered and each pipeline's own defaults stand. The handler warns
-once per request naming them, and `request.json` in the run directory records
-which field each question resolved through.
+Adding a question is: create the custom field, point the form at it, and add a
+row to `WRIKE_FORM_ANSWERS`. A row with an empty ID reads as never answered, and
+the handler warns once per request naming it.
 
-Filling one in is: create the custom field in Wrike, point the form question at
-it, and paste the ID into `WRIKE_FORM_ANSWERS`.
+`request.json` in the run directory records which field each question resolved
+through and what came back, so an answer that did not arrive can be told from one
+that was never given.
 
-Three fields are still addressed by ID: `WRIKE_S3_RESULTS_URL_CFID`, the landing
-page link; `WRIKE_EXPIRATION_CFID`, the date below; and the workflow's custom
-statuses. The first is only ever written. The other two are read back, but by a
-daily pass over every task at once rather than per request, so resolving a title
-each time would buy nothing.
+Two more fields the system writes are not questions, so they have IDs of their
+own rather than rows in that table: `WRIKE_S3_RESULTS_URL_CFID` ("Dashboard URL")
+and `WRIKE_EXPIRATION_CFID` ("Dashboard Expiration").
 
 ### The pipeline question
 
@@ -96,23 +121,24 @@ prev_run_id :: process new data using the same settings as before
 **Only the first word is read**, so the descriptions can be reworded freely. The
 first two resolve to `pipelines/AMPLISEQ.sh` and `pipelines/TAXPROFILER.sh`; the
 third names no pipeline, and means the settings come from the run named in
-"Previous Run ID".
+"Nextflow Previous Run ID".
 
 Adding a fourth option means adding `pipelines/<NAME>.sh` and the option to both
 the form and `WRIKE_FORM_ANSWERS` — see
 [Adding a pipeline](../pipelines/index.md#adding-a-pipeline).
 
-### Availability
+### Dashboard Retention
 
-The one answer besides "Pipeline" that the handler reads rather than leaving to a
-pipeline. `wrike_task_handler.sh` turns it into a date — today plus the number of
-months it names — and writes that to the task's **"Expiration"** custom field
-(`WRIKE_EXPIRATION_CFID`); "Unlimited" leaves the field blank, which means kept
-indefinitely. It is also recorded in the run's `pipeline_manifest.json`.
+The one answer besides "Nextflow Pipeline" that the handler reads rather than
+leaving to a pipeline. `wrike_task_handler.sh` turns it into a date — today plus
+the number of months it names — and writes that to the task's **"Dashboard
+Expiration"** field (`WRIKE_EXPIRATION_CFID`); "Unlimited" leaves that blank,
+which means kept indefinitely. It is also recorded in the run's
+`pipeline_manifest.json`.
 
-`wrike_expiration.sh` reads that field off every task in "Dashboards" once a day:
+`wrike_expiration.sh` reads that date off every task in "Dashboards" once a day:
 two weeks out it comments, mentioning the author and the task's followers; on the
 date it deletes the published results, leaves an expired page in their place, and
-sets the task's Status to `Expired`. **The date on the task is what it acts on**, so changing
-"Expiration" is how a dashboard is kept longer. See
+sets the task's Status to `Expired`. **The date on the task is what it acts on**,
+so editing "Dashboard Expiration" is how a dashboard is kept longer. See
 [Expiring a dashboard](../operations/expiration.md).

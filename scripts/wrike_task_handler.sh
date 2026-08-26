@@ -29,15 +29,15 @@
 # business, and this script knows no pipeline from another. There is no free-text
 # parameter field, so a requester can only ask for what that list offers.
 #
-# Two answers are read here rather than left to a pipeline. "Availability" says
-# how long the results are kept, and becomes the "Expiration" date on the task
+# Two answers are read here rather than left to a pipeline. "Dashboard Retention"
+# says how long the results are kept, and becomes the "Dashboard Expiration" date
 # that wrike_expiration.sh acts on once it passes.
 #
-# The other is "Pipeline", whose options are
-# "<name> :: <what it is for>" and whose first word names a file in pipelines/ -
-# except "prev_run_id", which instead means the settings come from the run named
-# in "Previous Run ID". That run's published pipeline_manifest.json is fetched
-# into rerun_manifest.json for wrike_job.sh to rebuild from.
+# The other is "Nextflow Pipeline", whose options are "<name> :: <what it is for>"
+# and whose first word names a file in pipelines/ - except "prev_run_id", which
+# instead means the settings come from the run named in "Nextflow Previous Run
+# ID". That run's published pipeline_manifest.json is fetched into
+# rerun_manifest.json for wrike_job.sh to rebuild from.
 #
 # Usage:     wrike_task_handler.sh <sqs_message_body_json>
 # Called by: wrike_sqs_listener.sh
@@ -262,8 +262,18 @@ update_wrike_custom_field "$WRIKE_S3_RESULTS_URL_CFID" "$RESULTS_URL" \
 
 # 4. Check every answer against the list the form offers. These values reach a
 #    nextflow command line, so anything not offered is refused rather than
-#    passed on. "Previous Run ID" has no list and is checked by shape below.
+#    passed on. The previous run ID has no list and is checked by shape below.
 for ANSWER_KEY in "${!WRIKE_ANSWERS[@]}"; do
+    #    Shape first, and for every answer including the ones with no list: this
+    #    is the check that does not assume Wrike sent one of its own options.
+    if ! wrike_answer_well_formed "${WRIKE_ANSWERS[$ANSWER_KEY]}"; then
+        REPLY="The answer to \"$ANSWER_KEY\" has characters in it that no answer"
+        REPLY+=" to that question ever has, so I won't act on it."
+        REPLY+=" Please submit a new request."
+        reject "$REPLY" \
+            "Answer to \"$ANSWER_KEY\" is malformed; ${#WRIKE_ANSWERS[$ANSWER_KEY]} characters, not recorded."
+    fi
+
     if ! wrike_answer_allowed "$ANSWER_KEY" "${WRIKE_ANSWERS[$ANSWER_KEY]}"; then
         REPLY="I don't recognize \"${WRIKE_ANSWERS[$ANSWER_KEY]:0:$ANSWER_ECHO_CHARS}\""
         REPLY+=" as an answer. Please submit a new request choosing one of:"
@@ -277,7 +287,7 @@ done
 #    - which is what "Unlimited" and a request that never answered the question
 #    leave - is kept indefinitely. Best effort, like the results URL: a field
 #    that will not write is not worth refusing a good request over.
-EXPIRES_ON=$(wrike_expiration_date "$(wrike_answer availability)")
+EXPIRES_ON=$(wrike_expiration_date "$(wrike_answer retention)")
 
 update_wrike_custom_field "$WRIKE_EXPIRATION_CFID" "$EXPIRES_ON" \
     || warn "Could not set the expiration date on task $TASK_ID."
@@ -400,6 +410,12 @@ fi
 
 ATTACHMENT_ID=$(echo "$ATTACHMENTS_JSON" | jq -r '.data[0].id')
 ATTACHMENT_NAME=$(echo "$ATTACHMENTS_JSON" | jq -r '.data[0].name')
+
+#    wrike_job.sh puts this straight into an API path, so it is checked as an ID
+#    the same way the task's own is
+if ! is_valid_wrike_id "$ATTACHMENT_ID"; then
+    fail_with_apology "Wrike returned an unusable attachment ID"
+fi
 
 if [[ ! "$ATTACHMENT_NAME" =~ \.(txt|tsv|out)$ ]]; then
     REPLY="I don't recognize the file extension on \"$ATTACHMENT_NAME\"."

@@ -29,7 +29,7 @@ export WRIKE_DASHBOARDS_FOLDER_ID="MQAAAAEN9zQV"
 export WRIKE_S3_RESULTS_URL_CFID="IEAAIKU5JUANAH3J"
 
 # The date a finished run's dashboard is torn down on. wrike_task_handler.sh
-# writes it from the request form's "Availability" answer, and
+# writes it from the request form's "Dashboard Retention" answer, and
 # wrike_expiration.sh reads every task's copy once a day. An empty field means
 # the results are kept indefinitely, which is what "Unlimited" leaves.
 export WRIKE_EXPIRATION_CFID="IEAAIKU5JUANEX3T"
@@ -44,42 +44,60 @@ export WRIKE_EXPIRATION_NOTICE_DAYS=14
 #
 # Answers are checked against these lists rather than passed through, because
 # each one ends up in a nextflow command line. There is no free-text parameter
-# field: what a requester can ask for is exactly what is listed here. A CheckBox
-# answer arrives comma-separated and every part has to be allowed. An empty list
-# is checked by shape instead - only "Previous Run ID", which is_valid_uid
-# answers for.
+# field: what a requester can ask for is exactly what is listed here. A multiple
+# choice answer arrives comma-separated and every part has to be allowed. An
+# empty list is checked by shape instead - only "Nextflow Previous Run ID",
+# which is_valid_uid answers for.
 #
 # Fields are addressed by ID and not by title. This Wrike account carries over a
-# hundred custom fields from every CMMR workflow and several share a title -
-# there is a "Pipeline" belonging to another team, where ours is "Pipeline Name",
-# and matching on the title silently reads theirs.
+# hundred custom fields from every CMMR workflow and several share a title, so
+# matching on one can silently read another team's field.
 #
-# An empty ID is a question the form asks that has no custom field behind it, so
-# its answer never reaches the task. Those read as unanswered and the pipeline
-# uses its own default; wrike_task_handler.sh names them in request.json. Fill
-# one in by creating the field and taking its ID from:
+# Every key but "pipeline", "retention" and "previous_run" names the nextflow
+# parameter its field is titled after, so a pipeline applies one by asking for
+# its own parameter name.
 #
-#   call_wrike_api GET customfields | jq -r '.data[] | "\(.id)\t\(.title)"'
+# The form leaves an optional question off the task entirely when the requester
+# takes the default, so an absent answer means "the pipeline's own default" and
+# is not an error. IDs are listed with:
 #
-# "Pipeline Name" is the one whose options carry a description after the name
+#   call_wrike_api GET spaces/$WRIKE_NXFPIPE_SPACE_ID/customfields \
+#       | jq -r '.data[] | "\(.id)\t\(.title)"'
+#
+# "Nextflow Pipeline" is the one whose options carry a description after the name
 # ("ampliseq :: 16S full length or variable region amplicons"), so only its first
-# word is read and checked.
+# word is read and checked. It and "Dashboard Retention" are the two fields Wrike
+# lets anything be written into (allowOtherValues), which is most of why these
+# lists are checked at all.
 WRIKE_FORM_ANSWERS=(
-    "pipeline|Pipeline Name|IEAAIKU5JUANAH3C|ampliseq,taxprofiler,prev_run_id"
-    "availability|Availability||1 Month,3 Months,6 Months,12 Months,24 Months,Unlimited"
-    "previous_run|Previous Run ID||"
-    "host|Host Depletion||None,PhiX,Human + PhiX,Mouse + PhiX"
-    "settings|Settings||Default,Custom"
-    "dada_ref|Primary ASV Taxonomic Database (DADA2)||silva=138.2,greengenes2=2024.09,coidb=221216,gtdb=R11-RS232,midori2-co1=gb250,pr2=5.1.0,rdp=18,sbdi-gtdb=R11-RS232-1,unite-alleuk=10.0,unite-fungi=10.0,zehr-nifh=2.5.0"
-    "qiime_ref|Secondary QIIME2 Taxonomic Database||silva=138,greengenes2=2024.09"
-    "kraken2_ref|Read-Based Taxonomic Database (Kraken2)||silva=138,rdp=18,greengenes=13.5,standard=20240904"
-    "picrust|Functional Profiling (PICRUSt2)||No,Yes"
-    "exclude_taxa|Taxa Exclusion Filter||mitochondria,chloroplast,Francisella"
+    "pipeline|Nextflow Pipeline|IEAAIKU5JUANAH3C|ampliseq,taxprofiler,prev_run_id"
+    "retention|Dashboard Retention|IEAAIKU5JUANE5TN|1 Month,3 Months,6 Months,12 Months,24 Months,Unlimited"
+    "previous_run|Nextflow Previous Run ID|IEAAIKU5JUANE5WG|"
+    "dada_ref_taxonomy|Ampliseq --dada_ref_taxonomy|IEAAIKU5JUANE5UH|silva=138.2,greengenes2=2024.09,coidb=221216,gtdb=R11-RS232,midori2-co1=gb250,pr2=5.1.0,rdp=18,sbdi-gtdb=R11-RS232-1,unite-alleuk=10.0,unite-fungi=10.0,zehr-nifh=2.5.0"
+    "qiime_ref_taxonomy|Ampliseq --qiime_ref_taxonomy|IEAAIKU5JUANE5UV|silva=138,greengenes2=2024.09"
+    "kraken2_ref_taxonomy|Ampliseq --kraken2_ref_taxonomy|IEAAIKU5JUANE5VD|silva=138,rdp=18,greengenes=13.5,standard=20240904"
+    "picrust|Ampliseq --picrust|IEAAIKU5JUANE5VL|No,Yes"
+    "exclude_taxa|Ampliseq --exclude_taxa|IEAAIKU5JUANE5VR|mitochondria,chloroplast,Francisella"
+    "hostremoval_reference|Taxprofiler --hostremoval_reference|IEAAIKU5JUANE5WC|None,PhiX,Human + PhiX,Mouse + PhiX"
 )
 
-# The "Pipeline" answer that names no pipeline: it asks for an earlier run to be
-# repeated, and names that run in "Previous Run ID".
+# The "Nextflow Pipeline" answer that names no pipeline: it asks for an earlier
+# run to be repeated, and names that run in "Nextflow Previous Run ID".
 export WRIKE_RERUN_ANSWER="prev_run_id"
+
+# Every character that appears in any answer listed above, plus the ":" and "/"
+# of a previous run given as its results link. Checked before the allow lists
+# and before an answer is written anywhere, so that a value carrying a shell
+# metacharacter, a quote, a backslash, a tab or a newline is refused whichever
+# question it answers.
+#
+# The lists above are exact-match, so this adds nothing while Wrike sends only
+# what its dropdowns offer. It is here because that is an assumption rather than
+# a guarantee: a dropdown can be switched to free text in one click, two of these
+# fields already accept "other" values, and a custom field can be written by
+# anything holding a token. Neither check is load-bearing on its own.
+WRIKE_ANSWER_CHARACTERS='^[A-Za-z0-9 ,.:+=/_-]*$'
+WRIKE_ANSWER_MAX_LENGTH=256
 
 declare -A WRIKE_CUSTOM_STATUS_IDS=(
     [Submitted]="IEAAIKU5JMHRVOKU"
@@ -363,7 +381,7 @@ WRIKE_ANSWERS_READ="[]"
 
 read_wrike_answers() {
     local task_json="$1"
-    local entry key title id value unconfigured=""
+    local entry key title id value joined unconfigured=""
 
     WRIKE_ANSWERS=()
     WRIKE_ANSWERS_READ="[]"
@@ -379,6 +397,14 @@ read_wrike_answers() {
         if [[ -n "$id" ]]; then
             value=$(echo "$task_json" | jq -r --arg id "$id" \
                 '.data[0].customFields[]? | select(.id == $id) | .value // empty')
+
+            # A "Multiple" field may answer with a JSON array rather than a
+            # comma-separated string; both mean the same thing here
+            if [[ "$value" == \[* ]]; then
+                if joined=$(printf '%s' "$value" | jq -r 'join(",")' 2>/dev/null); then
+                    value="$joined"
+                fi
+            fi
 
             # One line, trimmed: every answer here is a single value
             read -r value <<< "$value" || true
@@ -427,6 +453,18 @@ wrike_answer() {
 wrike_custom_field_id() {
     call_wrike_api GET "customfields" \
         | jq -r --arg t "$1" 'first(.data[] | select(.title == $t) | .id) // empty'
+}
+
+# True when an answer is made only of the characters the form's own options use
+# and is not absurdly long. This is the check that holds whether or not Wrike
+# enforced its own dropdown, so every answer faces it - including the ones with
+# no allow list.
+wrike_answer_well_formed() {
+    # ".." is refused outright: no answer contains it, and "." and "/" have to be
+    # allowed for "silva=138.2" and for a run given as its results link
+    [[ "$1" != *..* ]] || return 1
+
+    [[ ${#1} -le $WRIKE_ANSWER_MAX_LENGTH && "$1" =~ $WRIKE_ANSWER_CHARACTERS ]]
 }
 
 # True when every comma-separated part of an answer is one the form offers. An

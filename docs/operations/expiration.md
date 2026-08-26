@@ -113,6 +113,18 @@ belongs to no target of its own. Both files are symlinked rather than copied, so
 the file in git is the file systemd reads, and a `git pull` that changes either
 needs only a `daemon-reload`.
 
+**Treat `enable --now` as "run it now."** `Persistent=true` makes systemd run a
+schedule it believes it missed, and a timer that has never run has no record of a
+last run — so the first pass can start the moment you enable it, deleting
+anything already past its date. Dry-run first, and enable only with the script in
+the state you mean to leave it in.
+
+To fire a pass by hand at any time, without waiting for 06:30:
+
+```bash
+systemctl --user start wrike-expiration.service && journalctl --user -u wrike-expiration -n 20
+```
+
 **Lingering applies here too** — see
 [Lingering](daemon.md#lingering). Without it there is no user manager to fire the
 timer once you log out. `Persistent=true` covers a login node that was down at

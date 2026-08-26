@@ -99,17 +99,7 @@ Example webhook payload when a task is ADDED to the Dashboards folder:
             "MessageId": "a4bc2230-aa2a-4ca2-b32f-cf611fed6cf9",
             "ReceiptHandle": "AQEB2URLVgkrplZcizhbT1nxBXYZ6Pm+pwvsyt0CZKKwoROAm9jmG37K2Q5s46IF2biBSJAibdqqyehSf9QvRtpIQvn3TXw0v9L9qIzupz1nrndH73jIsGUZLsg0jcutUgUI6pBkH3yCvAIDiNbwvxRB67PywMW3rgpvAYZhC1ZP3tTvGo/JFaNIChMiQ17IjZ2OepdmIZXbLr51B/7wnYvajccEzL36DULo89IpVfWuWisi8pZSD41RH/KUhSh3HMYs+0STikfYgW8A9ob41h0TArQ9t+USxxfsVnWw2MvuQze0Z/hjK4Gq+Cv3hg9Q1x3+O168jGHfhEzy4BPgKBSdy2W6QkB5YTbaPesSU+Ll/uE/pKRm08BsAhDVy6seZwMa",
             "MD5OfBody": "333d5fe83862580c5b112858e312b182",
-            "Body": "[\n  {\n    \"taskId\": \"MAAAAAEOCkIe\",\n    \"webhookId\": \"IEAAIKU5JAACF45S\",\n    \"eventAuthorId\": \"KUAAXTKP\",\n    \"eventType\": \"TaskCreated\",\n    \"lastUpdatedDate\": \"2026-08-11T23:35:42Z\"\n  }\n]"
-        }
-    ]
-}
-{
-    "Messages": [
-        {
-            "MessageId": "b8b428bb-0fe0-4652-8918-07f514f7c0c5",
-            "ReceiptHandle": "AQEBToLwqlEVpBX4aZ2ood5GXKi5LhoojzmrBXAV7zZNccaIWI0ltBhCHtEUAjGzUqKcxrb2a8R9XTvThmlnvEEbqP1sRp74c5r6rGtstZ0Zcd0n4dy5GL9Nimz01lB6rPsHoEMNpfbG9DznQmeoODbF+iDEGR/M2+9JJky0d95kbj2khKvaQ5YkbIRrs0pCJIQl120TOXo0FyzY3+LFjDc5q7Cmgzp4huEbhT/d+TI9KlSdbtq2CgxY8qGOYqwhIOV4ONfOXiwLtm6scqQ+pxJdiFFlWEYv4pX8AOaIOqUJDxAYiIvBSUYomJ+IZCzVVCUQswZ2duxxo9gBLST5J//cZOHssGa9aJ0VtNOWWZJuO6HMTrdGqeyfbmJ9Nw8j7ipr",
-            "MD5OfBody": "2ace32d4f7377bc3e554d76a907019ad",
-            "Body": "[\n  {\n    \"attachmentId\": \"IEAAIKU5IYWVOCNU\",\n    \"taskId\": \"MAAAAAEOCkIe\",\n    \"webhookId\": \"IEAAIKU5JAACF45S\",\n    \"eventAuthorId\": \"KUAF6MYL\",\n    \"eventType\": \"AttachmentAdded\",\n    \"lastUpdatedDate\": \"2026-08-11T23:35:42Z\"\n  }\n]"
+            "Body": "[\n  {\n    \"taskId\": \"MAAAAAEOud3s\",\n    \"webhookId\": \"IEAAIKU5JAACF45S\",\n    \"eventAuthorId\": \"KUAAXTKP\",\n    \"eventType\": \"TaskCreated\",\n    \"lastUpdatedDate\": \"2026-08-11T23:35:42Z\"\n  }\n]"
         }
     ]
 }
@@ -121,30 +111,59 @@ That task can be investigated like this:
 ```bash
 call_wrike_api GET tasks/$TASK_ID
 ```
-(only showing relevant json fields)
 ```json
 {
   "kind": "tasks",
   "data": [
     {
-      "id": "MAAAAAEOCkIe",
+      "id": "MAAAAAEOud3s",
       "accountId": "IEAAIKU5",
-      "title": "16Sv4 - Dashboard",
-      "description": "<b>Attach the sample sheet.</b><br />somesamples.txt<br />",
-      "briefDescription": "Attach the sample sheet. somesamples.txt",
+      "title": "PQ9999999",
+      "description": "<b>Settings</b><br />Default<br /><br /><b>Attach the sample sheet.</b><br />six_samples.tsv<br />",
+      "briefDescription": "Settings Default Attach the sample sheet. six_samples.tsv",
       "parentIds": [
         "MQAAAAEN9zQV"
+      ],
+      "superParentIds": [],
+      "sharedIds": [
+        "KUAYXHNY",
+        "KUAAXTKP"
       ],
       "responsibleIds": [
         "KUAYXHNY"
       ],
+      "status": "Active",
+      "importance": "Normal",
+      "createdDate": "2026-08-26T19:25:49Z",
+      "updatedDate": "2026-08-26T19:27:00Z",
+      "dates": {
+        "type": "Backlog"
+      },
+      "scope": "WsTask",
       "authorIds": [
         "KUAAXTKP"
       ],
+      "customStatusId": "IEAAIKU5JMHRVOKU",
+      "hasAttachments": true,
+      "permalink": "https://www.wrike.com/open.htm?id=4542029292",
+      "priority": "898f38008000000000008c00",
+      "followedByMe": true,
+      "followerIds": [
+        "KUAYXHNY",
+        "KUAAXTKP"
+      ],
+      "superTaskIds": [],
+      "subTaskIds": [],
+      "dependencyIds": [],
+      "metadata": [],
       "customFields": [
         {
           "id": "IEAAIKU5JUANAH3C",
-          "value": "16Sv4"
+          "value": "ampliseq :: 16S full length or variable region amplicons"
+        },
+        {
+          "id": "IEAAIKU5JUANE5TN",
+          "value": "3 Months"
         }
       ]
     }
@@ -160,16 +179,16 @@ call_wrike_api GET tasks/$TASK_ID/attachments
   "kind": "attachments",
   "data": [
     {
-      "id": "IEAAIKU5IYWVOCNU",
+      "id": "IEAAIKU5IYXBA7WO",
       "authorId": "KUAAXTKP",
-      "name": "somesamples.txt",
-      "createdDate": "2026-08-11T23:35:37Z",
+      "name": "six_samples.tsv",
+      "createdDate": "2026-08-26T19:25:47Z",
       "version": 1,
       "type": "Wrike",
-      "contentType": "text/plain",
-      "size": 5,
-      "taskId": "MAAAAAEOCkIe",
-      "originVersionId": "IEAAIKU5IYWVOCNU"
+      "contentType": "text/tab-separated-values",
+      "size": 1044,
+      "taskId": "MAAAAAEOud3s",
+      "originVersionId": "IEAAIKU5IYXBA7WO"
     }
   ]
 }

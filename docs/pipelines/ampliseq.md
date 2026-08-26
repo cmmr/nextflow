@@ -33,20 +33,21 @@ To move to a newer commit, add `AMPLISEQ_02.sh` with the new SHA and repoint
 
 ## What the requester can change
 
-On `Settings: Default` the pipeline's own defaults stand — SILVA 138.2 for DADA2
-taxonomy, no QIIME2 classifier, no Kraken2 read classification, no PICRUSt2, and
-`exclude_taxa` of mitochondria, chloroplast and Francisella.
+On `Settings: Default` the form attaches none of the optional fields, so the
+pipeline's own defaults stand — SILVA 138.2 for DADA2 taxonomy, no QIIME2
+classifier, no Kraken2 read classification, no PICRUSt2, and `exclude_taxa` of
+mitochondria, chloroplast and Francisella.
 
-`Settings: Custom` applies five
-[form answers](../wrike/account.md#the-request-forms-questions) instead:
-`dada_ref`, `qiime_ref`, `kraken2_ref`, `picrust` and `exclude_taxa`. Picking a
-QIIME2 or Kraken2 database turns that classification on, which is real extra
-runtime for a second opinion on the same ASVs.
+`Settings: Custom` attaches five
+[form answers](../wrike/account.md#the-request-forms-questions), each titled
+after the parameter it sets: `--dada_ref_taxonomy`, `--qiime_ref_taxonomy`,
+`--kraken2_ref_taxonomy`, `--picrust` and `--exclude_taxa`. Picking a QIIME2 or
+Kraken2 database turns that classification on, which is real extra runtime for a
+second opinion on the same ASVs.
 
 **The three database questions do not offer the same SILVA**, because ampliseq
 does not carry the same one for each: `silva=138.2` exists only under
-`dada_ref_databases`, so QIIME2 and Kraken2 stop at `silva=138`. Picking `Custom`
-and leaving the DADA2 question alone gives the same reference as `Default`.
+`dada_ref_databases`, so QIIME2 and Kraken2 stop at `silva=138`.
 
 ## Preparing a run
 

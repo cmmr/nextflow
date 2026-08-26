@@ -17,13 +17,13 @@
   not stored here and may not exist anywhere - so anything the client does next
   starts with a conversation, not with this page.
 
-  Placeholders are TASK_NAME, RUN_ID, COMPLETED, SAMPLE_COUNT and EXPIRED, each
-  wrapped in doubled underscores. They are deliberately not spelled that way in
-  this comment - the renderer substitutes the whole file, comment included, and
-  would fill these in too. The task name is user-authored text and is
-  HTML-escaped on the way in; COMPLETED and SAMPLE_COUNT are markup the renderer
-  builds itself, and are empty for a run with no completion date or no recorded
-  sample count.
+  Placeholders are COMMON_CSS, TASK_NAME, RUN_ID, COMPLETED, SAMPLE_COUNT and
+  EXPIRED, each wrapped in doubled underscores. They are deliberately not spelled
+  that way in this comment - the renderer substitutes the whole file, comment
+  included, and would fill these in too. The task name is user-authored text and
+  is HTML-escaped on the way in; COMPLETED and SAMPLE_COUNT are markup the
+  renderer builds itself, and are empty for a run with no completion date or no
+  recorded sample count.
 -->
 <html lang="en">
 <head>
@@ -31,98 +31,50 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__TASK_NAME__</title>
 <style>
-  :root {
-    color-scheme: light dark;
-    --bg: #ffffff;
-    --header-bg: #f4f6f8;
-    --notice-bg: #fdf6e7;
-    --notice-border: #e6c67a;
-    --border: #d7dde3;
-    --text: #1b2733;
-    --muted: #5c6b7a;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #12171d;
-      --header-bg: #1a2129;
-      --notice-bg: #2a2313;
-      --notice-border: #6b5726;
-      --border: #2c3742;
-      --text: #e6edf3;
-      --muted: #9aa7b4;
-    }
-  }
+__COMMON_CSS__
 
-  html, body { height: 100%; }
-  body {
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    background: var(--bg);
-    color: var(--text);
-    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-          Helvetica, Arial, sans-serif;
-  }
+body { font-size: 16px; line-height: 1.55; }
 
-  header {
-    flex: 0 0 auto;
-    padding: 14px 22px;
-    background: var(--header-bg);
-    border-bottom: 1px solid var(--border);
-  }
-  header h1 {
-    margin: 0;
-    font-size: 17px;
-    font-weight: 600;
-    overflow-wrap: anywhere;
-  }
-  header .meta {
-    margin: 3px 0 0;
-    font-size: 13px;
-    color: var(--muted);
-  }
-  header .meta code {
-    font: inherit;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  }
+main {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 30px 22px;
+}
+.wrap { max-width: 640px; margin: 0 auto; }
 
-  main {
-    flex: 1 1 auto;
-    overflow: auto;
-    padding: 30px 22px;
-  }
-  .wrap { max-width: 640px; margin: 0 auto; }
+.notice {
+  padding: 18px 20px;
+  margin: 0 0 26px;
+  background: var(--notice-bg);
+  border: 1px solid var(--notice-border);
+  border-radius: 8px;
+  color: var(--notice-text);
+}
+.notice h2 {
+  margin: 0 0 8px;
+  font-size: 20px;
+  font-weight: 600;
+}
+.notice p { margin: 0; }
 
-  .notice {
-    padding: 18px 20px;
-    margin: 0 0 26px;
-    background: var(--notice-bg);
-    border: 1px solid var(--notice-border);
-    border-radius: 8px;
-  }
-  .notice h2 {
-    margin: 0 0 8px;
-    font-size: 20px;
-    font-weight: 600;
-  }
-  .notice p { margin: 0; }
-
-  h3 {
-    margin: 24px 0 8px;
-    font-size: 15px;
-    font-weight: 600;
-  }
-  p { margin: 0 0 14px; }
-  .muted { color: var(--muted); font-size: 14px; }
+h3 {
+  margin: 24px 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+}
+p { margin: 0 0 14px; }
+p.muted { font-size: 14px; }
 </style>
 </head>
 <body>
 
 <header>
-  <h1>__TASK_NAME__</h1>
-  <!-- The completion date and the sample count each bring their own separator,
-       so either can render as nothing -->
-  <p class="meta">__COMPLETED__reference <code>__RUN_ID__</code> __SAMPLE_COUNT__</p>
+  <div>
+    <h1>__TASK_NAME__</h1>
+    <!-- The completion date and the sample count each bring their own separator,
+         so either can render as nothing -->
+    <p class="meta">__COMPLETED__reference <code>__RUN_ID__</code> __SAMPLE_COUNT__</p>
+  </div>
 </header>
 
 <main>

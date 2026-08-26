@@ -48,8 +48,10 @@ source /data/prod/nextflow/.env
 # The page left where the dashboard was
 readonly EXPIRED_TEMPLATE="$NEXTFLOW_DIR/templates/expired.html"
 
-# How far ahead of the date the warning comment goes out
-readonly WARNING_DAYS=14
+# How far ahead of the date the warning comment goes out. Shared with the
+# landing page, which states the same floored date wrike_dashboard_expiration
+# works out.
+readonly WARNING_DAYS=$WRIKE_EXPIRATION_NOTICE_DAYS
 
 # A dashboard is never torn down less than this long after its run finished,
 # whatever the Expiration date says. A run that took longer than the window it
@@ -226,9 +228,7 @@ recorded_sample_count() {
 render_expired_page() {
     local title="$1" run_id="$2" completed="$3" samples="$4" expired="$5"
 
-    local page completed_html="" samples_html=""
-
-    page=$(<"$EXPIRED_TEMPLATE")
+    local completed_html="" samples_html=""
 
     : "${title:=Sequencing results}"
 
@@ -245,16 +245,12 @@ render_expired_page() {
         (( samples == 1 )) && samples_html="&middot; 1 sample"
     fi
 
-    # Replacements are variable expansions rather than literal text, so bash
-    # inserts them as-is - no second pass over backslashes, which a task name is
-    # free to contain.
-    page=${page//__TASK_NAME__/$(escape_html "$title")}
-    page=${page//__RUN_ID__/$run_id}
-    page=${page//__COMPLETED__/$completed_html}
-    page=${page//__SAMPLE_COUNT__/$samples_html}
-    page=${page//__EXPIRED__/$(escape_html "$(show_date "$expired")")}
-
-    printf '%s\n' "$page"
+    render_template "$EXPIRED_TEMPLATE" \
+        TASK_NAME    "$(escape_html "$title")" \
+        RUN_ID       "$run_id" \
+        COMPLETED    "$completed_html" \
+        SAMPLE_COUNT "$samples_html" \
+        EXPIRED      "$(escape_html "$(show_date "$expired")")"
 }
 
 # Tell the author and the task's followers the date is coming, once per date

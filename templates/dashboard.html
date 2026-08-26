@@ -1,0 +1,248 @@
+<!doctype html>
+<!--
+  dashboard.html - Landing page for a published run.
+
+  Rendered by publish_dashboard.sh, which every pipeline's upload script calls,
+  and uploaded to s3://$AWS_S3_BUCKET/nxf/<run_id>/index.html. It overwrites the
+  progress page nextflow_progress.sh published while the job was running, which
+  is why this one carries no meta refresh.
+
+  Everything is inline and every link is relative, because this file is served
+  from S3 next to the objects it points at and has no origin to fetch from.
+
+  Three views share one page: a tab loads a report into the viewer frame, and
+  the file index below is shown by :target instead. That way a reader without
+  scripting still reaches every view.
+
+  Placeholders are COMMON_CSS, TASK_NAME, RUN_ID, RUN_DATE, SAMPLE_COUNT,
+  EXPIRY, BUTTONS, TABS, VIEW_SRC, GROUP_NAV and SECTIONS, each wrapped in doubled
+  underscores. They are deliberately not spelled that way in this comment - the
+  renderer substitutes the whole file, comment included, and would fill these in
+  too. The task name is user-authored text and is HTML-escaped on the way in;
+  everything else is markup the renderer escaped itself.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TASK_NAME__</title>
+<style>
+__COMMON_CSS__
+
+/* One row of views above the frame that holds them */
+nav.tabs {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 0 22px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+nav.tabs a {
+  padding: 10px 15px;
+  border-bottom: 3px solid transparent;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+nav.tabs a:hover { color: var(--text); }
+nav.tabs a.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+/* The report is the page; everything above it is a strip. */
+iframe {
+  flex: 1 1 auto;
+  width: 100%;
+  border: 0;
+  background: var(--bg);
+}
+
+/* Shown by its own :target, so the tab works without scripting. The frame is
+   the sibling after it, and goes when this arrives. The second pair of rules
+   keeps it open while one of its own groups is the target, which is what the
+   group menu jumps to. */
+#files { display: none; }
+#files:target { display: flex; }
+#files:target ~ iframe { display: none; }
+#files:has(:target) { display: flex; }
+#files:has(:target) ~ iframe { display: none; }
+
+#files {
+  flex: 1 1 auto;
+  overflow: auto;
+  gap: 34px;
+  padding: 24px 22px 40px;
+}
+
+/* The group menu, beside the groups on anything wider than a phone */
+#files .menu {
+  flex: 0 0 auto;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  width: 190px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+#files .menu a {
+  padding: 6px 10px;
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 13.5px;
+  font-weight: 600;
+  text-decoration: none;
+}
+#files .menu a:hover { background: var(--row); color: var(--text); }
+
+#files .groups {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 900px;
+}
+#files .group { margin: 0 0 30px; }
+#files .group h2 {
+  margin: 0 0 4px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+#files .group table { font-size: 14px; }
+#files .group td { padding: 9px 10px; }
+#files .group tbody tr:nth-child(odd) { background: transparent; }
+#files .group tr:hover { background: var(--row); }
+#files .desc {
+  display: block;
+  margin-top: 2px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+               Helvetica, Arial, sans-serif;
+  font-size: 13px;
+  color: var(--muted);
+  overflow-wrap: break-word;
+}
+/* Downloads land as files; everything else opens in a tab of its own */
+#files .tag {
+  display: inline-block;
+  margin-left: 7px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  vertical-align: 1px;
+}
+
+@media (max-width: 800px) {
+  #files { flex-direction: column; gap: 18px; }
+  #files .menu {
+    position: static;
+    width: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  #files .menu a { background: var(--row); }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>__TASK_NAME__</h1>
+    <!-- The sample count brings its own separator, so it can render as nothing -->
+    <p class="meta">Completed __RUN_DATE__ &middot; uid <code>__RUN_ID__</code> __SAMPLE_COUNT__</p>
+  </div>
+  <div class="buttons">__BUTTONS__</div>
+</header>
+
+__EXPIRY__
+
+<nav class="tabs">__TABS__</nav>
+
+<section id="files">
+  <nav class="menu">__GROUP_NAV__</nav>
+  <div class="groups">__SECTIONS__</div>
+</section>
+
+<iframe id="viewer" name="viewer" src="__VIEW_SRC__" title="Report"></iframe>
+
+<script>
+(function () {
+  var tabs = [].slice.call(document.querySelectorAll("nav.tabs a"));
+  var viewer = document.getElementById("viewer");
+
+  // The countdown is worked out when the page is read rather than when it was
+  // published, so a link opened weeks later still says how long is left.
+  var expiry = document.querySelector(".expiry[data-expires]");
+  if (expiry) {
+    var parts = expiry.getAttribute("data-expires").split("-");
+    var due = new Date(+parts[0], +parts[1] - 1, +parts[2]);
+    var today = new Date();
+    var days = Math.round((due - new Date(today.getFullYear(), today.getMonth(),
+                                          today.getDate())) / 86400000);
+    var left = expiry.querySelector(".countdown");
+
+    if (days > 1)        left.textContent = ", " + days + " days from now";
+    else if (days === 1) left.textContent = ", tomorrow";
+    else if (days === 0) left.textContent = ", today";
+    else                 left.textContent = ", a date that has passed";
+
+    if (days <= 14) expiry.className = "expiry soon";
+  }
+
+  function show(view) {
+    tabs.forEach(function (tab) {
+      var on = tab.getAttribute("data-view") === view;
+      tab.className = on ? "tab active" : "tab";
+
+      if (on && view !== "files" && viewer.getAttribute("src") !== tab.getAttribute("href")) {
+        viewer.setAttribute("src", tab.getAttribute("href"));
+      }
+    });
+  }
+
+  function fromHash() {
+    var hash = location.hash.replace("#", "");
+    var target = hash && document.getElementById(hash);
+    var known = tabs.some(function (t) { return t.getAttribute("data-view") === hash; });
+    var view = known ? hash : tabs[0].getAttribute("data-view");
+
+    // A group of the file index is targeted by the menu inside it, which leaves
+    // the index open under a fragment no tab names
+    if (!known && target && document.getElementById("files").contains(target)) {
+      view = "files";
+    }
+
+    // The index is shown by its own fragment, so opening on it needs one
+    if (view === "files" && !location.hash) location.hash = "files";
+
+    show(view);
+  }
+
+  tabs.forEach(function (tab) {
+    tab.addEventListener("click", function (event) {
+      event.preventDefault();
+      location.hash = tab.getAttribute("data-view");
+      fromHash();
+    });
+  });
+
+  window.addEventListener("hashchange", fromHash);
+  fromHash();
+})();
+</script>
+
+</body>
+</html>

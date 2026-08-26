@@ -49,6 +49,13 @@ whatever the date says. Without that, a run that took longer than the window it
 asked for would be expired the day it was published, with the warning arriving
 alongside the deletion instead of ahead of it.
 
+Both numbers are `WRIKE_EXPIRATION_NOTICE_DAYS`, in
+[`wrike_api.sh`](../../scripts/wrike_api.sh), because the
+[dashboard](../results/index.md#the-expiration-notice) states the same floored
+date this pass acts on. It works it out through `wrike_dashboard_expiration`,
+which reads that constant too — so the date printed on a published page and the
+date the tear-down honours cannot drift apart.
+
 ## What survives
 
 Everything under `nxf/<uid>/` goes except the run's own records, which are what

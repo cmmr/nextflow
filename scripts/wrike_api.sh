@@ -34,6 +34,11 @@ export WRIKE_S3_RESULTS_URL_CFID="IEAAIKU5JUANAH3J"
 # the results are kept indefinitely, which is what "Unlimited" leaves.
 export WRIKE_EXPIRATION_CFID="IEAAIKU5JUANEX3T"
 
+# How far ahead of that date wrike_expiration.sh warns, and the shortest a
+# dashboard is ever kept for. A run that took longer than the window it was
+# given would otherwise be torn down the day it was published.
+export WRIKE_EXPIRATION_NOTICE_DAYS=14
+
 # Every question on the "Bioinformatics Pipeline" request form, as
 # key | its title in Wrike | the answers this system accepts.
 #
@@ -309,6 +314,32 @@ wrike_expiration_date() {
     [[ "$months" =~ ^[0-9]+$ ]] || return 0
 
     date -d "+$months months" "+%F"
+}
+
+# The date a run's dashboard is torn down on, as the landing page states it and
+# wrike_expiration.sh acts on it: the task's "Expiration" date, or the minimum
+# notice from the day the run finished, whichever is later. Prints nothing when
+# the task carries no date, which is what "Unlimited" leaves.
+#
+# Takes either a task or the reply a task was fetched in, and the run's finish
+# date, defaulting to today.
+wrike_dashboard_expiration() {
+    local task_json="$1"
+    local finished="${2:-$(date +%F)}"
+    local expires floor
+
+    expires=$(echo "$task_json" | jq -r --arg id "$WRIKE_EXPIRATION_CFID" \
+        '(.data[0] // .) | .customFields[]? | select(.id == $id) | .value // empty') \
+        || return 1
+
+    [[ "$expires" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || return 0
+
+    floor=$(date -d "$finished +$WRIKE_EXPIRATION_NOTICE_DAYS days" +%F) || return 1
+
+    # Both are yyyy-mm-dd, which sorts as text
+    [[ "$expires" > "$floor" ]] && floor="$expires"
+
+    printf '%s' "$floor"
 }
 
 # Read the request form's answers off a task into WRIKE_ANSWERS, keyed as in

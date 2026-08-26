@@ -5,7 +5,7 @@ Every script that talks to Wrike or AWS begins with
 assignment or a `source`, so it is safe and cheap to source any number of times,
 in any process, and it carries no guard. It sets `NEXTFLOW_DIR`, sets the
 nextflow cache directories, unsets any `WRIKE_API_TOKEN` inherited from the
-caller, and then sources three things:
+caller, and then sources five things:
 
 - `secrets/.env` — **credentials only**, never committed:
   - `WRIKE_API_TOKEN` — the bot's, and the only one anything here uses. `.env`
@@ -31,8 +31,14 @@ caller, and then sources three things:
   HMAC-SHA256, so it is stable, unguessable, and safe in a path and a URL, none
   of which a raw Wrike ID is — plus `is_valid_uid`, which every script that
   builds a path or an S3 prefix out of one checks first, `escape_html`, for the
-  task name that heads both published pages, and `run_results_url`, the one
-  place the address written onto a Wrike task is spelled.
+  task name that heads every published page, `escape_url` and `human_size` for the
+  filenames and sizes those pages list, `render_template`, which fills one of the
+  [`templates/`](results/index.md#one-page-one-stylesheet) pages in and inlines
+  `common.css` into it, and `run_results_url`, the one place the address written
+  onto a Wrike task is spelled.
+- [`scripts/pipeline_params.sh`](../scripts/pipeline_params.sh) — the layered
+  parameter map a pipeline declares its defaults in and `wrike_job.sh` writes the
+  params file from; see [Pipelines](pipelines/index.md).
 - [`scripts/wrike_api.sh`](../scripts/wrike_api.sh) — `call_wrike_api` plus the
   `update_wrike_*` / `add_wrike_task_comment` helpers, which read `TASK_ID` from
   the environment rather than taking it as an argument. **It also defines every
@@ -45,12 +51,21 @@ caller, and then sources three things:
     on, written from the request form's "Availability" answer and read back daily
     by `wrike_expiration.sh`; see
     [Expiring a dashboard](operations/expiration.md)
+  - `WRIKE_EXPIRATION_NOTICE_DAYS` — how far ahead of that date the warning goes
+    out, and the shortest a dashboard is ever kept. Read by the tear-down and by
+    the landing page's own
+    [expiration notice](results/index.md#the-expiration-notice), so the date a
+    reader is shown is the date that will be honoured
   - `WRIKE_CUSTOM_STATUS_IDS` — the status map described in
     [Progress is the task's Status](wrike/status.md)
   - `WRIKE_NXFPIPE_SPACE_ID`, `WRIKE_NXFPIPE_WORKFLOW_ID`,
     `WRIKE_NXFPIPE_REQUEST_FORM_ID` — not read by the running system; they are
     what you need to re-inspect the workflow and form, as
     [the Wrike API responses](wrike/responses.md) does
+- [`scripts/publish_dashboard.sh`](../scripts/publish_dashboard.sh) — the
+  landing page every pipeline's upload script publishes, and
+  `upload_results_tree`, the two-pass copy that gives each object a content type
+  a browser can do something with. See [The results page](results/index.md).
 
 **`.env` deliberately does not touch `PATH`.** Everything in this project is
 invoked by its absolute path — `"$NEXTFLOW_DIR/scripts/wrike_job.sh"`, and

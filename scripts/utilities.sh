@@ -19,9 +19,10 @@
 # wrike_task_handler.sh creates message.out in the run directory, and
 # wrike_followup.sh posts whatever ends up there back to the Wrike task.
 #
-# Defines: log, warn, fail, run_results_url, escape_html, is_valid_uid, derive_uid
+# Defines: log, warn, fail, run_results_url, escape_html, escape_url, human_size,
+#          render_template, is_valid_uid, derive_uid
 # Env:     RUN_ID_SALT from secrets/.env, for derive_uid only; AWS_S3_BUCKET and
-#          S3_RUN_PREFIX for run_results_url
+#          S3_RUN_PREFIX for run_results_url; NEXTFLOW_DIR for render_template
 
 log() {
     echo "[$(date)] $*"
@@ -61,6 +62,73 @@ escape_html() {
     s="${s//</&lt;}"
     s="${s//>/&gt;}"
     printf '%s' "$s"
+}
+
+# Percent-encode a path for an href. A filename is bytes and is encoded as bytes,
+# which LC_ALL=C makes the loop below walk. Separators are left alone, so a
+# whole relative path can be passed in.
+escape_url() {
+    local LC_ALL=C
+    local s="$1" out="" i c
+
+    for (( i = 0; i < ${#s}; i++ )); do
+        c=${s:i:1}
+
+        case "$c" in
+            [A-Za-z0-9._~/-]) out+="$c" ;;
+            *)                out+=$(printf '%%%02X' "'$c") ;;
+        esac
+    done
+
+    printf '%s' "$out"
+}
+
+# Bytes, in the units a download is read in
+human_size() {
+    local bytes="$1"
+
+    LC_ALL=C awk -v b="$bytes" 'BEGIN {
+        split("B KB MB GB TB PB", unit, " ")
+        i = 1
+        while (b >= 1024 && i < 6) { b /= 1024; i++ }
+        if (i == 1) printf "%d %s", b, unit[i]
+        else        printf "%.1f %s", b, unit[i]
+    }'
+}
+
+# Fill in one page template and print it. templates/common.css is inlined for
+# every page; the name/value pairs after the template are substituted in the
+# order given, each replacing its name wrapped in doubled underscores.
+#
+# Replacements are variable expansions rather than literal text, so bash inserts
+# them as-is - no second pass over backslashes, which a task name is free to
+# contain.
+render_template() {
+    local file="$1"
+    shift
+
+    local common="$NEXTFLOW_DIR/templates/common.css"
+    local page css name value
+
+    if [[ ! -r "$file" || ! -r "$common" ]]; then
+        warn "Cannot read the page template $file or the stylesheet $common."
+        return 1
+    fi
+
+    page=$(<"$file")
+    css=$(<"$common")
+
+    page=${page//__COMMON_CSS__/$css}
+
+    while (( $# >= 2 )); do
+        name="$1"
+        value="$2"
+        shift 2
+
+        page=${page//__"${name}"__/$value}
+    done
+
+    printf '%s\n' "$page"
 }
 
 # A uid is the name a run is known by everywhere except Wrike: the run directory,

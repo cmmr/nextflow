@@ -8,9 +8,12 @@ secrets/.env          Wrike token and AWS credentials. Credentials only; not in 
 run                   CLI entry point. Files a Wrike request, then gets out of the way.
 
 scripts/
-  utilities.sh             log, warn, fail, and the uid helpers. Sourced by .env.
+  utilities.sh             log, warn, fail, the page renderer, and the uid helpers.
+                           Sourced by .env.
   pipeline_params.sh       The parameter map a params file is built from. Likewise.
   wrike_api.sh             Wrike REST helpers and object IDs. Likewise sourced.
+  publish_dashboard.sh     Builds the landing page and uploads a results tree.
+                           Likewise sourced; used by both upload scripts.
   wrike_sqs_listener.sh    The daemon. Polls SQS, routes events.
   wrike_task_handler.sh    Validates a form request, submits it. Login node.
   wrike_delete_handler.sh  Tears a run down. Login node.
@@ -38,13 +41,17 @@ config/               Nextflow config, passed to `nextflow run -c`.
                       Both are documented in docs/pipelines/taxprofiler.md.
 
 templates/            Web pages published to S3 alongside a run's results.
-  progress.html       Live progress page template. Pipeline-agnostic.
+  common.css          The palette and base styling every page below inlines.
+  dashboard.html      Landing page template. Pipeline-agnostic.
+  progress.html       Live progress page template. Likewise.
   expired.html        The page left where an expired dashboard was. Likewise.
   listing.html        Folder listing page template. Likewise.
   ampliseq/
-    index.html        Landing page template for a published ampliseq run.
+    outputs.conf      What the dashboard's file index lists for an ampliseq run.
+    report.css        The stylesheet ampliseq's own summary report is given.
+    abstract.md       The section that report opens with.
   taxprofiler/
-    index.html        Landing page template for a published taxprofiler run.
+    outputs.conf      What the dashboard's file index lists for a taxprofiler run.
 
 systemd/              The units systemd runs: the daemon, and the daily
                       expiration timer.
@@ -66,7 +73,7 @@ docs/                 Source of the documentation site; one page per file.
     ampliseq.md       The ampliseq pre/post steps, and how the 16S region is detected.
     taxprofiler.md    The taxprofiler pipelines, their databases and host references.
   results/
-    index.md          The published landing page and the live progress view.
+    index.md          The dashboard, its file index, and the live progress view.
     browsable-folders.md  Listing pages written into every results folder.
     cloudfront.md     Viewer request function that serves those listing pages.
   wrike/

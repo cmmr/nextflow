@@ -17,14 +17,20 @@
 # data. A WGS run's reads are large, so this needs free space in the run
 # directory equal to the input volume.
 #
+# The landing page is publish_dashboard.sh's, filled in from what this run
+# actually produced: which reports it has tabs for, which files its header
+# offers, and which of the outputs named in templates/taxprofiler/outputs.conf
+# exist.
+#
 # Usage:     taxprofiler_upload.sh [results_dir]
 #            defaults to ./results, the outdir set in the taxprofiler params file
 # Called by: wrike_job.sh, as the POST_PROCESS_CMDS entry of the taxprofiler pipelines
 # Requires:  aws, zip, curl and jq (via the Wrike helpers)
-# Reads:     templates/taxprofiler/index.html, the landing page template
+# Reads:     templates/dashboard.html and templates/taxprofiler/outputs.conf, via
+#            the dashboard helpers
 # Runs:      index_directories.sh, over the results folder
 # Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, WRIKE_S3_RESULTS_URL_CFID,
-#            the Wrike helper functions and the log/fail/escape_html/is_valid_uid
+#            the Wrike and dashboard helper functions and the log/fail/is_valid_uid
 #            helpers, all sourced from .env
 # Outputs:   ./message.out on error
 #
@@ -52,9 +58,8 @@ SAMPLE_COUNT_FILE="sample_count.txt"
 # results as part of the record
 DB_SHEET="taxprofiler_database.csv"
 
-# The page that frames the report. Both of the links it carries are relative, so
-# it only works from the same prefix as the objects it points at.
-readonly INDEX_TEMPLATE="$NEXTFLOW_DIR/templates/taxprofiler/index.html"
+# What the landing page's "All output files" view lists, in the order it lists it
+readonly OUTPUT_CATALOG="$NEXTFLOW_DIR/templates/taxprofiler/outputs.conf"
 
 # The run directory is named after the uid, so results publish under the
 # directory's own name. Validated because an empty value would make
@@ -77,51 +82,11 @@ if [[ ! -d "$RESULTS_DIR" ]]; then
     fail "The pipeline finished but produced no results directory ('$RESULTS_DIR') to upload."
 fi
 
-# One button per file matching a glob under RESULTS_DIR, labelled with its own
-# filename. "view" opens in a new tab, anything else downloads. Paths and hrefs
-# are relative to RESULTS_DIR, which is what lands at the prefix root.
-add_buttons() {
-    local mode="$1"
-    local pattern="$2"
-    local path name
-
-    for path in "$RESULTS_DIR"/$pattern; do
-        [[ -r "$path" ]] || continue
-
-        name=${path#"$RESULTS_DIR/"}
-        DOWNLOADS+="<a class=\"download\" href=\"$(escape_html "$name")\""
-
-        if [[ "$mode" == view ]]; then
-            DOWNLOADS+=" target=\"_blank\" rel=\"noopener\">"
-        else
-            DOWNLOADS+=" download>"
-        fi
-
-        DOWNLOADS+="$(escape_html "${name##*/}")</a>"
-    done
-}
-
-# Built from what this run actually produced: a profiler can be turned off, and
-# krona covers only some of them. A missing file gets no button.
-render_downloads() {
-    DOWNLOADS=""
-
-    # The reads are the bulky download most people came for
-    add_buttons download "$FASTQ_ZIP_NAME"
-
-    # Interactive classification charts, one per tool and database
-    add_buttons view "krona/*.html"
-
-    # taxpasta's merged profiles, one table per tool and database
-    add_buttons download "taxpasta/*.tsv"
-
-    printf '%s' "$DOWNLOADS"
-}
-
 # 1. Archive the reads into the results folder so they upload with everything
 #    else. Skipped for any pipeline that does not stage its inputs this way.
 if [[ -d "$FASTQ_DIR" ]]; then
-    command -v zip > /dev/null         || fail "The results could not be packaged for download: zip is not installed."
+    command -v zip > /dev/null \
+        || fail "The results could not be packaged for download: zip is not installed."
 
     log "Archiving $FASTQ_DIR for task $TASK_ID..."
     rm -f "$FASTQ_ZIP"
@@ -129,8 +94,7 @@ if [[ -d "$FASTQ_DIR" ]]; then
     # zip's output goes into the failure message, so the requester is told why
     # their data could not be packaged
     if ! ZIP_OUTPUT=$(zip -0 -r "$FASTQ_ZIP" "$FASTQ_DIR" 2>&1); then
-        fail "The sequencing data could not be packaged for download:"$'
-'"$ZIP_OUTPUT"
+        fail "The sequencing data could not be packaged for download:"$'\n'"$ZIP_OUTPUT"
     fi
 else
     log "No $FASTQ_DIR directory; skipping raw sequence archive."
@@ -146,31 +110,42 @@ if [[ -r "$DB_SHEET" ]]; then
 fi
 
 # 3. Give every folder below the results root a listing page, so that the folder
-#    links multiqc_report.html carries still resolve once the results are objects
-#    in a bucket rather than directories on disk.
+#    links the report and the landing page carry still resolve once the results
+#    are objects in a bucket rather than directories on disk.
 if ! "$NEXTFLOW_DIR/scripts/index_directories.sh" "$RESULTS_DIR"; then
     warn "The results folders could not be indexed; their listings will be missing."
 fi
 
-# 4. Publish everything in one pass
+# 4. Publish everything below the landing page
 log "Initiating S3 upload for Task $TASK_ID..."
 
-if ! UPLOAD_OUTPUT=$(aws s3 cp "$RESULTS_DIR/" "$S3_RESULTS_DIR/" --recursive 2>&1); then
+if ! UPLOAD_OUTPUT=$(upload_results_tree "$RESULTS_DIR" "$S3_RESULTS_DIR"); then
     fail "The results could not be uploaded to S3:"$'\n'"$UPLOAD_OUTPUT"
 fi
 
-# 5. Land the page that frames all of it last, once nothing it points at is still
-#    uploading. This overwrites the progress page published to this key.
-if [[ ! -r "$INDEX_TEMPLATE" ]]; then
-    fail "The results were uploaded, but the page that presents them is missing from the server."
-fi
+# 5. Build the page that frames all of it, from what the run produced.
+dashboard_reset "$RESULTS_DIR" "$OUTPUT_CATALOG"
+
+dashboard_view quality "MultiQC report" "multiqc/multiqc_report.html"
+
+#    The reads are the bulky download most people came for; then the interactive
+#    classification charts, one per tool and database, and taxpasta's merged
+#    profiles
+dashboard_button "$FASTQ_ZIP_NAME"
+dashboard_button "krona/*.html"
+dashboard_button "taxpasta/*.tsv"
 
 #    The title is read from Wrike rather than taken from the copy recorded at
 #    submission, since the requester may have renamed the task since. That copy
-#    is the fallback, and a generic heading the one after that.
+#    is the fallback, and a generic heading the one after that. The same reply
+#    carries the date the dashboard is torn down on.
 TASK_NAME=""
+EXPIRES_ON=""
+
 if TASK_JSON=$(call_wrike_api GET "tasks/$TASK_ID"); then
     TASK_NAME=$(echo "$TASK_JSON" | jq -r '.data[0].title // empty')
+    EXPIRES_ON=$(wrike_dashboard_expiration "$TASK_JSON") \
+        || warn "Could not work out when this dashboard expires; the page will not say."
 fi
 
 if [[ -z "$TASK_NAME" && -r "$WRIKE_TASK_NAME_FILE" ]]; then
@@ -197,19 +172,17 @@ if [[ -r "$SAMPLE_COUNT_FILE" ]]; then
     fi
 fi
 
-# The task name is whatever the requester typed into Wrike, and it goes straight
-# into the page header, so it is HTML-escaped on the way in. DOWNLOADS is markup
-# the renderer escaped itself.
-INDEX_HTML=$(<"$INDEX_TEMPLATE")
-INDEX_HTML=${INDEX_HTML//__TASK_NAME__/$(escape_html "$TASK_NAME")}
-INDEX_HTML=${INDEX_HTML//__RUN_ID__/$RUN_ID}
-INDEX_HTML=${INDEX_HTML//__RUN_DATE__/$(date '+%B %-d, %Y')}
-INDEX_HTML=${INDEX_HTML//__SAMPLE_COUNT__/$SAMPLE_COUNT_HTML}
-INDEX_HTML=${INDEX_HTML//__DOWNLOADS__/$(render_downloads)}
+# 6. Land the page last, once nothing it points at is still uploading. This
+#    overwrites the progress page published to this key.
+#
+#    --content-type because reading the body from stdin leaves aws nothing to
+#    guess from, and a page served as binary downloads instead of rendering.
+if ! DASHBOARD=$(render_dashboard "$RUN_ID" "$TASK_NAME" "$(date '+%B %-d, %Y')" \
+        "$SAMPLE_COUNT_HTML" "$EXPIRES_ON"); then
+    fail "The results were uploaded, but the page that presents them could not be built."
+fi
 
-# --content-type because reading the body from stdin leaves aws nothing to guess
-# from, and a page served as binary downloads instead of rendering.
-if ! UPLOAD_OUTPUT=$(printf '%s\n' "$INDEX_HTML" \
+if ! UPLOAD_OUTPUT=$(printf '%s\n' "$DASHBOARD" \
         | aws s3 cp - "$S3_RESULTS_DIR/index.html" --content-type "text/html" 2>&1); then
     fail "The results were uploaded, but the page that presents them was not:"$'\n'"$UPLOAD_OUTPUT"
 fi

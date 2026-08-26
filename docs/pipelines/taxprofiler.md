@@ -127,10 +127,10 @@ lab sheet into the six-column CSV taxprofiler wants — `sample`, `run_accession
 [`taxprofiler_upload.sh`](../../scripts/taxprofiler_upload.sh) mirrors the ampliseq
 uploader: it zips `raw-sequences/` into the results folder (`zip -0` — the reads
 are already compressed), indexes the results folders, copies them to
-`s3://$AWS_S3_BUCKET/nxf/<uid>/`, renders
-[`templates/taxprofiler/index.html`](../../templates/taxprofiler/index.html) over
-`multiqc/multiqc_report.html`, and writes the report URL to the Wrike custom
-field.
+`s3://$AWS_S3_BUCKET/nxf/<uid>/`, renders the shared
+[dashboard](../results/index.md) over `multiqc/multiqc_report.html`, and writes
+the report URL to the Wrike custom field. What its file index lists is
+[`templates/taxprofiler/outputs.conf`](../../templates/taxprofiler/outputs.conf).
 
 **The reads archive is the bulk of what a WGS run publishes.** Building it needs
 free space in the run directory equal to the input volume, and the upload is that
@@ -143,8 +143,12 @@ names from the database sheet:
 | Button | Files |
 |---|---|
 | `raw-sequences.zip` | the staged reads, zipped at upload |
-| krona charts | `krona/*.html` — opened in a new tab rather than downloaded |
+| krona charts | `krona/*.html` — one per tool and database |
 | taxpasta tables | `taxpasta/*.tsv` — one merged profile per tool and database |
+
+Only the archive downloads; the charts and the tables open in a tab, which is
+what [their content types](../results/index.md#what-a-link-does-when-you-click-it)
+are set at upload to allow.
 
 
 ## Host removal

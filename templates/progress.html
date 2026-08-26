@@ -3,7 +3,7 @@
   progress.html - Live progress page for a running pipeline.
 
   Rendered by scripts/nextflow_progress.sh every minute while a job runs, and
-  uploaded to the same key the finished report later takes
+  uploaded to the same key the finished dashboard later takes
   (s3://$AWS_S3_BUCKET/nxf/<run_id>/index.html) - so a reader who opens the
   results link early watches the run, and is handed the report when it lands.
 
@@ -11,14 +11,15 @@
   has no live status API without Seqera Platform, so the rows are parsed out of
   its console output; see nextflow_progress.sh.
 
-  The meta refresh is what makes this live. The finished report carries none, so
-  the last refresh a reader's browser makes is the one that stops it polling.
+  The meta refresh is what makes this live. The finished dashboard carries none,
+  so the last refresh a reader's browser makes is the one that stops it polling.
 
-  Placeholders are TASK_NAME, RUN_ID, STATUS, UPDATED and ROWS, each wrapped in
-  doubled underscores. They are deliberately not spelled that way in this comment
-  - the renderer substitutes the whole file, comment included, and would paste
-  the entire process table in here too. The task name is user-authored text and
-  is HTML-escaped on the way in; ROWS is markup the renderer escaped itself.
+  Placeholders are COMMON_CSS, TASK_NAME, RUN_ID, STATUS, UPDATED and ROWS, each
+  wrapped in doubled underscores. They are deliberately not spelled that way in
+  this comment - the renderer substitutes the whole file, comment included, and
+  would paste the entire process table in here too. The task name is
+  user-authored text and is HTML-escaped on the way in; ROWS is markup the
+  renderer escaped itself.
 -->
 <html lang="en">
 <head>
@@ -27,155 +28,96 @@
 <meta http-equiv="refresh" content="60">
 <title>__TASK_NAME__</title>
 <style>
-  :root {
-    color-scheme: light dark;
-    --bg: #ffffff;
-    --header-bg: #f4f6f8;
-    --border: #d7dde3;
-    --text: #1b2733;
-    --muted: #5c6b7a;
-    --accent: #1f6feb;
-    --track: #e3e8ed;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #12171d;
-      --header-bg: #1a2129;
-      --border: #2c3742;
-      --text: #e6edf3;
-      --muted: #9aa7b4;
-      --accent: #3b82f6;
-      --track: #263039;
-    }
-  }
+__COMMON_CSS__
 
-  html, body { height: 100%; }
-  body {
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    background: var(--bg);
-    color: var(--text);
-    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-          Helvetica, Arial, sans-serif;
-  }
+.status {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 15px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.status .dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.8s ease-in-out infinite;
+}
+@keyframes pulse { 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) {
+  .status .dot { animation: none; }
+}
 
-  header {
-    flex: 0 0 auto;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px 24px;
-    padding: 14px 22px;
-    background: var(--header-bg);
-    border-bottom: 1px solid var(--border);
-  }
-  header h1 {
-    margin: 0;
-    font-size: 17px;
-    font-weight: 600;
-    overflow-wrap: anywhere;
-  }
-  header .meta {
-    margin: 3px 0 0;
-    font-size: 13px;
-    color: var(--muted);
-  }
-  header .meta code {
-    font: inherit;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  }
+main {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 22px;
+}
+.wrap { max-width: 1000px; margin: 0 auto; }
 
-  .status {
-    flex: 0 0 auto;
-    display: inline-flex;
-    align-items: center;
-    gap: 9px;
-    padding: 8px 15px;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    font-size: 14px;
-    font-weight: 600;
-    white-space: nowrap;
-  }
-  .status .dot {
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    background: var(--accent);
-    animation: pulse 1.8s ease-in-out infinite;
-  }
-  @keyframes pulse { 50% { opacity: 0.25; } }
-  @media (prefers-reduced-motion: reduce) {
-    .status .dot { animation: none; }
-  }
+th {
+  text-align: left;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 0 12px 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+tbody tr:nth-child(odd) { background: transparent; }
+td {
+  padding: 9px 12px 9px 0;
+  vertical-align: middle;
+}
+td.proc {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+td.bar { width: 34%; min-width: 120px; }
+td.bar span {
+  display: block;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--track);
+}
+td.bar span > i {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--accent);
+}
+td.pct { width: 3.5em; text-align: right; font-variant-numeric: tabular-nums; }
+td.cnt { width: 12em; color: var(--muted); font-variant-numeric: tabular-nums; }
 
-  main {
-    flex: 1 1 auto;
-    overflow: auto;
-    padding: 22px;
-  }
-  .wrap { max-width: 1000px; margin: 0 auto; }
+.empty { padding: 26px 0; }
 
-  table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  th {
-    text-align: left;
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--muted);
-    font-weight: 600;
-    padding: 0 12px 8px 0;
-    border-bottom: 1px solid var(--border);
-  }
-  td {
-    padding: 9px 12px 9px 0;
-    border-bottom: 1px solid var(--border);
-    vertical-align: middle;
-  }
-  td.proc {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 13px;
-    overflow-wrap: anywhere;
-  }
-  td.bar { width: 34%; min-width: 120px; }
-  td.bar span {
-    display: block;
-    height: 8px;
-    border-radius: 4px;
-    background: var(--track);
-  }
-  td.bar span > i {
-    display: block;
-    height: 100%;
-    border-radius: 4px;
-    background: var(--accent);
-  }
-  td.pct { width: 3.5em; text-align: right; font-variant-numeric: tabular-nums; }
-  td.cnt { width: 12em; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* Nextflow shows only so many processes at once, and closes the table with a
+   line counting the ones it left out. */
+.note { margin: 14px 0 0; font-size: 13px; color: var(--muted); }
 
-  .empty { color: var(--muted); padding: 26px 0; }
+footer {
+  flex: 0 0 auto;
+  padding: 12px 22px;
+  border-top: 1px solid var(--border);
+  font-size: 12.5px;
+  color: var(--muted);
+}
 
-  /* Nextflow shows only so many processes at once, and closes the table with a
-     line counting the ones it left out. */
-  .note { margin: 14px 0 0; font-size: 13px; color: var(--muted); }
-
-  footer {
-    flex: 0 0 auto;
-    padding: 12px 22px;
-    border-top: 1px solid var(--border);
-    font-size: 12.5px;
-    color: var(--muted);
-  }
-
-  /* Narrow enough that only the process and its percentage still fit. The
-     headers go with their columns - the renderer emits four, two of them
-     empty spacers above the bar and percentage. */
-  @media (max-width: 640px) {
-    td.bar, td.cnt,
-    th:nth-child(2), th:nth-child(3), th:nth-child(4) { display: none; }
-  }
+/* Narrow enough that only the process and its percentage still fit. The
+   headers go with their columns - the renderer emits four, two of them
+   empty spacers above the bar and percentage. */
+@media (max-width: 640px) {
+  td.bar, td.cnt,
+  th:nth-child(2), th:nth-child(3), th:nth-child(4) { display: none; }
+}
 </style>
 </head>
 <body>

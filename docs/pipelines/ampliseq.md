@@ -78,7 +78,46 @@ writes the report URL to a Wrike custom field. Nextflow's `work/` directory is
 deliberately left behind.
 
 What the requester actually opens — the landing page, and the live progress view
-it starts out as — is [The results page](../results/index.md).
+it starts out as — is [The results page](../results/index.md). What it offers of
+this pipeline's output is declared in three lines of that script and one text
+file:
+
+```bash
+dashboard_view report  "Analysis report"   "summary_report/summary_report.html"
+dashboard_view quality "Sequence quality"  "multiqc/multiqc_report.html"
+dashboard_button "raw-sequences.zip"
+dashboard_button "qiime2/abundance_tables/feature-table.biom"
+```
+
+plus [`templates/ampliseq/outputs.conf`](../../templates/ampliseq/outputs.conf),
+the annotated index of everything else — abundance tables, taxonomy, sequences,
+diversity, PICRUSt2, QC, the R objects, and the record of how the run was set
+up. Entries whose files a given run did not produce are skipped, so an ONT run
+lists `savont/` and no `dada2/` without a catalogue of its own.
+
+## Dressing the summary report
+
+ampliseq renders its own report from an R Markdown template, and exposes the
+pieces of it worth replacing. Three are set in
+[`AMPLISEQ_01.sh`](../../pipelines/AMPLISEQ_01.sh):
+
+| Parameter | Set to |
+|---|---|
+| `report_css` | [`templates/ampliseq/report.css`](../../templates/ampliseq/report.css) — the dashboard's palette, light or dark, in place of `assets/nf-core_style.css` |
+| `report_abstract` | [`templates/ampliseq/abstract.md`](../../templates/ampliseq/abstract.md) — replaces the pipeline's `Abstract` section with one written for the client |
+| `report_title` | `Amplicon sequencing analysis` |
+
+The report is read inside the dashboard's frame, so it follows the reader's
+light or dark setting the way every other published page does. Its plots are
+SVGs drawn on a white canvas, so in dark mode each one sits on a white plate
+rather than being inverted into something unreadable.
+
+`report_logo` is left at its default and hidden by the stylesheet: the pipeline
+stretches it to the full width of the page and paints the table of contents with
+it, which is nf-core branding on a CMMR deliverable. Attribution stays where it
+belongs — the report's subtitle still names `nf-core/ampliseq` and its version,
+and the abstract links to the project. **Nothing here carries Baylor College of
+Medicine marks**, which we have no permission to apply.
 
 ## How the platform is detected
 

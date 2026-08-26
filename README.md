@@ -26,7 +26,7 @@ to `main`.
 | [Repository layout](https://cmmr.github.io/nextflow/layout/) | What every file here is for |
 | [Configuration](https://cmmr.github.io/nextflow/configuration/) | `.env` and everything it sources |
 | [Pipelines](https://cmmr.github.io/nextflow/pipelines/) | The pipeline file format, versioning, and adding one |
-| [Results](https://cmmr.github.io/nextflow/results/) | The published landing page, progress view, and folder listings |
+| [Results](https://cmmr.github.io/nextflow/results/) | The dashboard, its file index and expiration notice, and the folder listings |
 | [Wrike](https://cmmr.github.io/nextflow/wrike/account/) | The bot account, task status, webhook bridge, API responses |
 | [Operations](https://cmmr.github.io/nextflow/operations/) | The daemon, the expiration timer, the logs, running a pipeline by hand |
 

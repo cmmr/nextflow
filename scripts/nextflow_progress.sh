@@ -159,13 +159,12 @@ render_rows() {
 
 publish_once() {
     local status="${1:-}"
-    local template rows task_name
+    local page rows task_name
 
     if [[ ! -r "$PROGRESS_TEMPLATE" ]]; then
         warn "No progress template at $PROGRESS_TEMPLATE; skipping."
         return 1
     fi
-    template=$(<"$PROGRESS_TEMPLATE")
 
     # Status from the run's own message bus unless the caller named one
     if [[ -z "$status" && -r "status.txt" ]]; then
@@ -186,21 +185,18 @@ publish_once() {
         rows="<p class=\"empty\">$STARTING_MESSAGE</p>"
     fi
 
-    # Replacements are variable expansions rather than literal text, so bash
-    # inserts them as-is - no second pass over backslashes, which a task name is
-    # free to contain.
-    template=${template//__TASK_NAME__/$(escape_html "$task_name")}
-    template=${template//__RUN_ID__/$RUN_ID}
-    template=${template//__STATUS__/$(escape_html "$status")}
-    template=${template//__UPDATED__/$(date '+%B %-d, %Y at %-I:%M %p %Z')}
-
-    # Rows last, and never escaped - render_rows emits the markup itself, having
+    # Rows are never escaped - render_rows emits the markup itself, having
     # escaped everything that came out of the log.
-    template=${template//__ROWS__/$rows}
+    page=$(render_template "$PROGRESS_TEMPLATE" \
+        TASK_NAME "$(escape_html "$task_name")" \
+        RUN_ID    "$RUN_ID" \
+        STATUS    "$(escape_html "$status")" \
+        UPDATED   "$(date '+%B %-d, %Y at %-I:%M %p %Z')" \
+        ROWS      "$rows") || return 1
 
     # --content-type because reading the body from stdin leaves aws nothing to
     # guess from, and a page served as binary downloads instead of rendering.
-    printf '%s\n' "$template" \
+    printf '%s\n' "$page" \
         | aws s3 cp - "$S3_INDEX" --content-type "text/html" > /dev/null
 }
 

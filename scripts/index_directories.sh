@@ -15,6 +15,10 @@
 # published itself are left alone. That also makes a second run over the same
 # results folder a no-op.
 #
+# Whether a link here opens in the browser or downloads is settled by the content
+# type the upload gives each object, not by the page: see TEXT_EXTENSIONS in
+# publish_dashboard.sh.
+#
 # The results folder itself is skipped. Its index.html is the run's landing
 # page, which ampliseq_upload.sh renders and uploads after everything else.
 #
@@ -23,8 +27,8 @@
 # Called by: ampliseq_upload.sh, just before it copies the folder to S3
 # Requires:  GNU find and awk
 # Reads:     templates/listing.html, the listing template
-# Env:       NEXTFLOW_DIR and the log/warn/fail and escape_html helpers, sourced
-#            from .env
+# Env:       NEXTFLOW_DIR and the log/warn/fail, escape_html and render_template
+#            helpers, sourced from .env
 
 set -euo pipefail
 
@@ -46,8 +50,6 @@ fi
 if [[ ! -r "$INDEX_TEMPLATE" ]]; then
     fail "The folder listing template is missing from the server ($INDEX_TEMPLATE)."
 fi
-
-TEMPLATE=$(<"$INDEX_TEMPLATE")
 
 # One directory's entries as table rows. find reports type, size and name; the
 # sort puts folders ahead of files - d before f - and orders each group by name.
@@ -151,13 +153,12 @@ while IFS= read -r DIR; do
         ROWS="<p class=\"empty\">This folder is empty.</p>"
     fi
 
-    PAGE=${TEMPLATE//__DIR_PATH__/$(escape_html "$REL_PATH")}
-
-    # Rows last, and never escaped - render_rows emits the markup itself, having
+    # Rows are never escaped - render_rows emits the markup itself, having
     # escaped and encoded every name it read off the disk.
-    PAGE=${PAGE//__ROWS__/$ROWS}
+    render_template "$INDEX_TEMPLATE" \
+        DIR_PATH "$(escape_html "$REL_PATH")" \
+        ROWS     "$ROWS" > "$DIR/$INDEX_NAME"
 
-    printf '%s\n' "$PAGE" > "$DIR/$INDEX_NAME"
     INDEXED=$((INDEXED + 1))
 done < <(find "$RESULTS_DIR" -mindepth 1 -type d)
 

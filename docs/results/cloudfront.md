@@ -13,7 +13,12 @@ its own. [`index_directories.sh`](../../scripts/index_directories.sh) writes an
 those pages reachable by folder URL, and without it every folder link in a
 report is a 404.
 
-Attach it to the distribution's **viewer request** event.
+Attach it to the **viewer request** event of the default behavior — and of that
+behavior only. A CloudFront function is configured per cache behavior, and the
+`/download/*` behavior that serves
+[the whole-run download](downloads.md) must not carry this one: a download
+address has no trailing slash and no dot, so rule 1 below would redirect every
+one of them once before it reached the function behind it.
 
 It handles the two shapes a folder URL arrives in:
 

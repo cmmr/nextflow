@@ -5,9 +5,9 @@
 # Date:   August 26th, 2026
 #
 # Sourced by .env rather than executed. Every pipeline's upload script publishes
-# the same page from templates/dashboard.html: a header, the date the results
-# are deleted on, one tab per report, and an index of every output file worth
-# naming.
+# the same page from templates/dashboard.html: a header carrying the date the
+# results are deleted on, one tab per report, buttons for what the run can be
+# downloaded as, and an index of every output file worth naming.
 #
 # An upload script declares what its pipeline produced and then renders:
 #
@@ -17,8 +17,9 @@
 #   render_dashboard <run_id> <task_name> <run_date> <sample_count> <expires>
 #
 # Each of those skips a file the run did not produce, so the page describes the
-# run rather than the pipeline. The first view is the one the page opens on and
-# the first button is the emphasised one.
+# run rather than the pipeline. The first view is the one the page opens on.
+# Every run also gets a button for the whole of itself as one zip, which the
+# declared ones sit to the left of.
 #
 # The file index comes from the catalog - templates/<pipeline>/outputs.conf -
 # which names paths, globs and folders in the order they should be read, grouped
@@ -85,22 +86,29 @@ dashboard_view() {
     DASHBOARD_VIEWS+=("$id|$label|$path")
 }
 
-# One header button per file matching a glob, labelled with its own filename
+# One download button per file matching a glob, labelled with its own filename
 dashboard_button() {
     local pattern="$1"
-    local path name class
+    local path name
 
     for path in "$DASHBOARD_RESULTS_DIR"/$pattern; do
         [[ -r "$path" ]] || continue
 
         name=${path#"$DASHBOARD_RESULTS_DIR/"}
-        class="button"
-        [[ -z "$DASHBOARD_BUTTONS" ]] && class="button primary"
 
-        DASHBOARD_BUTTONS+="<a class=\"$class\" href=\"$(escape_url "$name")\""
+        DASHBOARD_BUTTONS+="<a class=\"button\" href=\"$(escape_url "$name")\""
         DASHBOARD_BUTTONS+="$(dashboard_link_attributes "$name")>"
         DASHBOARD_BUTTONS+="$(escape_html "${name##*/}")</a>"
     done
+}
+
+# The button for the whole run as one zip, which every run has and which is the
+# emphasised one. Its address is the only absolute link on the page: the zip is
+# served by a behavior of the distribution rather than sitting beside the page,
+# so it is also the one link that does not resolve in an unpacked copy.
+dashboard_zip_button() {
+    printf '<a class="button primary all" href="/download/%s">Download everything</a>' \
+        "$(escape_url "$1")"
 }
 
 # A group heading as its own fragment, e.g. "Start here" -> "start-here"
@@ -144,23 +152,24 @@ dashboard_first_view() {
     escape_url "${entry##*|}"
 }
 
-# The strip under the header saying when the results are deleted. The date is
-# written out here; how far off it is, is worked out in the page itself.
+# The note in the corner of the header saying when the results are deleted. The
+# date is written out here; how far off it is, is worked out in the page itself.
+# What to do about it is left to the tooltip, so the header stays a header.
 dashboard_expiry() {
     local expires="$1"
 
     if [[ ! "$expires" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
-        printf '<div class="expiry none">No deletion date is set for these results.'
-        printf ' They stay online until you ask us to remove them.</div>'
+        printf '<div class="expiry none" title="These results stay online until you ask your'
+        printf ' CMMR contact to remove them.">No deletion date</div>'
         return 0
     fi
 
-    printf '<div class="expiry" data-expires="%s"><strong>Save anything you want to keep.</strong>' \
+    printf '<div class="expiry" data-expires="%s" title="This page and every file it links to' \
         "$expires"
-    printf ' This page and every file it links to are deleted on <span class="date">%s</span>' \
-        "$(escape_html "$(date -d "$expires" '+%B %-d, %Y')")"
-    printf '<span class="countdown"></span>. To keep them online for longer, ask your CMMR'
-    printf ' contact before that date.</div>'
+    printf ' are deleted then. Save anything you want to keep, or ask your CMMR contact to keep'
+    printf ' them online for longer.">Deleted <span class="date">%s</span>' \
+        "$(escape_html "$(date -d "$expires" '+%b %-d, %Y')")"
+    printf '<span class="countdown"></span></div>'
 }
 
 dashboard_trim() {
@@ -298,7 +307,7 @@ render_dashboard() {
         RUN_DATE     "$run_date" \
         SAMPLE_COUNT "$sample_count" \
         EXPIRY       "$(dashboard_expiry "$expires")" \
-        BUTTONS      "$DASHBOARD_BUTTONS" \
+        BUTTONS      "$DASHBOARD_BUTTONS$(dashboard_zip_button "$run_id")" \
         TABS         "$(dashboard_tabs)" \
         VIEW_SRC     "$(dashboard_first_view)" \
         GROUP_NAV    "$GROUP_NAV" \

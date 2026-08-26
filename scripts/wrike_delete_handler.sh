@@ -18,7 +18,8 @@
 # Called by: wrike_sqs_listener.sh
 # Requires:  jq, aws, scancel (Slurm), openssl (via derive_uid), curl (via
 #            call_wrike_api)
-# Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, RUN_ID_SALT, WRIKE_DASHBOARDS_FOLDER_ID,
+# Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, S3_ZIP_PREFIX, RUN_ID_SALT,
+#            WRIKE_DASHBOARDS_FOLDER_ID,
 #            the Wrike helper functions and the log/fail/derive_uid helpers, all
 #            sourced from .env
 
@@ -82,6 +83,12 @@ scancel --name="nf-$RUN_ID" --user="$(whoami)" > /dev/null 2>&1 || true
 #    wrike_task_handler.sh put there when the request arrived, and the results on
 #    top of it if the run got that far.
 aws s3 rm "$S3_RESULTS_DIR" --recursive > /dev/null 2>&1 || true
+
+#    And the zip the download Lambda cached of all that, which is published from
+#    a prefix of its own and so is not under the recursive delete above
+for CACHED in "$S3_ZIP_PREFIX/$RUN_ID.zip" "$S3_ZIP_PREFIX/$RUN_ID.json"; do
+    aws s3 rm "s3://$AWS_S3_BUCKET/$CACHED" > /dev/null 2>&1 || true
+done
 
 # 3. Confirm to the user. Only a removed Dashboards tag gets a comment; a deleted
 #    task has nowhere to comment on.

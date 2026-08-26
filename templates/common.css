@@ -121,27 +121,28 @@ a.button.primary {
 }
 a.button:hover { filter: brightness(1.08); }
 
-/* When the results are deleted. Coloured by the countdown script once it knows
-   how far off that is; without scripting it stays as the amber notice. */
+/* When the results are deleted, in the corner of the header. A quiet note
+   until the countdown script finds the date is close and reddens it; without
+   scripting it stays quiet. */
 .expiry {
   flex: 0 0 auto;
-  padding: 11px 22px;
-  background: var(--notice-bg);
-  border-bottom: 1px solid var(--notice-border);
-  color: var(--notice-text);
-  font-size: 14px;
+  padding: 5px 11px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+  white-space: nowrap;
 }
+.expiry .date { color: var(--text); font-weight: 600; }
 .expiry.soon {
   background: var(--alert-bg);
-  border-bottom-color: var(--alert-border);
+  border-color: var(--alert-border);
   color: var(--alert-text);
 }
-.expiry.none {
-  background: var(--panel);
-  border-bottom-color: var(--border);
-  color: var(--muted);
-}
-.expiry .date { white-space: nowrap; }
+.expiry.soon .date { color: inherit; }
+.expiry.none { border-style: dashed; }
 
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 tbody tr:nth-child(odd) { background: var(--row); }

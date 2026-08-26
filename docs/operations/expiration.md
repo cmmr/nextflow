@@ -72,6 +72,12 @@ Only the top level of the prefix is offered a match, so every results folder —
 `summary_report/`, `qiime2/`, and the listing pages under them — goes, along with
 `raw-sequences.zip`, which is most of the storage the tear-down is for.
 
+The cached [whole-run download](../results/downloads.md), `zip/<uid>.zip` and
+its `zip/<uid>.json`, is deleted alongside them. It is published from a prefix
+of its own, so listing `nxf/<uid>/` does not reach it — and a zip that outlived
+its dashboard would break the promise the expiration notice makes, which is that
+this page and every file it links to go on this date.
+
 `index.html` is deleted with the rest and immediately republished from
 [`templates/expired.html`](../../templates/expired.html), so the results link on
 the task, and any link a reader kept, still lead to an explanation rather than to

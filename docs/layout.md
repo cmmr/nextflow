@@ -31,6 +31,11 @@ scripts/
   build_16s_reference.sh      Builds the 16S landmarks the region detector aligns to. Likewise.
   fetch_taxprofiler_db.sh     Downloads a taxprofiler database. Likewise.
 
+lambda/               The AWS functions behind the results download URL;
+                      see docs/results/downloads.md.
+  nxf_download.py          Answers /download/<uid>: a redirect, or a waiting page.
+  nxf_download_builder.py  Streams a run's results into one zip in the bucket.
+
 pipelines/            One file per pipeline; see docs/pipelines/index.md.
 config/               Nextflow config, passed to `nextflow run -c`.
   slurm.config        Executor + apptainer settings used by the pipelines.
@@ -76,6 +81,8 @@ docs/                 Source of the documentation site; one page per file.
     index.md          The dashboard, its file index, and the live progress view.
     browsable-folders.md  Listing pages written into every results folder.
     cloudfront.md     Viewer request function that serves those listing pages.
+    downloads.md      The on-demand zip of a whole run, and the Lambdas behind it.
+    downloads-setup.md  Building that in the AWS console, one time, step by step.
   wrike/
     account.md        The bot account, the space, and the request form.
     status.md         The task Status a run reports its progress as.

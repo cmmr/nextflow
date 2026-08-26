@@ -5,7 +5,19 @@ Every script that talks to Wrike or AWS begins with
 assignment or a `source`, so it is safe and cheap to source any number of times,
 in any process, and it carries no guard. It sets `NEXTFLOW_DIR`, sets the
 nextflow cache directories, unsets any `WRIKE_API_TOKEN` inherited from the
-caller, and then sources five things:
+caller, and then sources five things.
+
+It also sets the two key prefixes everything this system publishes lives under.
+`S3_RUN_PREFIX` (`nxf`) is where a run's results and its landing page go, and
+every script that builds a results path must agree on it — changing it orphans
+everything already published. `S3_ZIP_PREFIX` (`zip`) is where the
+[download Lambdas](results/downloads.md) cache a run packaged as a single file.
+It is set on both of those functions as an environment variable of the same
+name, and the two tear-downs read it here, so that a cached zip is deleted along
+with the results it was made from. **The three copies have to agree**; see
+[Setting up the download URL](results/downloads-setup.md).
+
+The five it sources:
 
 - `secrets/.env` — **credentials only**, never committed:
   - `WRIKE_API_TOKEN` — the bot's, and the only one anything here uses. `.env`

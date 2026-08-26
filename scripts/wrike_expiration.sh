@@ -36,7 +36,7 @@
 #            wrike_expiration.sh --dry-run   # report what it would do, change nothing
 # Requires:  aws, jq, GNU date, curl (via call_wrike_api), openssl (via derive_uid)
 # Reads:     templates/expired.html
-# Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, RUN_ID_SALT,
+# Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, S3_ZIP_PREFIX, RUN_ID_SALT,
 #            WRIKE_DASHBOARDS_FOLDER_ID, WRIKE_EXPIRATION_CFID,
 #            WRIKE_CUSTOM_STATUS_IDS, WRIKE_BOT_USER_ID, the Wrike helpers and
 #            the log/warn/fail/derive_uid/escape_html helpers, all from .env
@@ -317,7 +317,7 @@ warn_of_expiration() {
 # it.
 expire_task() {
     local task_json="$1" expired="$2"
-    local run_id prefix listing title completed samples shown reply relative key
+    local run_id prefix listing title completed samples shown reply relative key cached
     local -a keys=() kept=() doomed=()
 
     # An empty uid would make the prefix below the whole bucket, and everything
@@ -348,6 +348,15 @@ expire_task() {
         fi
     done
 
+    # The zip the download Lambda cached of these results is published from a
+    # prefix of its own, so the listing above does not reach it. The page says
+    # everything it links to goes on this date, and this is one of those things.
+    for cached in "$S3_ZIP_PREFIX/$run_id.zip" "$S3_ZIP_PREFIX/$run_id.json"; do
+        if aws s3api head-object --bucket "$AWS_S3_BUCKET" --key "$cached" > /dev/null 2>&1; then
+            doomed+=("$cached")
+        fi
+    done
+
     # Read before the deletion, since the landing page is one of the things it
     # takes and is where an older run's sample count is written down.
     title=$(echo "$task_json" | jq -r '.title // empty')
@@ -356,7 +365,7 @@ expire_task() {
 
     if [[ "$DRY_RUN" == true ]]; then
         log "[dry run] Task $TASK_ID (uid $run_id) expired on $shown:" \
-            "would delete ${#doomed[@]} object(s) under s3://$AWS_S3_BUCKET/$prefix/," \
+            "would delete ${#doomed[@]} object(s) published for this run," \
             "keeping ${kept[*]:-nothing}."
         return 0
     fi

@@ -14,8 +14,8 @@ it is served from S3 alongside the objects it points at.
 
 ## What is on it
 
-**A header** carrying the Wrike task name, the completion date, the uid, the
-sample count, and a download button for each of the run's headline files.
+**A header** carrying the Wrike task name, the completion date, the uid and the
+sample count on the left, and the deletion date on the right.
 
 The task name is re-read from Wrike at upload time rather than taken from the
 `wrike_task_name.txt` copy recorded at submission, since the requester may have
@@ -25,14 +25,19 @@ which the samplesheet script writes into the run directory — the count *after*
 merging entries that share a sample name. A run without that file leaves the
 figure out.
 
-**The expiration notice**, immediately under the header and impossible to scroll
-past, because it is the one thing on the page with a deadline attached. See
+**The expiration notice**, in the top right corner of the header. See
 [The expiration notice](#the-expiration-notice) below.
 
 **A row of tabs**, one per report the run produced plus the file index. Each
 loads into the frame below without leaving the page, and the open tab is
 remembered in the URL fragment — so `#quality` is a link straight to the
 MultiQC report, framed by the dashboard rather than bare.
+
+**The download buttons**, at the right end of that same row. One per headline
+file the pipeline declared, plus [the whole run as a single
+zip](downloads.md) — the emphasised one, since it is what most readers want
+before the deletion date. They sit in the tab row but are styled as buttons, so
+they do not read as another view of the page.
 
 | Tab | ampliseq | taxprofiler |
 |---|---|---|
@@ -50,13 +55,15 @@ See [The file index](#the-file-index) below.
 
 ## The expiration notice
 
-A published dashboard has a deletion date, and the page says so where nobody has
-to look for it: a full-width strip between the header and the tabs, in amber,
-turning red inside the last two weeks.
+A published dashboard has a deletion date, and the page says so in the corner of
+the header: *"Deleted Sep 24, 2026 · 38 days left"*. It is quiet — muted text in
+a bordered pill — until the date is inside the last two weeks, when it turns
+red. What a reader should do about it is in the tooltip rather than the header,
+so the notice states the deadline without shouting it.
 
 **The date is rendered into the page; the countdown is worked out in the
-reader's browser.** The strip carries `data-expires="2026-09-24"`, and a few
-lines of script turn that into *"38 days from now"* when the page is opened. A
+reader's browser.** The notice carries `data-expires="2026-09-24"`, and a few
+lines of script turn that into *"· 38 days left"* when the page is opened. A
 static page cannot say how long is left — it would be wrong the following week —
 so it says the date, and the countdown is computed against the day the link is
 actually clicked.
@@ -69,8 +76,8 @@ both read it from the same place, so the page cannot promise a date the daily
 pass will not honour.
 
 A run whose `Availability` answer was `Unlimited` leaves the field unset. Its
-strip is muted grey and says there is no deletion date rather than disappearing,
-since "no date" is itself worth stating.
+notice says *"No deletion date"* rather than disappearing, since "no date" is
+itself worth stating.
 
 ## The file index
 
@@ -124,6 +131,14 @@ Without the first of those, a browser handed `feature-table.tsv` as
 wanting a quick look at a table least wants. It applies to every link to that
 object, including the ones in the folder listing pages.
 
+## Taking a copy of the whole thing
+
+The one thing a client most wants before their deletion date is all of it at
+once, and `https://$AWS_S3_BUCKET/download/<uid>` is that: the entire prefix,
+packaged on demand into a single zip that unpacks into a working offline copy of
+this page. Nothing on the dashboard links to it yet. See
+[Downloading a whole run](downloads.md).
+
 ## Before and after the dashboard
 
 **That page starts as a live progress view.**
@@ -174,7 +189,7 @@ not, which is what stops a reader's browser polling once the results land.
 All five published pages — dashboard, progress, listing, expired, and the
 folder listings — share
 [`templates/common.css`](../../templates/common.css): the palette, the header
-strip, the buttons, the tables. `render_template` in
+notice, the buttons, the tables. `render_template` in
 [`utilities.sh`](../../scripts/utilities.sh) inlines it into whichever template
 it is filling in, alongside that page's own placeholders:
 

@@ -14,6 +14,9 @@
   the file index below is shown by :target instead. That way a reader without
   scripting still reaches every view.
 
+  The header carries the run on the left and the deletion date on the right;
+  the row of tabs under it carries the downloads at its right end.
+
   Placeholders are COMMON_CSS, TASK_NAME, RUN_ID, RUN_DATE, SAMPLE_COUNT,
   EXPIRY, BUTTONS, TABS, VIEW_SRC, GROUP_NAV and SECTIONS, each wrapped in doubled
   underscores. They are deliberately not spelled that way in this comment - the
@@ -29,17 +32,25 @@
 <style>
 __COMMON_CSS__
 
-/* One row of views above the frame that holds them */
+/* One row of views above the frame that holds them, with what the run can be
+   downloaded as at the other end of it */
 nav.tabs {
   flex: 0 0 auto;
   display: flex;
   flex-wrap: wrap;
-  gap: 2px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 20px;
   padding: 0 22px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
 }
-nav.tabs a {
+nav.tabs .views {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+nav.tabs .views a {
   padding: 10px 15px;
   border-bottom: 3px solid transparent;
   color: var(--muted);
@@ -48,11 +59,24 @@ nav.tabs a {
   text-decoration: none;
   white-space: nowrap;
 }
-nav.tabs a:hover { color: var(--text); }
-nav.tabs a.active {
+nav.tabs .views a:hover { color: var(--text); }
+nav.tabs .views a.active {
   color: var(--text);
   border-bottom-color: var(--accent);
 }
+
+/* Sized to sit inside the row without setting its height. It shrinks so that
+   on a narrow screen it wraps within itself rather than widening the page. */
+nav.tabs .buttons {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: auto;
+  padding: 5px 0;
+}
+nav.tabs a.button { padding: 5px 11px; font-size: 12.5px; }
+/* Named for what it fetches rather than for a file, so not set in the face
+   filenames are read in */
+nav.tabs a.button.all { font-family: inherit; font-size: 13px; }
 
 /* The report is the page; everything above it is a strip. */
 iframe {
@@ -164,12 +188,13 @@ iframe {
     <!-- The sample count brings its own separator, so it can render as nothing -->
     <p class="meta">Completed __RUN_DATE__ &middot; uid <code>__RUN_ID__</code> __SAMPLE_COUNT__</p>
   </div>
-  <div class="buttons">__BUTTONS__</div>
+  __EXPIRY__
 </header>
 
-__EXPIRY__
-
-<nav class="tabs">__TABS__</nav>
+<nav class="tabs">
+  <div class="views">__TABS__</div>
+  <div class="buttons">__BUTTONS__</div>
+</nav>
 
 <section id="files">
   <nav class="menu">__GROUP_NAV__</nav>
@@ -180,7 +205,7 @@ __EXPIRY__
 
 <script>
 (function () {
-  var tabs = [].slice.call(document.querySelectorAll("nav.tabs a"));
+  var tabs = [].slice.call(document.querySelectorAll("nav.tabs .views a"));
   var viewer = document.getElementById("viewer");
 
   // The countdown is worked out when the page is read rather than when it was
@@ -194,10 +219,10 @@ __EXPIRY__
                                           today.getDate())) / 86400000);
     var left = expiry.querySelector(".countdown");
 
-    if (days > 1)        left.textContent = ", " + days + " days from now";
-    else if (days === 1) left.textContent = ", tomorrow";
-    else if (days === 0) left.textContent = ", today";
-    else                 left.textContent = ", a date that has passed";
+    if (days > 1)        left.textContent = " · " + days + " days left";
+    else if (days === 1) left.textContent = " · tomorrow";
+    else if (days === 0) left.textContent = " · today";
+    else                 left.textContent = " · passed";
 
     if (days <= 14) expiry.className = "expiry soon";
   }

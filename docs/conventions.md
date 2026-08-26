@@ -28,6 +28,13 @@ These carry most of the system's state, and nothing works if you break them:
   wherever it finds it — which is what makes any script in the run, down to a
   pipeline's own pre- and post-process steps, able to explain itself to the
   requester without knowing anything about Wrike.
+- **`request.json` says how the request was read.** Written into the run
+  directory before any validation: the SQS event, every question with the custom
+  field it resolved through and the value that came back, and the field titles
+  Wrike actually has. A rejected request keeps its directory, so this is what an
+  unexpected rejection is diagnosed from — and it is the only place the
+  difference between *the requester left it blank* and *the field is titled
+  something else* is visible. It is not published with the results.
 - **The request form's answers reach a pipeline through the run directory.**
   `wrike_task_handler.sh` checks each against the list Wrike offers and writes
   the survivors to `form_answers.tsv`; pipelines read them with `form_answer`.

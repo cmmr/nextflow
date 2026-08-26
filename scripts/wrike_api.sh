@@ -40,31 +40,41 @@ export WRIKE_EXPIRATION_CFID="IEAAIKU5JUANEX3T"
 export WRIKE_EXPIRATION_NOTICE_DAYS=14
 
 # Every question on the "Bioinformatics Pipeline" request form, as
-# key | its title in Wrike | the answers this system accepts.
+# key | its title in Wrike | its custom field ID | the answers this system accepts.
 #
 # Answers are checked against these lists rather than passed through, because
 # each one ends up in a nextflow command line. There is no free-text parameter
-# field: what a requester can ask for is exactly what is listed here.
+# field: what a requester can ask for is exactly what is listed here. A CheckBox
+# answer arrives comma-separated and every part has to be allowed. An empty list
+# is checked by shape instead - only "Previous Run ID", which is_valid_uid
+# answers for.
 #
-# Fields are matched by title rather than by ID, so recreating one in Wrike needs
-# no change here. A CheckBox answer arrives comma-separated and every part has to
-# be allowed. An empty list is checked by shape instead - only "Previous Run ID",
-# which is_valid_uid answers for.
+# Fields are addressed by ID and not by title. This Wrike account carries over a
+# hundred custom fields from every CMMR workflow and several share a title -
+# there is a "Pipeline" belonging to another team, where ours is "Pipeline Name",
+# and matching on the title silently reads theirs.
 #
-# "Pipeline" is the one whose options carry a description after the name
+# An empty ID is a question the form asks that has no custom field behind it, so
+# its answer never reaches the task. Those read as unanswered and the pipeline
+# uses its own default; wrike_task_handler.sh names them in request.json. Fill
+# one in by creating the field and taking its ID from:
+#
+#   call_wrike_api GET customfields | jq -r '.data[] | "\(.id)\t\(.title)"'
+#
+# "Pipeline Name" is the one whose options carry a description after the name
 # ("ampliseq :: 16S full length or variable region amplicons"), so only its first
 # word is read and checked.
 WRIKE_FORM_ANSWERS=(
-    "pipeline|Pipeline|ampliseq,taxprofiler,prev_run_id"
-    "availability|Availability|1 Month,3 Months,6 Months,12 Months,24 Months,Unlimited"
-    "previous_run|Previous Run ID|"
-    "host|Host Depletion|None,PhiX,Human + PhiX,Mouse + PhiX"
-    "settings|Settings|Default,Custom"
-    "dada_ref|Primary ASV Taxonomic Database (DADA2)|silva=138.2,greengenes2=2024.09,coidb=221216,gtdb=R11-RS232,midori2-co1=gb250,pr2=5.1.0,rdp=18,sbdi-gtdb=R11-RS232-1,unite-alleuk=10.0,unite-fungi=10.0,zehr-nifh=2.5.0"
-    "qiime_ref|Secondary QIIME2 Taxonomic Database|silva=138,greengenes2=2024.09"
-    "kraken2_ref|Read-Based Taxonomic Database (Kraken2)|silva=138,rdp=18,greengenes=13.5,standard=20240904"
-    "picrust|Functional Profiling (PICRUSt2)|No,Yes"
-    "exclude_taxa|Taxa Exclusion Filter|mitochondria,chloroplast,Francisella"
+    "pipeline|Pipeline Name|IEAAIKU5JUANAH3C|ampliseq,taxprofiler,prev_run_id"
+    "availability|Availability||1 Month,3 Months,6 Months,12 Months,24 Months,Unlimited"
+    "previous_run|Previous Run ID||"
+    "host|Host Depletion||None,PhiX,Human + PhiX,Mouse + PhiX"
+    "settings|Settings||Default,Custom"
+    "dada_ref|Primary ASV Taxonomic Database (DADA2)||silva=138.2,greengenes2=2024.09,coidb=221216,gtdb=R11-RS232,midori2-co1=gb250,pr2=5.1.0,rdp=18,sbdi-gtdb=R11-RS232-1,unite-alleuk=10.0,unite-fungi=10.0,zehr-nifh=2.5.0"
+    "qiime_ref|Secondary QIIME2 Taxonomic Database||silva=138,greengenes2=2024.09"
+    "kraken2_ref|Read-Based Taxonomic Database (Kraken2)||silva=138,rdp=18,greengenes=13.5,standard=20240904"
+    "picrust|Functional Profiling (PICRUSt2)||No,Yes"
+    "exclude_taxa|Taxa Exclusion Filter||mitochondria,chloroplast,Francisella"
 )
 
 # The "Pipeline" answer that names no pipeline: it asks for an earlier run to be
@@ -343,35 +353,69 @@ wrike_dashboard_expiration() {
 }
 
 # Read the request form's answers off a task into WRIKE_ANSWERS, keyed as in
-# WRIKE_FORM_ANSWERS. Unanswered questions are simply absent. One customfields
-# call resolves every title, since a task carries only IDs.
+# WRIKE_FORM_ANSWERS. Unanswered questions are simply absent.
+#
+# WRIKE_ANSWERS_READ is what that pass looked at, for wrike_task_handler.sh to
+# record: a question with no field behind it, or one the task does not carry, is
+# otherwise indistinguishable from one the requester left blank.
 declare -A WRIKE_ANSWERS=()
+WRIKE_ANSWERS_READ="[]"
 
 read_wrike_answers() {
     local task_json="$1"
-    local fields_json entry key title id value
-
-    fields_json=$(call_wrike_api GET "customfields") || return 1
+    local entry key title id value unconfigured=""
 
     WRIKE_ANSWERS=()
+    WRIKE_ANSWERS_READ="[]"
 
     for entry in "${WRIKE_FORM_ANSWERS[@]}"; do
         key=${entry%%|*}
         title=${entry#*|}
         title=${title%%|*}
+        id=${entry%|*}
+        id=${id##*|}
+        value=""
 
-        id=$(echo "$fields_json" | jq -r --arg t "$title" \
-            'first(.data[] | select(.title == $t) | .id) // empty')
+        if [[ -n "$id" ]]; then
+            value=$(echo "$task_json" | jq -r --arg id "$id" \
+                '.data[0].customFields[]? | select(.id == $id) | .value // empty')
 
-        [[ -n "$id" ]] || continue
+            # One line, trimmed: every answer here is a single value
+            read -r value <<< "$value" || true
+        else
+            unconfigured+=" $key"
+        fi
 
-        value=$(echo "$task_json" | jq -r --arg id "$id" \
-            '.data[0].customFields[]? | select(.id == $id) | .value // empty')
+        if [[ -n "$value" ]]; then
+            WRIKE_ANSWERS["$key"]="$value"
+        fi
 
-        # One line, trimmed: every answer here is a single value
-        read -r value <<< "$value" || true
+        WRIKE_ANSWERS_READ=$(printf '%s' "$WRIKE_ANSWERS_READ" | jq -c \
+            --arg key "$key" --arg title "$title" --arg id "$id" --arg value "$value" \
+            '. + [{key: $key, title: $title, field_id: $id, value: $value}]')
+    done
 
-        [[ -n "$value" ]] && WRIKE_ANSWERS["$key"]="$value"
+    # One line rather than one per question: while the form is being built this
+    # is most of them, and it is the operator's business rather than the requester's
+    if [[ -n "$unconfigured" ]]; then
+        warn "No custom field ID in WRIKE_FORM_ANSWERS for:$unconfigured." \
+             "Those questions read as unanswered and the pipeline's own defaults stand."
+    fi
+
+    # Explicit, because the loop's own status is the last thing it happened to do
+    return 0
+}
+
+# The custom field ID behind one form question. Empty when it has none.
+wrike_answer_field_id() {
+    local entry id
+
+    for entry in "${WRIKE_FORM_ANSWERS[@]}"; do
+        if [[ "${entry%%|*}" == "$1" ]]; then
+            id=${entry%|*}
+            printf '%s' "${id##*|}"
+            return 0
+        fi
     done
 }
 

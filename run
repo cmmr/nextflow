@@ -126,7 +126,7 @@ fi
 
 # 4. Build the task there. The pipeline goes in lower case, as the form's options
 #    spell it; the handler reads only the first word either way.
-PIPELINE_CFID=$(wrike_custom_field_id "Pipeline") || PIPELINE_CFID=""
+PIPELINE_CFID=$(wrike_answer_field_id pipeline)
 
 if [[ -z "$PIPELINE_CFID" ]]; then
     fail "Wrike has no \"Pipeline\" custom field to put the request in."

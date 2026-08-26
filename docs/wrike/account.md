@@ -30,7 +30,8 @@ the bot sees, it sees because the request form put it in that folder.
 ## The request form's questions
 
 Every question is listed in `WRIKE_FORM_ANSWERS` in
-[`wrike_api.sh`](../../scripts/wrike_api.sh), as `key | title in Wrike | allowed answers`:
+[`wrike_api.sh`](../../scripts/wrike_api.sh), as
+`key | title in Wrike | custom field ID | allowed answers`:
 
 | Key | Question | Answers |
 | --- | --- | --- |
@@ -57,10 +58,24 @@ and left there. Nothing in the handler interprets one — pipelines read them wi
 `form_answer`, so which answers mean anything stays a
 [pipeline's business](../pipelines/index.md#the-form-s-answers).
 
-**Fields are matched by title, not by ID.** One `GET /customfields` call per
-request resolves them, so recreating a field in Wrike needs no change here, and
-there are no IDs to paste. A question Wrike does not have is simply unanswered,
-and the pipeline uses its own default.
+**Fields are addressed by ID, not by title.** This Wrike account carries over a
+hundred custom fields from every CMMR workflow, and several share a title —
+including a `Pipeline` belonging to another team, where ours is `Pipeline Name`.
+Matching on the title reads theirs, silently, and the answer comes back empty.
+Get an ID with:
+
+```bash
+call_wrike_api GET customfields | jq -r '.data[] | "\(.id)\t\(.title)"'
+```
+
+**Only `Pipeline Name` has a field so far.** The other eight questions have an
+empty ID in `WRIKE_FORM_ANSWERS`, which means their answers never reach the task:
+they read as unanswered and each pipeline's own defaults stand. The handler warns
+once per request naming them, and `request.json` in the run directory records
+which field each question resolved through.
+
+Filling one in is: create the custom field in Wrike, point the form question at
+it, and paste the ID into `WRIKE_FORM_ANSWERS`.
 
 Three fields are still addressed by ID: `WRIKE_S3_RESULTS_URL_CFID`, the landing
 page link; `WRIKE_EXPIRATION_CFID`, the date below; and the workflow's custom

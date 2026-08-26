@@ -202,6 +202,30 @@ printf '%s\n' "$TASK_NAME" > "$WRIKE_TASK_NAME_FILE"
 # The run's own record of how far it has got, which the page below reads
 echo "Validating" > status.txt
 
+# What this request was and how it was read: the event that started it, every
+# question with the field it resolved through and the value that came back, and
+# the titles Wrike actually has. A rejected request keeps its directory, so this
+# is what a rejection nobody expected is diagnosed from - and it is the only
+# place the difference between "the requester left it blank" and "the field is
+# titled something else" is visible. Best effort, and never fatal.
+jq -n \
+    --arg run_id "$RUN_ID" \
+    --arg wrike_task_id "$TASK_ID" \
+    --arg task_name "$TASK_NAME" \
+    --arg read_utc "$(date -u "+%Y-%m-%dT%H:%M:%SZ")" \
+    --argjson answers "$WRIKE_ANSWERS_READ" \
+    --argjson task_custom_fields "$(echo "$TASK_JSON" | jq -c '[.data[0].customFields[]?]')" \
+    --argjson sqs_message "$MESSAGE_BODY" \
+    '{run_id: $run_id, wrike_task_id: $wrike_task_id, task_name: $task_name,
+      read_utc: $read_utc, answers: $answers,
+      task_custom_fields: $task_custom_fields,
+      sqs_message: $sqs_message}' \
+    > request.json \
+    || warn "Could not record request.json for task $TASK_ID."
+
+log "Task $TASK_ID answered: $(printf '%s' "$WRIKE_ANSWERS_READ" \
+    | jq -r '[.[] | select(.value != "") | "\(.key)=\(.value)"] | join(" ") // "nothing"')"
+
 # 3. Claim the S3 prefix. A uid is derived, so it is not unique by construction
 #    and has to be checked against what is already published; a collision would
 #    mean one client's results overwriting another's. A failed call is not a free

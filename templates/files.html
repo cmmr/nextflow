@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<!--
+  files.html - The File Explorer view of a published run, read inside dashboard.html.
+
+  Rendered by publish_dashboard.sh into the results folder as files.html and
+  loaded into the landing page's frame. It is the pipeline's output catalog -
+  templates/<pipeline>/outputs.conf - as a grouped, annotated index of
+  everything the run published, with a menu of the groups beside it.
+
+  The rows come out of the same renderer the rest of the page does, so they
+  carry class names rather than utilities; the style block below is what those
+  names mean, written in the design system's own values.
+
+  Placeholders are COMMON_HEAD, TASK_NAME, GROUP_NAV, SECTIONS, YEAR and
+  FOOTER_NOTE, each wrapped in doubled underscores. They are deliberately not
+  spelled that way in this comment - the renderer substitutes the whole file,
+  comment included, and would paste the entire index in here too. The task name
+  is user-authored text and is HTML-escaped on the way in; GROUP_NAV and
+  SECTIONS are markup the renderer escaped and URL-encoded itself.
+-->
+<html class="light" lang="en">
+<head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>__TASK_NAME__ - All output files</title>
+__COMMON_HEAD__
+<style>
+/* The design system's values, for the rows the renderer emits as classes */
+:root {
+  --border: #c5c5d3;
+  --muted: #454651;
+  --text: #1b1c1c;
+  --row: #f5f3f3;
+  --link: #00245a;
+}
+
+.groups .group { margin: 0 0 32px; }
+.groups .group:last-child { margin-bottom: 0; }
+.groups .group h2 {
+  margin: 0 0 4px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  line-height: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.groups table { width: 100%; border-collapse: collapse; }
+.groups td {
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.groups tr:hover { background: var(--row); }
+.groups td.name {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+.groups td.name a { color: var(--link); text-decoration: none; }
+.groups td.name a:hover { text-decoration: underline; }
+.groups td.size {
+  width: 8em;
+  text-align: right;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.groups .desc {
+  display: block;
+  margin-top: 3px;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--muted);
+  overflow-wrap: break-word;
+}
+/* Downloads land as files; everything else opens in a tab of its own */
+.groups .tag {
+  display: inline-block;
+  margin-left: 7px;
+  padding: 1px 8px;
+  border-radius: 12px;
+  background: #efeded;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  vertical-align: 1px;
+}
+
+.menu a {
+  display: block;
+  padding: 6px 10px;
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.menu a:hover { background: #efeded; color: var(--text); }
+
+.empty { color: var(--muted); font-style: italic; }
+</style>
+</head>
+<body class="bg-surface-bg-light text-on-surface font-body-md h-screen overflow-hidden flex flex-col">
+<div class="flex flex-1 overflow-hidden">
+<!-- Main Content Canvas -->
+<main class="flex-1 flex flex-col overflow-y-auto bg-surface relative">
+<div class="p-margin-page space-y-6 max-w-7xl mx-auto w-full">
+<div>
+<h1 class="font-headline-xl text-headline-xl text-primary">All output files</h1>
+<p class="text-on-surface-variant mt-1">Everything this run published, grouped by what it is for.</p>
+</div>
+<div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-padding-card shadow-sm flex flex-col lg:flex-row gap-gutter-grid items-start">
+<nav class="menu w-full lg:w-56 shrink-0 lg:sticky lg:top-0 flex flex-row flex-wrap lg:flex-col gap-1">__GROUP_NAV__</nav>
+<div class="groups flex-1 min-w-0">__SECTIONS__</div>
+</div>
+</div>
+<!-- Footer -->
+<footer class="mt-auto bg-surface-container border-t border-outline-variant w-full mt-12">
+<div class="flex flex-col md:flex-row justify-between items-center px-margin-page py-gutter-grid w-full max-w-7xl mx-auto">
+<div class="text-on-surface-variant font-body-sm text-body-sm text-center md:text-left mb-4 md:mb-0">
+                        © __YEAR__ Alkek Center for Metagenomics and Microbiome Research. Baylor College of Medicine.
+                    </div>
+<div class="flex flex-wrap justify-center gap-6">
+</div>
+<div class="text-on-surface-variant font-body-sm text-body-sm">__FOOTER_NOTE__</div></div>
+</footer>
+</main>
+</div>
+
+</body>
+</html>

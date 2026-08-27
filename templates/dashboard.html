@@ -1,4 +1,4 @@
-<!doctype html>
+<!DOCTYPE html>
 <!--
   dashboard.html - Landing page for a published run.
 
@@ -7,228 +7,66 @@
   progress page nextflow_progress.sh published while the job was running, which
   is why this one carries no meta refresh.
 
-  Everything is inline and every link is relative, because this file is served
-  from S3 next to the objects it points at and has no origin to fetch from.
+  This is templates/redesign/code.html split in two: the navigation bar stays
+  here and everything under it is a page of its own, loaded into the frame
+  below. The bar therefore survives navigation - the run's name, its views and
+  its deletion date are the one piece of chrome that does not reload - and each
+  view is a whole page rather than a panel: overview.html for the run itself,
+  the pipeline's own reports as they were written, files.html for the index.
 
-  The header and the row of tabs under it are one strip: the run's name and the
-  notes about it on top, the views it offers along the bottom edge, and a single
-  rule closing the whole thing off. Below that a report sits on the page with a
-  margin around it, and the file index takes the frame's place when its own
-  fragment is the target - so a reader without scripting still reaches every
-  view.
+  The links carry target="view", so they load into that frame with or without
+  scripting; the script only remembers which one is open in the fragment, so
+  #quality is a link straight to the MultiQC report with the bar still around
+  it.
 
-  Placeholders are COMMON_CSS, TASK_NAME, FACTS, BUTTONS, TABS, VIEW_SRC,
-  GROUP_NAV and SECTIONS, each wrapped in doubled underscores. They are
-  deliberately not spelled that way in this comment - the renderer substitutes
-  the whole file, comment included, and would fill these in too. The task name is
-  user-authored text and is HTML-escaped on the way in; everything else is markup
-  the renderer escaped itself.
+  Every link is relative, because this page is served from S3 next to the
+  objects it points at. The head is shared with the other two pages and is
+  inlined from templates/tailwind.html.
+
+  Placeholders are COMMON_HEAD, TASK_NAME, NAV, EXPIRY and FIRST_VIEW, each
+  wrapped in doubled underscores. They are deliberately not spelled that way in
+  this comment - the renderer substitutes the whole file, comment included, and
+  would fill these in too. The task name is user-authored text and is
+  HTML-escaped on the way in; NAV and EXPIRY are markup the renderer escaped
+  itself.
 -->
-<html lang="en">
+<html class="light" lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>__TASK_NAME__</title>
-<style>
-__COMMON_CSS__
-
-/* The header runs into the tabs below it rather than being ruled off from
-   them; the one rule under the tabs closes both. */
-header {
-  padding: 15px 22px 13px;
-  border-bottom: 0;
-}
-
-/* One row of views along the bottom of that strip, with what the run can be
-   downloaded as at the other end of it */
-nav.tabs {
-  flex: 0 0 auto;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 4px 20px;
-  padding: 0 22px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
-}
-nav.tabs .views {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-}
-nav.tabs .views a {
-  padding: 9px 14px 8px;
-  border-bottom: 2px solid transparent;
-  border-radius: 6px 6px 0 0;
-  color: var(--muted);
-  font-size: 14px;
-  font-weight: 600;
-  text-decoration: none;
-  white-space: nowrap;
-}
-nav.tabs .views a:hover { background: var(--row); color: var(--text); }
-nav.tabs .views a.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-}
-nav.tabs .views a.active:hover { background: transparent; }
-
-/* Sized to sit inside the row without setting its height. It shrinks so that
-   on a narrow screen it wraps within itself rather than widening the page. */
-nav.tabs .buttons {
-  flex: 0 1 auto;
-  min-width: 0;
-  margin-left: auto;
-  padding: 5px 0 7px;
-}
-nav.tabs a.button { padding: 5px 11px; font-size: 12.5px; }
-/* Named for what it fetches rather than for a file, so not set in the face
-   filenames are read in */
-nav.tabs a.button.all { font-family: inherit; font-size: 13px; }
-
-/* The report is the page, but it is set in from the tabs rather than butted
-   against them - the margin is what separates one page's chrome from
-   another's, and is all that separates them. */
-.stage {
-  flex: 1 1 auto;
-  min-height: 0;
-  display: flex;
-  padding: 16px 22px 22px;
-}
-.stage iframe {
-  flex: 1 1 auto;
-  width: 100%;
-  border: 0;
-  background: var(--bg);
-}
-
-/* Shown by its own :target, so the tab works without scripting. The frame is
-   the sibling after it, and goes when this arrives. The second pair of rules
-   keeps it open while one of its own groups is the target, which is what the
-   group menu jumps to. */
-#files { display: none; }
-#files:target { display: flex; }
-#files:target ~ .stage { display: none; }
-#files:has(:target) { display: flex; }
-#files:has(:target) ~ .stage { display: none; }
-
-#files {
-  flex: 1 1 auto;
-  overflow: auto;
-  gap: 34px;
-  padding: 26px 22px 40px;
-}
-
-/* The group menu, beside the groups on anything wider than a phone */
-#files .menu {
-  flex: 0 0 auto;
-  position: sticky;
-  top: 0;
-  align-self: flex-start;
-  width: 190px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-#files .menu a {
-  padding: 6px 10px;
-  border-radius: 6px;
-  color: var(--muted);
-  font-size: 13.5px;
-  font-weight: 600;
-  text-decoration: none;
-}
-#files .menu a:hover { background: var(--row); color: var(--text); }
-
-#files .groups {
-  flex: 1 1 auto;
-  min-width: 0;
-  max-width: 900px;
-}
-#files .group { margin: 0 0 34px; }
-#files .group h2 {
-  margin: 0 0 4px;
-  padding-bottom: 7px;
-  border-bottom: 1px solid var(--border);
-  font-size: 12.5px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-#files .group table { font-size: 14px; }
-#files .group td { padding: 10px; }
-#files .group tbody tr:nth-child(odd) { background: transparent; }
-#files .group tr:hover { background: var(--row); }
-#files .desc {
-  display: block;
-  margin-top: 3px;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-               Helvetica, Arial, sans-serif;
-  font-size: 13px;
-  color: var(--muted);
-  overflow-wrap: break-word;
-}
-/* Downloads land as files; everything else opens in a tab of its own */
-#files .tag {
-  display: inline-block;
-  margin-left: 7px;
-  padding: 1px 6px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: var(--muted);
-  vertical-align: 1px;
-}
-
-@media (max-width: 800px) {
-  .stage { padding: 12px 12px 16px; }
-  #files { flex-direction: column; gap: 18px; padding: 20px 16px 32px; }
-  #files .menu {
-    position: static;
-    width: auto;
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
-  #files .menu a { background: var(--row); }
-}
-</style>
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>__TASK_NAME__ - Alkek Center for Metagenomics and Microbiome Research</title>
+__COMMON_HEAD__
 </head>
-<body>
-
-<header>
-  <h1>__TASK_NAME__</h1>
-  <div class="facts">__FACTS__</div>
+<body class="bg-surface-bg-light text-on-surface font-body-md h-screen overflow-hidden flex flex-col">
+<!-- TopNavBar -->
+<header class="bg-primary text-on-primary docked full-width top-0 z-50 shadow-md">
+<div class="flex flex-wrap justify-between items-center gap-y-3 w-full px-margin-page py-4">
+<div class="flex flex-wrap items-center gap-4 md:gap-8">
+<div class="font-headline-lg text-headline-lg font-bold text-on-primary">CMMR</div>
+<nav class="flex flex-wrap gap-x-4 gap-y-1 md:gap-6" id="views">__NAV__</nav>
+</div>
+<div class="flex items-center">__EXPIRY__</div></div>
 </header>
-
-<nav class="tabs">
-  <div class="views">__TABS__</div>
-  <div class="buttons">__BUTTONS__</div>
-</nav>
-
-<section id="files">
-  <nav class="menu">__GROUP_NAV__</nav>
-  <div class="groups">__SECTIONS__</div>
-</section>
-
-<div class="stage">
-  <iframe id="viewer" name="viewer" src="__VIEW_SRC__" title="Report"></iframe>
+<div class="flex flex-1 overflow-hidden">
+<iframe class="flex-1 w-full border-0 bg-surface" id="view" name="view" src="__FIRST_VIEW__" title="__TASK_NAME__"></iframe>
 </div>
 
 <script>
 (function () {
-  var tabs = [].slice.call(document.querySelectorAll("nav.tabs .views a"));
-  var viewer = document.getElementById("viewer");
+  // The two states of a link in the bar, kept as they are written in the design
+  var ON = "text-on-primary border-b-2 border-secondary-fixed font-bold pb-1"
+         + " hover:bg-primary-container transition-colors px-2 py-1 rounded";
+  var OFF = "text-primary-fixed-dim opacity-80 hover:bg-primary-container"
+          + " transition-colors px-2 py-1 rounded";
+
+  var links = [].slice.call(document.querySelectorAll("#views a"));
+  var frame = document.getElementById("view");
 
   // The countdown is worked out when the page is read rather than when it was
   // published, so a link opened weeks later still says how long is left. The
-  // page is published saying the results are available until that date; only a
-  // date that has since passed needs the wording changed.
-  var expiry = document.querySelector(".expiry[data-expires]");
+  // page is published saying the results expire on that date; only a date that
+  // has since passed needs the wording changed.
+  var expiry = document.querySelector("[data-expires]");
   if (expiry) {
     var parts = expiry.getAttribute("data-expires").split("-");
     var due = new Date(+parts[0], +parts[1] - 1, +parts[2]);
@@ -237,47 +75,41 @@ nav.tabs a.button.all { font-family: inherit; font-size: 13px; }
                                           today.getDate())) / 86400000);
     var left = expiry.querySelector(".countdown");
 
-    if (days > 1)        left.textContent = " · " + days + " days left";
-    else if (days === 1) left.textContent = " · 1 day left";
-    else if (days === 0) left.textContent = " · last day";
-    else                 expiry.querySelector(".label").textContent = "Deleted on ";
+    if (days > 1)        left.textContent = " (" + days + " days left)";
+    else if (days === 1) left.textContent = " (1 day left)";
+    else if (days === 0) left.textContent = " (last day)";
+    else                 expiry.querySelector(".label").textContent = "Deleted ";
 
-    if (days <= 14) expiry.className = "expiry soon";
+    // The amber note reddens once the countdown finds the date close
+    if (days <= 14) {
+      expiry.className = expiry.className
+        .replace(/warning-amber/g, "error-red");
+    }
   }
 
   function show(view) {
-    tabs.forEach(function (tab) {
-      var on = tab.getAttribute("data-view") === view;
-      tab.className = on ? "tab active" : "tab";
+    links.forEach(function (link) {
+      var on = link.getAttribute("data-view") === view;
 
-      if (on && view !== "files" && viewer.getAttribute("src") !== tab.getAttribute("href")) {
-        viewer.setAttribute("src", tab.getAttribute("href"));
+      link.className = on ? ON : OFF;
+
+      if (on && frame.getAttribute("src") !== link.getAttribute("href")) {
+        frame.setAttribute("src", link.getAttribute("href"));
       }
     });
   }
 
   function fromHash() {
     var hash = location.hash.replace("#", "");
-    var target = hash && document.getElementById(hash);
-    var known = tabs.some(function (t) { return t.getAttribute("data-view") === hash; });
-    var view = known ? hash : tabs[0].getAttribute("data-view");
+    var known = links.some(function (l) { return l.getAttribute("data-view") === hash; });
 
-    // A group of the file index is targeted by the menu inside it, which leaves
-    // the index open under a fragment no tab names
-    if (!known && target && document.getElementById("files").contains(target)) {
-      view = "files";
-    }
-
-    // The index is shown by its own fragment, so opening on it needs one
-    if (view === "files" && !location.hash) location.hash = "files";
-
-    show(view);
+    show(known ? hash : links[0].getAttribute("data-view"));
   }
 
-  tabs.forEach(function (tab) {
-    tab.addEventListener("click", function (event) {
+  links.forEach(function (link) {
+    link.addEventListener("click", function (event) {
       event.preventDefault();
-      location.hash = tab.getAttribute("data-view");
+      location.hash = link.getAttribute("data-view");
       fromHash();
     });
   });

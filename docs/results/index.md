@@ -5,88 +5,120 @@ pipeline publishes the *same* landing page: the run's dashboard. It follows the
 same lifecycle whichever pipeline built it — claimed at submission, live as a
 progress view while the job runs, overwritten by the finished dashboard.
 
-The URL handed to the requester is `index.html`, not a report.
-[`templates/dashboard.html`](../../templates/dashboard.html) is what lands
-there, rendered by
-[`publish_dashboard.sh`](../../scripts/publish_dashboard.sh) and uploaded last,
-once everything it links to is in place. Every link in it is relative, because
-it is served from S3 alongside the objects it points at.
+The URL handed to the requester is `index.html`, and that page is a navigation
+bar and a frame. Everything under the bar is a page in its own right, loaded
+into that frame — so the bar is the one piece of chrome that survives
+navigation, and each of the pipeline's own reports is read inside it exactly as
+the pipeline wrote it.
 
-## What is on it
+[`publish_dashboard.sh`](../../scripts/publish_dashboard.sh) renders three of
+those pages from what the run produced and uploads them last, once everything
+they link to is in place:
 
-**A header** carrying the Wrike task name on the left, and on the right a row of
-small bordered notes: the sample count, the completion date, and how long the
-results stay online. The three share one shape, so the corner reads as one set
-rather than as a caption plus a badge, and the header carries no rule of its
-own — it runs into the tab row below it, and the one rule under the tabs closes
-both.
+| Template | Lands as | What it is |
+|---|---|---|
+| [`dashboard.html`](../../templates/dashboard.html) | `index.html` | the navigation bar, and the frame the rest load into |
+| [`overview.html`](../../templates/overview.html) | `overview.html` | the run itself: what it was, what it found, what to take away |
+| [`files.html`](../../templates/files.html) | `files.html` | the annotated index of everything the run published |
+
+All three are laid out to the [Alkek design
+system](../../templates/redesign/DESIGN.md), and every link in them is relative,
+because they are served from S3 alongside the objects they point at.
+
+## The navigation bar
+
+The CMMR wordmark, one link per view of the run, and the deletion date at the
+far end. Overview is always first and is the view a reader lands on; the rest
+are what the pipeline declared, and the file index sits where the pipeline put
+it.
+
+| Link | ampliseq | taxprofiler |
+|---|---|---|
+| `#overview` | `overview.html` | `overview.html` |
+| `#report` | `summary_report/summary_report.html` | — |
+| `#quality` | `multiqc/multiqc_report.html` | `multiqc/multiqc_report.html` |
+| `#files` | `files.html` | `files.html` |
+| `#setup` | `ampliseq_args.yaml` | `taxprofiler_args.yaml` |
+
+The open view is remembered in the URL fragment, so `#quality` is a link
+straight to the MultiQC report with the bar still around it. Each link also
+carries `target="view"`, so the bar works with scripting off — the script only
+keeps the fragment and the underline in step with the frame.
+
+`Run Setup` is the params file as the run resolved it, which is why it is a
+plain text file rather than a page: it is the record, and there is nothing to
+add to it. It is served as `text/plain`, like every other table and log — see
+[What a link does when you click it](#what-a-link-does-when-you-click-it).
+
+**The expiration notice**, at the end of the bar. See [The expiration
+notice](#the-expiration-notice) below.
+
+## What is on the Overview
+
+**The run's name**, as the headline, with a line naming what the analysis was
+beneath it — *16S rRNA amplicon sequencing analysis*, *Shotgun metagenomic
+taxonomic profiling*.
 
 The task name is re-read from Wrike at upload time rather than taken from the
 `wrike_task_name.txt` copy recorded at submission, since the requester may have
 renamed the task since filing it. That copy is the fallback, and a generic
-heading the one after that. The sample count comes from `sample_count.txt`,
-which the samplesheet script writes into the run directory — the count *after*
-merging entries that share a sample name. A run without that file leaves the
-note out rather than writing an empty one.
+heading the one after that.
 
-**The uid is not on the page.** It names the run in the address bar, in the S3
-prefix and on the Wrike task, and a reader of the results has no use for it. The
-expired page still carries it, under `reference`, because that page is asking the
-reader to quote something back to us.
+**How the run was set up**, as a row of labelled values under the headline: the
+region the reads were measured to cover, what sequenced them and what they were
+classified against for ampliseq; what was depleted and what was classified
+against for taxprofiler. Each is read off `pipeline_manifest.json`, the same
+record a rerun is rebuilt from, so the page and the record cannot disagree — and
+a setting the manifest does not carry leaves its value off the row rather than
+naming an empty one.
 
-**The expiration notice**, the last of those three notes. See
-[The expiration notice](#the-expiration-notice) below.
+**The plots**, in the panel below it: what was in each sample, and how varied
+each sample was, under the panel's two tab-links, with the taxonomic rank and
+the sample order beside them. This is the pair of questions most requesters open
+the link for, which is why it is the view they land on rather than one they have
+to find. [`ampliseq_composition.sh`](composition.md) works the numbers out and
+leaves them in `composition_data.json`, which is written into the page; a run
+that produced nothing to plot leaves the panel on its empty state, which is what
+a taxprofiler run gets.
 
-**A row of tabs**, one per report the run produced plus the file index. Each
-loads into the frame below without leaving the page, and the open tab is
-remembered in the URL fragment — so `#quality` is a link straight to the
-MultiQC report, framed by the dashboard rather than bare.
+**Quick downloads**, at the top of the sidebar. One row per headline file the
+pipeline declared, then [the whole run as a single zip](downloads.md) — the
+emphasised one, since it is what most readers want before the deletion date.
 
-**The download buttons**, at the right end of that same row. One per headline
-file the pipeline declared, plus [the whole run as a single
-zip](downloads.md) — the emphasised one, since it is what most readers want
-before the deletion date. They sit in the tab row but are styled as buttons, so
-they do not read as another view of the page.
+**Run statistics**, under them: what the run measured, in the units a sidebar
+has room for. An ampliseq run reports its samples and ASVs, the reads that went
+in against the reads that reached an ASV, the depth of the thinnest and deepest
+sample, and how much of it the classifier could place at genus and at species.
+The same pass that works out the plots counts all of it, into
+`run_statistics.tsv`; a pipeline that counts nothing gets a tile for its sample
+count, from `sample_count.txt`, and no more.
 
-| Tab | ampliseq | taxprofiler |
-|---|---|---|
-| `#report` | `summary_report/summary_report.html` | — |
-| `#profile` | [`composition_and_diversity.html`](composition.md) | — |
-| `#quality` | `multiqc/multiqc_report.html` | `multiqc/multiqc_report.html` |
-| `#files` | the file index | the file index |
+**A footer** saying when the run finished, which pipeline version produced it,
+and the uid. That last is there so a reader asking us about these results has
+something to quote; nothing else on the page needs it.
 
-Which of these is most useful depends on the question being asked, so none is
-buried: the pipeline's own narrative report is what an ampliseq page opens on,
-and what was found and how varied it was — the two things most requesters open
-the link for — is the tab beside it.
+## What is on the File Explorer
 
-**The report is set in from the tabs, not butted against them.** It sits on the
-page with a margin around it and nothing drawn around it, so the chrome of the
-dashboard and the chrome of whatever report is loaded into it do not run
-together.
-
-**The file index**, under the `All output files` tab — a grouped, annotated
-catalogue of everything the run published, with a menu of the groups beside it.
-See [The file index](#the-file-index) below.
+A grouped, annotated catalogue of everything the run published, with a menu of
+the groups beside it. See [The file index](#the-file-index) below.
 
 ## The expiration notice
 
-A published dashboard has a deletion date, and the page says so in the corner of
-the header: *"Available until Sep 24, 2026 · 38 days left"*. It is written from
-the reader's side — the date is the last day the link works, not the day we run
-the delete — and stays quiet, muted text in a bordered pill, until the date is
-inside the last two weeks, when it turns red. What a reader should do about it
-is in the tooltip rather than the header, so the notice states the deadline
-without shouting it.
+A published dashboard has a deletion date, and the bar says so at its far end:
+*"Expires Sep 24, 2026 (38 days left)"*. It is written from the reader's side —
+the date is the last day the link works, not the day we run the delete — and is
+an amber pill against the bar's blue until the date is inside the last two
+weeks, when it turns red. What a reader should do about it is in the tooltip
+rather than the bar, so the notice states the deadline without shouting it.
 
 If the date has already passed by the time the page is opened, the script that
-works out the countdown rewrites the label to *"Deleted on Sep 24, 2026"*. That
-is the only case the wording changes in, and one the reader should not normally
+works out the countdown rewrites the label to *"Deleted Sep 24, 2026"*. That is
+the only case the wording changes in, and one the reader should not normally
 reach: the expiration pass replaces the whole page well before it.
 
 **The date is rendered into the page; the countdown is worked out in the
 reader's browser.** The notice carries `data-expires="2026-09-24"`, and a few
-lines of script turn that into *"· 38 days left"* when the page is opened. A
+lines of script turn that into *"(38 days left)"* when the page is opened. A
 static page cannot say how long is left — it would be wrong the following week —
 so it says the date, and the countdown is computed against the day the link is
 actually clicked.
@@ -106,7 +138,7 @@ itself worth stating.
 
 `summary_report.html` links to a good deal of what a run produces, but not to
 all of it, and not with any account of what a reader would want each file for.
-The `All output files` tab is that account.
+The File Explorer is that account.
 
 It is built from the pipeline's **output catalogue** —
 [`templates/ampliseq/outputs.conf`](../../templates/ampliseq/outputs.conf) and
@@ -160,7 +192,7 @@ object, including the ones in the folder listing pages.
 The one thing a client most wants before their deletion date is all of it at
 once, and `https://$AWS_S3_BUCKET/download/<uid>` is that: the entire prefix,
 packaged on demand into a single zip that unpacks into a working offline copy of
-this page. Nothing on the dashboard links to it yet. See
+this page. The sidebar's **Download everything** button is that link. See
 [Downloading a whole run](downloads.md).
 
 ## Before and after the dashboard
@@ -208,16 +240,28 @@ depends on it.
 The progress page refreshes itself every minute and the finished dashboard does
 not, which is what stops a reader's browser polling once the results land.
 
-## One page, one stylesheet
+## How the pages are styled
 
-Every published page — dashboard, progress, expired, the folder listings, and
-the [composition and diversity page](composition.md) — shares
-[`templates/common.css`](../../templates/common.css): the palette, the header
-notice, the buttons, the tables. The one page that adds to it is the composition
-page, which needs a categorical palette for its fills and defines those eight
-colours in its own style block. `render_template` in
-[`utilities.sh`](../../scripts/utilities.sh) inlines it into whichever template
-it is filling in, alongside that page's own placeholders:
+The three pages a run is read through — the bar, the Overview and the File
+Explorer — share one head, inlined from
+[`templates/tailwind.html`](../../templates/tailwind.html): the Tailwind
+runtime, Inter and JetBrains Mono, the Material Symbols icon font, and the
+design system's tokens as Tailwind's theme. It is
+[`templates/redesign/code.html`](../../templates/redesign/code.html)'s own head,
+lifted out of it unchanged, so the design and the pages built from it cannot
+drift apart. Each page then styles itself in the utilities that head defines,
+which is how the markup stays the design's markup.
+
+Those three fetch what they need — the Tailwind runtime and the fonts — from
+their CDNs. The pages a reader sees while the run is still going, and the ones
+left behind after it, do not: the [progress
+page](../../templates/progress.html), the [expired
+page](../../templates/expired.html) and the [folder
+listings](browsable-folders.md) inline
+[`templates/common.css`](../../templates/common.css) instead, and are readable
+with no network but the one that served them. `render_template` in
+[`utilities.sh`](../../scripts/utilities.sh) inlines whichever of the two a
+template asks for, alongside that page's own placeholders:
 
 ```bash
 render_template "$LISTING_TEMPLATE" \
@@ -227,7 +271,9 @@ render_template "$LISTING_TEMPLATE" \
 ```
 
 Inlined, not linked, because these pages are served from S3 next to the objects
-they describe and have no origin to fetch a stylesheet from — and because a
-page that outlives its stylesheet is worse than a page that repeats it. Each
-page follows the reader's light or dark setting; nothing is themed with Baylor
-College of Medicine marks, which we have no permission to apply.
+they describe and have no origin to fetch a stylesheet from — and because a page
+that outlives its stylesheet is worse than a page that repeats it.
+
+Nothing is themed with Baylor College of Medicine marks, which we have no
+permission to apply: the navigation bar carries the CMMR wordmark set in type,
+and the footer names the Center and the College in text.

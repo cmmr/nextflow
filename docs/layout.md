@@ -12,8 +12,9 @@ scripts/
                            Sourced by .env.
   pipeline_params.sh       The parameter map a params file is built from. Likewise.
   wrike_api.sh             Wrike REST helpers and object IDs. Likewise sourced.
-  publish_dashboard.sh     Builds the landing page and uploads a results tree.
-                           Likewise sourced; used by both upload scripts.
+  publish_dashboard.sh     Builds the three pages a run is read through, and
+                           uploads a results tree. Likewise sourced; used by
+                           both upload scripts.
   wrike_sqs_listener.sh    The daemon. Polls SQS, routes events.
   wrike_task_handler.sh    Validates a form request, submits it. Login node.
   wrike_delete_handler.sh  Tears a run down. Login node.
@@ -24,7 +25,7 @@ scripts/
   index_directories.sh     Writes a listing page into every results folder. Pipeline-agnostic.
   ampliseq_samplesheet.sh  PRE_PROCESS_CMDS for the ampliseq pipeline.
   ampliseq_detect_region.sh   Likewise; measures which 16S region was sequenced.
-  ampliseq_composition.sh  Builds the composition and diversity page. Run by ampliseq_upload.sh.
+  ampliseq_composition.sh  Works out what the Overview plots. Run by ampliseq_upload.sh.
   ampliseq_upload.sh       POST_PROCESS_CMDS for the ampliseq pipeline.
   taxprofiler_samplesheet.sh  PRE_PROCESS_CMDS for the taxprofiler pipelines.
   taxprofiler_upload.sh       POST_PROCESS_CMDS for the taxprofiler pipelines.
@@ -47,18 +48,28 @@ config/               Nextflow config, passed to `nextflow run -c`.
                       Both are documented in docs/pipelines/taxprofiler.md.
 
 templates/            Web pages published to S3 alongside a run's results.
-  common.css          The palette and base styling every page below inlines.
-  dashboard.html      Landing page template. Pipeline-agnostic.
-  progress.html       Live progress page template. Likewise.
-  expired.html        The page left where an expired dashboard was. Likewise.
-  listing.html        Folder listing page template. Likewise.
+  tailwind.html       The head the three dashboard pages share: the Tailwind
+                      runtime, the fonts, and the design system as its theme.
+  dashboard.html      Landing page template: the navigation bar and its frame.
+                      Pipeline-agnostic, as are the two below.
+  overview.html       The view it opens on: the run, its plots and its sidebar.
+  files.html          The annotated index of everything the run published.
+  common.css          The palette and base styling the three pages below inline.
+  progress.html       Live progress page template.
+  expired.html        The page left where an expired dashboard was.
+  listing.html        Folder listing page template.
   ampliseq/
-    outputs.conf      What the dashboard's file index lists for an ampliseq run.
-    composition.html  The composition and diversity page; see docs/results/composition.md.
+    outputs.conf      What the file index lists for an ampliseq run.
     report.css        The stylesheet ampliseq's own summary report is given.
     abstract.md       The section that report opens with.
   taxprofiler/
-    outputs.conf      What the dashboard's file index lists for a taxprofiler run.
+    outputs.conf      What the file index lists for a taxprofiler run.
+  redesign/
+    DESIGN.md         The Alkek design system the pages above are styled to:
+                      tokens, type scale, and what each component is for.
+    code.html         The dashboard as it was designed, before it was split into
+                      a bar and the pages it frames. tailwind.html is its head.
+    screen.png        The same, as a picture.
 
 systemd/              The units systemd runs: the daemon, and the daily
                       expiration timer.

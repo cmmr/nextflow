@@ -20,7 +20,7 @@
 # wrike_followup.sh posts whatever ends up there back to the Wrike task.
 #
 # Defines: log, warn, fail, run_results_url, escape_html, escape_url, human_size,
-#          render_template, is_valid_uid, derive_uid
+#          human_count, render_template, is_valid_uid, derive_uid
 # Env:     RUN_ID_SALT from secrets/.env, for derive_uid only; AWS_S3_BUCKET and
 #          S3_RUN_PREFIX for run_results_url; NEXTFLOW_DIR for render_template
 
@@ -96,8 +96,24 @@ human_size() {
     }'
 }
 
-# Fill in one page template and print it. templates/common.css is inlined for
-# every page; the name/value pairs after the template are substituted in the
+# A count, in the units a sidebar has room for: 16600 -> 16.6k, 2400000 -> 2.4M.
+# Anything under a thousand is written out in full.
+human_count() {
+    local count="$1"
+
+    LC_ALL=C awk -v n="$count" 'BEGIN {
+        split("k M G", unit, " ")
+        if (n < 1000) { printf "%d", n; exit }
+        i = 0
+        while (n >= 1000 && i < 3) { n /= 1000; i++ }
+        if (n < 100) printf "%.1f%s", n, unit[i]
+        else         printf "%d%s", n + 0.5, unit[i]
+    }'
+}
+
+# Fill in one page template and print it. templates/common.css and
+# templates/tailwind.html are inlined for every page that carries their
+# placeholder; the name/value pairs after the template are substituted in the
 # order given, each replacing its name wrapped in doubled underscores.
 #
 # Replacements are variable expansions rather than literal text, so bash inserts
@@ -108,17 +124,20 @@ render_template() {
     shift
 
     local common="$NEXTFLOW_DIR/templates/common.css"
-    local page css name value
+    local head="$NEXTFLOW_DIR/templates/tailwind.html"
+    local page css markup name value
 
-    if [[ ! -r "$file" || ! -r "$common" ]]; then
-        warn "Cannot read the page template $file or the stylesheet $common."
+    if [[ ! -r "$file" || ! -r "$common" || ! -r "$head" ]]; then
+        warn "Cannot read the page template $file, the stylesheet $common or the head $head."
         return 1
     fi
 
     page=$(<"$file")
     css=$(<"$common")
+    markup=$(<"$head")
 
     page=${page//__COMMON_CSS__/$css}
+    page=${page//__COMMON_HEAD__/$markup}
 
     while (( $# >= 2 )); do
         name="$1"

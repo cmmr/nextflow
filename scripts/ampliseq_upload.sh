@@ -19,24 +19,29 @@
 # is repointed at the listing for the results folder, since a folder URL for the
 # top of a run is the dashboard the report is being read inside.
 #
-# ampliseq_composition.sh runs before both, and leaves behind the composition and
-# diversity page the dashboard opens in a tab of its own.
+# ampliseq_composition.sh runs before both, and leaves behind the diversity table
+# and the data the Overview's two plots are drawn from.
 #
 # The archive is stored, not compressed (zip -0): the reads are already gzipped.
 # zip stores what a symlink points at, so linked samples are archived as real
 # data.
 #
-# The landing page is publish_dashboard.sh's, filled in from what this run
-# actually produced: which reports it has tabs for, which files its header
-# offers, and which of the outputs named in templates/ampliseq/outputs.conf
-# exist.
+# The pages a reader sees are publish_dashboard.sh's, filled in from what this
+# run actually produced: which reports the navigation bar offers, what the
+# Overview plots, which files its sidebar offers, what the run measured, and
+# which of the outputs named in templates/ampliseq/outputs.conf exist. The plots
+# and the numbers beside them are what ampliseq_composition.sh left in
+# composition_data.json and run_statistics.tsv, and the settings above them come
+# off the manifest wrike_job.sh recorded.
 #
 # Usage:     ampliseq_upload.sh [results_dir]
 #            defaults to ./results, the outdir set in the ampliseq params file
 # Called by: wrike_job.sh, as the POST_PROCESS_CMDS entry of the ampliseq pipeline
 # Requires:  aws, zip, curl and jq (via the Wrike helpers)
-# Reads:     templates/dashboard.html and templates/ampliseq/outputs.conf, via
-#            the dashboard helpers
+# Reads:     templates/dashboard.html, templates/overview.html,
+#            templates/files.html and templates/ampliseq/outputs.conf, via the
+#            dashboard helpers; ./composition_data.json, ./run_statistics.tsv
+#            and ./pipeline_manifest.json from the run directory
 # Runs:      ampliseq_composition.sh and index_directories.sh, over the results
 #            folder
 # Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, WRIKE_DASHBOARD_URL_CFID,
@@ -64,6 +69,21 @@ FASTQ_ZIP="$RESULTS_DIR/$FASTQ_ZIP_NAME"
 # Written by ampliseq_samplesheet.sh, in the run directory rather than in the
 # results: the number of samples after any merging
 SAMPLE_COUNT_FILE="sample_count.txt"
+
+# The headline numbers ampliseq_composition.sh counted out of the ASV and
+# abundance tables, as key and value, for the Overview's sidebar
+STATS_FILE="run_statistics.tsv"
+
+# What that script left for the Overview's two plots to draw, or nothing when
+# the run produced no tables to plot
+PLOT_DATA_FILE="composition_data.json"
+
+# Written by wrike_job.sh, and read here for the settings the page names: which
+# pipeline version ran, which region it measured, and what it classified against
+RUN_MANIFEST="pipeline_manifest.json"
+
+# What the page calls the analysis, under the task's own name
+SUBTITLE="16S rRNA amplicon sequencing analysis"
 
 # ampliseq's own account of the run, and the first thing the dashboard shows
 SUMMARY_REPORT="$RESULTS_DIR/summary_report/summary_report.html"
@@ -116,10 +136,10 @@ else
 fi
 
 # 2. Work out the two things a requester asks for first - what was in each
-#    sample, and how varied each sample was - and write the page that shows
-#    them. Ahead of the listings, so the files it leaves behind are in them.
+#    sample, and how varied each sample was - for the Overview to plot. Ahead of
+#    the listings, so the table it leaves in the results is in them.
 if ! "$NEXTFLOW_DIR/scripts/ampliseq_composition.sh" "$RESULTS_DIR"; then
-    warn "The composition and diversity page could not be built; it will be missing."
+    warn "The composition and diversity data could not be built; the plots will be missing."
 fi
 
 # 3. Give every folder below the results root a listing page, so that the folder
@@ -146,18 +166,99 @@ if ! UPLOAD_OUTPUT=$(upload_results_tree "$RESULTS_DIR" "$S3_RESULTS_DIR"); then
     fail "The results could not be uploaded to S3:"$'\n'"$UPLOAD_OUTPUT"
 fi
 
-# 6. Build the page that frames all of it, from what the run produced.
+# 6. Build the pages that frame all of it, from what the run produced.
 dashboard_reset "$RESULTS_DIR" "$OUTPUT_CATALOG"
 
-#    The first view is the one the page opens on
-dashboard_view report  "Analysis report"         "summary_report/summary_report.html"
-dashboard_view profile "Composition & diversity" "composition_and_diversity.html"
-dashboard_view quality "Sequence quality"        "multiqc/multiqc_report.html"
+#    The navigation bar, after the Overview every run opens on
+dashboard_view report  "Analysis Report" "summary_report/summary_report.html"
+dashboard_view quality "Quality Control" "multiqc/multiqc_report.html"
+dashboard_index_view   "File Explorer"
+dashboard_view setup   "Run Setup"       "ampliseq_args.yaml"
 
 #    The reads are the bulky download most people came for; the ASV table
 #    carries its taxonomy as observation metadata
 dashboard_button "$FASTQ_ZIP_NAME"
 dashboard_button "qiime2/abundance_tables/feature-table.biom"
+
+#    How the run was set up, as the page states it above the report. Every value
+#    comes off the manifest wrike_job.sh recorded, so the page and the record
+#    cannot disagree; anything it does not carry leaves its item off the row.
+PIPELINE=""
+REGION=""
+REF_TAXONOMY=""
+SEQUENCING_TYPE=""
+
+if [[ -r "$RUN_MANIFEST" ]]; then
+    PIPELINE=$(jq -r '.pipeline // empty' "$RUN_MANIFEST") || true
+    REGION=$(jq -r '.region // empty' "$RUN_MANIFEST") || true
+    REF_TAXONOMY=$(jq -r '.params.dada_ref_taxonomy // empty' "$RUN_MANIFEST") || true
+    SEQUENCING_TYPE=$(jq -r '.params.sequencing_type // empty' "$RUN_MANIFEST") || true
+else
+    warn "No $RUN_MANIFEST in the run directory; the page will not say how the run was set up."
+fi
+
+case "$SEQUENCING_TYPE" in
+    illumina_pe) PLATFORM="Illumina, paired-end" ;;
+    illumina_se) PLATFORM="Illumina, single-end" ;;
+    nanopore)    PLATFORM="Oxford Nanopore" ;;
+    pacbio)      PLATFORM="PacBio HiFi" ;;
+    *)           PLATFORM="$SEQUENCING_TYPE" ;;
+esac
+
+dashboard_spec biotech  "Amplified region"   "$REGION"
+dashboard_spec science  "Sequencing"         "$PLATFORM"
+dashboard_spec database "Reference taxonomy" "$REF_TAXONOMY"
+
+#    What the run measured, as the sidebar reports it. The counts are whole
+#    numbers written out in the units a sidebar has room for; the bars are only
+#    how far each reading got.
+declare -A STATS=()
+
+if [[ -r "$STATS_FILE" ]]; then
+    while IFS=$'\t' read -r STAT_KEY STAT_VALUE; do
+        if [[ "$STAT_VALUE" =~ ^[0-9]+$ ]]; then
+            STATS["$STAT_KEY"]="$STAT_VALUE"
+        fi
+    done < "$STATS_FILE"
+fi
+
+if [[ -n "${STATS[samples]:-}" ]]; then
+    dashboard_stat_group "SAMPLES & ASVs"
+    dashboard_stat_tiles "${STATS[samples]}|Samples" "$(human_count "${STATS[asvs]:-0}")|Total ASVs|growth"
+fi
+
+if [[ -n "${STATS[reads_retained]:-}" ]]; then
+    RETAINED=${STATS[reads_retained]}
+    TOTAL_READS=${STATS[reads_total]:-$RETAINED}
+
+    #    Reads that reached an ASV, against the reads that went in. The two bars
+    #    share a scale, so the second one is the survival rate by eye.
+    RETAINED_PCT=100
+    if (( TOTAL_READS > 0 )); then
+        RETAINED_PCT=$(( RETAINED * 100 / TOTAL_READS ))
+    fi
+
+    dashboard_stat_group "READ TOTALS"
+    dashboard_stat_bar "Total reads"    "$(human_count "$TOTAL_READS")" 100
+    dashboard_stat_bar "Retained reads" "$(human_count "$RETAINED")" "$RETAINED_PCT" growth
+
+    dashboard_stat_group "READS PER SAMPLE"
+    dashboard_stat_chips "$(human_count "${STATS[reads_avg]:-0}")|Avg" \
+                         "$(human_count "${STATS[reads_min]:-0}")|Min" \
+                         "$(human_count "${STATS[reads_max]:-0}")|Max"
+fi
+
+if [[ -n "${STATS[genus_pct]:-}" || -n "${STATS[species_pct]:-}" ]]; then
+    dashboard_stat_group "CLASSIFICATION"
+
+    if [[ -n "${STATS[genus_pct]:-}" ]]; then
+        dashboard_stat_bar "Genus level" "${STATS[genus_pct]}%" "${STATS[genus_pct]}"
+    fi
+
+    if [[ -n "${STATS[species_pct]:-}" ]]; then
+        dashboard_stat_bar "Species level" "${STATS[species_pct]}%" "${STATS[species_pct]}" secondary
+    fi
+fi
 
 #    The title is read from Wrike rather than taken from the copy recorded at
 #    submission, since the requester may have renamed the task since. That copy
@@ -195,20 +296,13 @@ if [[ -r "$SAMPLE_COUNT_FILE" ]]; then
     fi
 fi
 
-# 7. Land the page last, once nothing it points at is still uploading. This
-#    overwrites the progress page published to this key, which is how a reader
-#    watching the run is handed the report.
-#
-#    --content-type because reading the body from stdin leaves aws nothing to
-#    guess from, and a page served as binary downloads instead of rendering.
-if ! DASHBOARD=$(render_dashboard "$RUN_ID" "$TASK_NAME" "$(date '+%b %-d, %Y')" \
-        "$SAMPLE_COUNT" "$EXPIRES_ON"); then
-    fail "The results were uploaded, but the page that presents them could not be built."
-fi
-
-if ! UPLOAD_OUTPUT=$(printf '%s\n' "$DASHBOARD" \
-        | aws s3 cp - "$S3_RESULTS_DIR/index.html" --content-type "text/html" 2>&1); then
-    fail "The results were uploaded, but the page that presents them was not:"$'\n'"$UPLOAD_OUTPUT"
+# 7. Land the pages last, once nothing they point at is still uploading. The
+#    landing page overwrites the progress page published to this key, which is
+#    how a reader watching the run is handed the report.
+if ! UPLOAD_OUTPUT=$(publish_dashboard "$S3_RESULTS_DIR" "$RUN_ID" "$TASK_NAME" \
+        "$SUBTITLE" "$PIPELINE" "$(date '+%b %-d, %Y')" "$SAMPLE_COUNT" \
+        "$EXPIRES_ON" "$PLOT_DATA_FILE"); then
+    fail "The results were uploaded, but the pages that present them were not:"$'\n'"$UPLOAD_OUTPUT"
 fi
 
 update_wrike_custom_field "$WRIKE_DASHBOARD_URL_CFID" "$S3_RESULTS_URL"

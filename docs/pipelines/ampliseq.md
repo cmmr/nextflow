@@ -73,23 +73,27 @@ what was sequenced and writes `detected_params.yaml` — `sequencing_type`,
 `savont_options` — which `wrike_job.sh` layers over the pipeline's defaults.
 
 [`ampliseq_upload.sh`](../../scripts/ampliseq_upload.sh) zips `raw-sequences/` into the
-results folder (`zip -0` — the reads are already compressed), builds the
-[composition and diversity page](../results/composition.md), gives every folder
-in it a listing page, uploads the folder to `s3://$AWS_S3_BUCKET/nxf/<uid>/`, and
-writes the report URL to a Wrike custom field. Nextflow's `work/` directory is
+results folder (`zip -0` — the reads are already compressed), works out
+[what the Overview plots](../results/composition.md), gives every folder in it a
+listing page, uploads the folder to `s3://$AWS_S3_BUCKET/nxf/<uid>/`, and writes
+the report URL to a Wrike custom field. Nextflow's `work/` directory is
 deliberately left behind.
 
 What the requester actually opens — the landing page, and the live progress view
 it starts out as — is [The results page](../results/index.md). What it offers of
-this pipeline's output is declared in three lines of that script and one text
-file:
+this pipeline's output is declared in a handful of lines of that script and one
+text file:
 
 ```bash
-dashboard_view report  "Analysis report"         "summary_report/summary_report.html"
-dashboard_view profile "Composition & diversity" "composition_and_diversity.html"
-dashboard_view quality "Sequence quality"        "multiqc/multiqc_report.html"
+dashboard_view report  "Analysis Report" "summary_report/summary_report.html"
+dashboard_view quality "Quality Control" "multiqc/multiqc_report.html"
+dashboard_index_view   "File Explorer"
+dashboard_view setup   "Run Setup"       "ampliseq_args.yaml"
 dashboard_button "raw-sequences.zip"
 dashboard_button "qiime2/abundance_tables/feature-table.biom"
+dashboard_spec biotech  "Amplified region"   "$REGION"
+dashboard_spec science  "Sequencing"         "$PLATFORM"
+dashboard_spec database "Reference taxonomy" "$REF_TAXONOMY"
 ```
 
 plus [`templates/ampliseq/outputs.conf`](../../templates/ampliseq/outputs.conf),
@@ -97,6 +101,14 @@ the annotated index of everything else — abundance tables, taxonomy, sequences
 diversity, PICRUSt2, QC, the R objects, and the record of how the run was set
 up. Entries whose files a given run did not produce are skipped, so an ONT run
 lists `savont/` and no `dada2/` without a catalogue of its own.
+
+Those are the links of the navigation bar, after the Overview every run opens
+on. The three settings are read off `pipeline_manifest.json`; the Overview's
+plots and the numbers beside them — samples and ASVs, reads in against reads
+kept, and how deep the classifier got — come from the
+`composition_data.json` and `run_statistics.tsv` that
+[`ampliseq_composition.sh`](../results/composition.md) works out of the ASV and
+abundance tables.
 
 ## Dressing the summary report
 
@@ -110,10 +122,12 @@ pieces of it worth replacing. Three are set in
 | `report_abstract` | [`templates/ampliseq/abstract.md`](../../templates/ampliseq/abstract.md) — replaces the pipeline's `Abstract` section with one written for the client |
 | `report_title` | `Amplicon sequencing analysis` |
 
-The report is read inside the dashboard's frame, so it follows the reader's
-light or dark setting the way every other published page does. Its plots are
-SVGs drawn on a white canvas, so in dark mode each one sits on a white plate
-rather than being inverted into something unreadable.
+The report is read inside the dashboard's frame. Its own stylesheet still
+follows the reader's light or dark setting, while the pages around it are light
+whichever way that setting goes — so a reader in dark mode gets a dark report
+inside a light bar until `report.css` is brought onto the design system. Its
+plots are SVGs drawn on a white canvas, so in dark mode each one sits on a white
+plate rather than being inverted into something unreadable.
 
 `report_logo` is left at its default and hidden by the stylesheet: the pipeline
 stretches it to the full width of the page and paints the table of contents with

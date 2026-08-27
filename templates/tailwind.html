@@ -1,0 +1,166 @@
+<!--
+  tailwind.html - The head every page of a published run shares.
+
+  Inlined by render_template wherever a template carries the COMMON_HEAD
+  placeholder - spelled with doubled underscores, and deliberately not spelled
+  that way here. It is templates/redesign/code.html's head, lifted out of it
+  unchanged so the three pages built from that design cannot drift apart: the
+  Tailwind runtime, the two typefaces and the icon font, and the design system's
+  tokens as Tailwind's theme.
+-->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "on-tertiary": "#ffffff",
+                      "primary-fixed": "#dde1ff",
+                      "surface-container-low": "#f5f3f3",
+                      "on-surface": "#1b1c1c",
+                      "on-tertiary-fixed-variant": "#004299",
+                      "secondary-fixed-dim": "#7ad4e2",
+                      "on-secondary": "#ffffff",
+                      "surface-tint": "#4559a8",
+                      "on-tertiary-fixed": "#001944",
+                      "secondary": "#006874",
+                      "inverse-surface": "#303031",
+                      "outline-variant": "#c5c5d3",
+                      "on-primary-fixed-variant": "#2c408f",
+                      "surface-container-lowest": "#ffffff",
+                      "on-secondary-fixed": "#001f24",
+                      "surface-dim": "#dbdad9",
+                      "surface": "#fbf9f8",
+                      "secondary-fixed": "#97f0ff",
+                      "on-surface-variant": "#454651",
+                      "bio-growth": "#10B981",
+                      "secondary-container": "#94edfc",
+                      "primary": "#000c3d",
+                      "tertiary-container": "#00245a",
+                      "warning-amber": "#F59E0B",
+                      "on-secondary-fixed-variant": "#004f57",
+                      "primary-fixed-dim": "#b8c4ff",
+                      "on-primary": "#ffffff",
+                      "inverse-on-surface": "#f2f0f0",
+                      "on-secondary-container": "#006d79",
+                      "surface-container-highest": "#e4e2e2",
+                      "surface-container": "#efeded",
+                      "on-error-container": "#93000a",
+                      "surface-variant": "#e4e2e2",
+                      "on-primary-container": "#7689dc",
+                      "on-tertiary-container": "#4d8aff",
+                      "primary-container": "#001d6e",
+                      "inverse-primary": "#b8c4ff",
+                      "on-primary-fixed": "#001453",
+                      "on-error": "#ffffff",
+                      "error-container": "#ffdad6",
+                      "on-background": "#1b1c1c",
+                      "tertiary": "#001031",
+                      "background": "#fbf9f8",
+                      "error-red": "#EF4444",
+                      "tertiary-fixed-dim": "#afc6ff",
+                      "error": "#ba1a1a",
+                      "tertiary-fixed": "#d9e2ff",
+                      "surface-bg-dark": "#0D1117",
+                      "surface-bright": "#fbf9f8",
+                      "outline": "#757682",
+                      "surface-container-high": "#e9e8e7",
+                      "surface-bg-light": "#EEFBF9"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.125rem",
+                      "lg": "0.25rem",
+                      "xl": "0.5rem",
+                      "full": "0.75rem"
+              },
+              "spacing": {
+                      "padding-card": "16px",
+                      "unit": "4px",
+                      "padding-dense": "8px",
+                      "margin-page": "24px",
+                      "gutter-grid": "16px"
+              },
+              "fontFamily": {
+                      "body-sm": [
+                              "Inter"
+                      ],
+                      "headline-xl": [
+                              "Inter"
+                      ],
+                      "code-md": [
+                              "JetBrains Mono"
+                      ],
+                      "code-sm": [
+                              "JetBrains Mono"
+                      ],
+                      "headline-lg": [
+                              "Inter"
+                      ],
+                      "label-caps": [
+                              "Inter"
+                      ],
+                      "body-md": [
+                              "Inter"
+                      ]
+              },
+              "fontSize": {
+                      "body-sm": [
+                              "12px",
+                              {
+                                      "lineHeight": "16px",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "headline-xl": [
+                              "32px",
+                              {
+                                      "lineHeight": "40px",
+                                      "letterSpacing": "-0.02em",
+                                      "fontWeight": "700"
+                              }
+                      ],
+                      "code-md": [
+                              "13px",
+                              {
+                                      "lineHeight": "18px",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "code-sm": [
+                              "11px",
+                              {
+                                      "lineHeight": "14px",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "headline-lg": [
+                              "24px",
+                              {
+                                      "lineHeight": "32px",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "label-caps": [
+                              "11px",
+                              {
+                                      "lineHeight": "12px",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "body-md": [
+                              "14px",
+                              {
+                                      "lineHeight": "20px",
+                                      "fontWeight": "400"
+                              }
+                      ]
+              }
+      },
+          },
+        }
+      </script>

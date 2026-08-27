@@ -17,17 +17,19 @@
 # data. A WGS run's reads are large, so this needs free space in the run
 # directory equal to the input volume.
 #
-# The landing page is publish_dashboard.sh's, filled in from what this run
-# actually produced: which reports it has tabs for, which files its header
-# offers, and which of the outputs named in templates/taxprofiler/outputs.conf
-# exist.
+# The pages a reader sees are publish_dashboard.sh's, filled in from what this
+# run actually produced: which reports the navigation bar offers, which files
+# the Overview's sidebar offers, how the run was set up, and which of the
+# outputs named in templates/taxprofiler/outputs.conf exist.
 #
 # Usage:     taxprofiler_upload.sh [results_dir]
 #            defaults to ./results, the outdir set in the taxprofiler params file
 # Called by: wrike_job.sh, as the POST_PROCESS_CMDS entry of the taxprofiler pipelines
 # Requires:  aws, zip, curl and jq (via the Wrike helpers)
-# Reads:     templates/dashboard.html and templates/taxprofiler/outputs.conf, via
-#            the dashboard helpers
+# Reads:     templates/dashboard.html, templates/overview.html,
+#            templates/files.html and templates/taxprofiler/outputs.conf, via
+#            the dashboard helpers; ./pipeline_manifest.json from the run
+#            directory
 # Runs:      index_directories.sh, over the results folder
 # Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, WRIKE_DASHBOARD_URL_CFID,
 #            the Wrike and dashboard helper functions and the log/fail/is_valid_uid
@@ -57,6 +59,13 @@ SAMPLE_COUNT_FILE="sample_count.txt"
 # Also written per run by taxprofiler_samplesheet.sh, and published with the
 # results as part of the record
 DB_SHEET="taxprofiler_database.csv"
+
+# Written by wrike_job.sh, and read here for the settings the page names: which
+# pipeline version ran, and what it was told to deplete against
+RUN_MANIFEST="pipeline_manifest.json"
+
+# What the page calls the analysis, under the task's own name
+SUBTITLE="Shotgun metagenomic taxonomic profiling"
 
 # What the landing page's "All output files" view lists, in the order it lists it
 readonly OUTPUT_CATALOG="$NEXTFLOW_DIR/templates/taxprofiler/outputs.conf"
@@ -126,7 +135,9 @@ fi
 # 5. Build the page that frames all of it, from what the run produced.
 dashboard_reset "$RESULTS_DIR" "$OUTPUT_CATALOG"
 
-dashboard_view quality "MultiQC report" "multiqc/multiqc_report.html"
+dashboard_view quality "Quality Control" "multiqc/multiqc_report.html"
+dashboard_index_view   "File Explorer"
+dashboard_view setup   "Run Setup"       "taxprofiler_args.yaml"
 
 #    The reads are the bulky download most people came for; then the interactive
 #    classification charts, one per tool and database, and taxpasta's merged
@@ -134,6 +145,30 @@ dashboard_view quality "MultiQC report" "multiqc/multiqc_report.html"
 dashboard_button "$FASTQ_ZIP_NAME"
 dashboard_button "krona/*.html"
 dashboard_button "taxpasta/*.tsv"
+
+#    How the run was set up, as the page states it above the report: what was
+#    depleted before classification, and what was classified against. The
+#    databases are named by the sheet the run was given, one row per tool.
+PIPELINE=""
+
+if [[ -r "$RUN_MANIFEST" ]]; then
+    PIPELINE=$(jq -r '.pipeline // empty' "$RUN_MANIFEST") || true
+else
+    warn "No $RUN_MANIFEST in the run directory; the page will not name the pipeline."
+fi
+
+HOST_REMOVAL=$(form_answer hostremoval_reference)
+: "${HOST_REMOVAL:=PhiX}"
+
+DATABASES=""
+if [[ -r "$DB_SHEET" ]]; then
+    DATABASES=$(awk -F, 'NR > 1 && $2 != "" && !seen[$2]++ {
+        printf "%s%s", (n++ ? ", " : ""), $2
+    }' "$DB_SHEET")
+fi
+
+dashboard_spec filter_alt "Host removal" "$HOST_REMOVAL"
+dashboard_spec database   "Databases"    "$DATABASES"
 
 #    The title is read from Wrike rather than taken from the copy recorded at
 #    submission, since the requester may have renamed the task since. That copy
@@ -171,19 +206,12 @@ if [[ -r "$SAMPLE_COUNT_FILE" ]]; then
     fi
 fi
 
-# 6. Land the page last, once nothing it points at is still uploading. This
-#    overwrites the progress page published to this key.
-#
-#    --content-type because reading the body from stdin leaves aws nothing to
-#    guess from, and a page served as binary downloads instead of rendering.
-if ! DASHBOARD=$(render_dashboard "$RUN_ID" "$TASK_NAME" "$(date '+%b %-d, %Y')" \
-        "$SAMPLE_COUNT" "$EXPIRES_ON"); then
-    fail "The results were uploaded, but the page that presents them could not be built."
-fi
-
-if ! UPLOAD_OUTPUT=$(printf '%s\n' "$DASHBOARD" \
-        | aws s3 cp - "$S3_RESULTS_DIR/index.html" --content-type "text/html" 2>&1); then
-    fail "The results were uploaded, but the page that presents them was not:"$'\n'"$UPLOAD_OUTPUT"
+# 6. Land the pages last, once nothing they point at is still uploading. The
+#    landing page overwrites the progress page published to this key.
+if ! UPLOAD_OUTPUT=$(publish_dashboard "$S3_RESULTS_DIR" "$RUN_ID" "$TASK_NAME" \
+        "$SUBTITLE" "$PIPELINE" "$(date '+%b %-d, %Y')" "$SAMPLE_COUNT" \
+        "$EXPIRES_ON"); then
+    fail "The results were uploaded, but the pages that present them were not:"$'\n'"$UPLOAD_OUTPUT"
 fi
 
 update_wrike_custom_field "$WRIKE_DASHBOARD_URL_CFID" "$S3_RESULTS_URL"

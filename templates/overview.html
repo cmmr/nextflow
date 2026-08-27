@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<!--
+  overview.html - The Overview view of a published run, read inside dashboard.html.
+
+  Rendered by publish_dashboard.sh into the results folder as overview.html and
+  loaded into the landing page's frame, which is where the navigation bar lives.
+  This page is templates/redesign/code.html's main content, unchanged apart from
+  the values filled into it and the plots drawn into the panel that offers them.
+
+  That panel is the run's composition and diversity: its two tab-links choose
+  between what was in each sample and how varied each sample was, and the two
+  selects beside them choose the taxonomic rank and the order the samples are
+  drawn in. Both charts draw to a canvas rather than to elements - a run of a
+  few thousand samples is one column per sample either way, and a few thousand
+  SVG rectangles per taxon is what makes QIIME 2's own barplot unusable at that
+  size. ampliseq_composition.sh works the numbers out; a run with none leaves
+  the panel on its empty state.
+
+  The eight colours are a validated categorical set - the ordering is what keeps
+  neighbouring fills apart under colour vision deficiency, so they are assigned
+  in that order and never cycled. A ninth taxon is not given a ninth colour: the
+  tail is summed into "Other", which wears the neutral. Sorting the samples
+  never reassigns them either. Three of the steps sit under 3:1 against a white
+  page, which is why the legend beside the chart is a table carrying every
+  taxon's name and share rather than a row of swatches.
+
+  Placeholders are COMMON_HEAD, TASK_NAME, SUBTITLE, SPECS, PLOT_DATA,
+  DOWNLOADS, ZIP_BUTTON, STATS, YEAR and FOOTER_NOTE, each wrapped in doubled
+  underscores. They are deliberately not spelled that way in this comment - the
+  renderer substitutes the whole file, comment included, and would paste the
+  entire dataset in here too. The task name is user-authored text and is
+  HTML-escaped on the way in; everything else is markup the renderer escaped
+  itself.
+-->
+<html class="light" lang="en">
+<head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>__TASK_NAME__</title>
+__COMMON_HEAD__
+<style>
+/* What the charts are drawn in. The categorical set is the only palette the
+   design system does not carry, and the four names under it are the tokens the
+   canvas has to read as values rather than as classes. */
+:root {
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+  --series-other: #b3bec9;
+
+  --border: #c5c5d3;
+  --muted: #454651;
+  --text: #1b1c1c;
+  --row: #f5f3f3;
+}
+
+canvas { display: block; width: 100%; }
+
+.plot-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.plot-table th {
+  padding: 0 10px 7px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-align: right;
+}
+.plot-table th:first-child { text-align: left; }
+.plot-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.plot-table tr:hover { background: var(--row); }
+.plot-table td.num {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.plot-table td.taxon {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.swatch {
+  flex: 0 0 auto;
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+}
+.rank-path {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* One panel per index, all in the sample order the chart above them uses */
+.panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px 20px;
+}
+.panels figure { margin: 0; }
+.panels figcaption {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.panels figcaption span {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+/* One tooltip for every chart on the page, moved to whichever is under the
+   pointer */
+.tip {
+  position: fixed;
+  z-index: 20;
+  max-width: 280px;
+  padding: 8px 11px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #ffffff;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+  pointer-events: none;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
+}
+.tip[hidden] { display: none; }
+.tip .name { font-weight: 600; overflow-wrap: anywhere; }
+.tip .row { color: var(--muted); }
+.tip .row b { color: var(--text); font-weight: 600; }
+</style>
+</head>
+<body class="bg-surface-bg-light text-on-surface font-body-md h-screen overflow-hidden flex flex-col">
+<div class="flex flex-1 overflow-hidden">
+<!-- Main Content Canvas -->
+<main class="flex-1 flex flex-col overflow-y-auto bg-surface relative">
+<div class="p-margin-page space-y-6 max-w-7xl mx-auto w-full"><div class="flex flex-col lg:flex-row gap-gutter-grid items-stretch lg:items-start">
+<div class="flex-1 flex flex-col gap-6 min-w-0">
+<div class="flex justify-between items-end">
+<div>
+<h1 class="font-headline-xl text-headline-xl text-primary">__TASK_NAME__</h1>
+<p class="text-on-surface-variant mt-1">__SUBTITLE__</p>
+</div>
+</div>
+__SPECS__
+<div class="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden flex flex-col shadow-sm h-[600px]">
+<div class="bg-surface-container-low border-b border-outline-variant px-4 py-2 flex flex-wrap justify-between items-center gap-y-2">
+<div class="flex items-center gap-6">
+<div class="flex items-center gap-4 ml-2">
+<button class="font-label-caps text-label-caps font-bold text-primary border-b-2 border-primary pb-0.5" data-plot="composition">Taxonomic Composition</button>
+<button class="font-label-caps text-label-caps font-bold text-on-surface-variant opacity-60 hover:opacity-100 transition-opacity pb-0.5" data-plot="diversity">Alpha Diversity</button>
+</div>
+</div>
+<div class="flex items-center gap-3" id="plot-controls" style="display: none">
+<div class="flex items-center gap-2 bg-surface-container-lowest border border-outline-variant/50 rounded px-2 py-1">
+<span class="font-body-sm text-body-sm text-on-surface-variant">Rank:</span>
+<select class="bg-transparent border-none py-0 pl-0 pr-8 min-w-[140px] font-body-sm text-body-sm text-primary focus:ring-0 cursor-pointer" id="rank">
+</select>
+</div>
+<div class="flex items-center gap-2 bg-surface-container-lowest border border-outline-variant/50 rounded px-2 py-1">
+<span class="font-body-sm text-body-sm text-on-surface-variant">Sort:</span>
+<select class="bg-transparent border-none p-0 font-body-sm text-body-sm text-primary focus:ring-0 cursor-pointer" id="order">
+</select>
+</div>
+</div>
+</div>
+<div class="flex-1 bg-white relative">
+<div class="absolute inset-0 p-8 flex flex-col items-center justify-center text-center opacity-50" id="plot-empty">
+<span class="material-symbols-outlined text-6xl text-outline mb-4">bar_chart</span>
+<h3 class="font-headline-lg text-headline-lg text-on-surface">Composition &amp; Diversity Plots</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-2">This run produced no abundance tables to draw.</p>
+</div>
+<div class="absolute inset-0 overflow-y-auto px-4 py-4" hidden id="plot-scroll">
+<section hidden id="composition">
+<p class="font-body-sm text-body-sm text-on-surface-variant mb-3">One column per
+sample, showing what proportion of its reads came from each of the eight most
+abundant taxa at this rank. Everything rarer is stacked together as
+&ldquo;Other&rdquo;; the full tables are in the abundance tables folder.</p>
+<canvas id="bars"></canvas>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-2 mb-4" id="axis-note"></p>
+<table class="plot-table">
+<thead>
+<tr><th>Taxon</th><th>Mean share</th><th>Samples present in</th></tr>
+</thead>
+<tbody id="legend"></tbody>
+</table>
+</section>
+<section hidden id="diversity">
+<p class="font-body-sm text-body-sm text-on-surface-variant mb-3">How much was
+found in each sample on its own: how many distinct ASVs, and how evenly the
+reads were spread across them. The read depth is plotted beside them because a
+shallow sample cannot show a high count whether or not one is there.</p>
+<div class="panels" id="panels"></div>
+<table class="plot-table mt-4">
+<thead>
+<tr><th>Index</th><th>Lowest</th><th>Median</th><th>Highest</th></tr>
+</thead>
+<tbody id="summary"></tbody>
+</table>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-3">Every value per
+sample, including Chao1 and the Simpson index, is in <a class="text-tertiary-container underline" href="alpha_diversity.tsv" rel="noopener" target="_blank">alpha_diversity.tsv</a>.</p>
+</section>
+</div>
+<div class="absolute inset-0 bg-gradient-to-br from-primary-fixed/5 to-transparent pointer-events-none"></div>
+</div>
+</div>
+</div>
+<aside class="w-full lg:w-80 flex flex-col gap-gutter-grid shrink-0">
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant p-padding-card shadow-sm">
+<h3 class="font-headline-lg text-headline-lg text-primary mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">download</span>Quick Downloads
+      </h3>
+<div class="flex flex-col gap-2">
+__DOWNLOADS__
+<div class="mt-2 pt-3 border-t border-outline-variant/50">
+__ZIP_BUTTON__
+</div>
+</div>
+</div>
+__STATS__
+</aside>
+</div></div>
+<!-- Footer -->
+<footer class="mt-auto bg-surface-container border-t border-outline-variant w-full mt-12">
+<div class="flex flex-col md:flex-row justify-between items-center px-margin-page py-gutter-grid w-full max-w-7xl mx-auto">
+<div class="text-on-surface-variant font-body-sm text-body-sm text-center md:text-left mb-4 md:mb-0">
+                        © __YEAR__ Alkek Center for Metagenomics and Microbiome Research. Baylor College of Medicine.
+                    </div>
+<div class="flex flex-wrap justify-center gap-6">
+</div>
+<div class="text-on-surface-variant font-body-sm text-body-sm">__FOOTER_NOTE__</div></div>
+</footer>
+</main>
+</div>
+
+<div class="tip" hidden id="tip"></div>
+
+<script>
+(function () {
+  var DATA = __PLOT_DATA__;
+
+  // The two states of a tab-link in the panel's header, as the design writes
+  // them
+  var ON = "font-label-caps text-label-caps font-bold text-primary border-b-2"
+         + " border-primary pb-0.5";
+  var OFF = "font-label-caps text-label-caps font-bold text-on-surface-variant"
+          + " opacity-60 hover:opacity-100 transition-opacity pb-0.5";
+
+  var buttons = [].slice.call(document.querySelectorAll("[data-plot]"));
+  var sections = {
+    composition: document.getElementById("composition"),
+    diversity: document.getElementById("diversity")
+  };
+
+  var samples = (DATA && DATA.samples) || [];
+  var reads = (DATA && DATA.reads) || [];
+  var alpha = (DATA && DATA.alpha) || {};
+  var levels = (DATA && DATA.levels) || [];
+  var count = samples.length;
+
+  if (!count) return;
+
+  // Both of these are laid out by a display utility, which outranks the hidden
+  // attribute - so what is shown and hidden here is the property behind it
+  function display(element, on) {
+    element.style.display = on ? "" : "none";
+  }
+
+  display(document.getElementById("plot-empty"), false);
+  document.getElementById("plot-scroll").hidden = false;
+  display(document.getElementById("plot-controls"), true);
+
+  // Room above every plot for the label on its topmost gridline
+  var TOP = 9;
+
+  var tip = document.getElementById("tip");
+  var charts = [];
+  var order = samples.map(function (_, i) { return i; });
+
+  // Read off the stylesheet rather than repeated here, so one palette serves
+  // the fills and the legend swatches
+  function palette(taxa) {
+    var style = getComputedStyle(document.documentElement);
+    var colors = [];
+
+    for (var i = 0; i < taxa.length; i++) {
+      var slot = i === taxa.length - 1 ? "--series-other" : "--series-" + (i + 1);
+      colors.push(style.getPropertyValue(slot).trim());
+    }
+
+    return colors;
+  }
+
+  function ink(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  function percent(parts) {
+    if (parts >= 1000) return (parts / 100).toFixed(0) + "%";
+    if (parts >= 10) return (parts / 100).toFixed(1) + "%";
+    return (parts / 100).toFixed(2) + "%";
+  }
+
+  function thousands(n) {
+    return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  }
+
+  // A canvas sized to the box it was laid out in, at the pixel density of the
+  // screen it is being read on
+  function surface(canvas, height) {
+    var ratio = window.devicePixelRatio || 1;
+    var width = canvas.parentNode.clientWidth;
+
+    canvas.style.height = height + "px";
+    canvas.width = Math.max(1, Math.round(width * ratio));
+    canvas.height = Math.round(height * ratio);
+
+    var ctx = canvas.getContext("2d");
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+
+    return { ctx: ctx, width: width, height: height };
+  }
+
+  // Where one sample's column sits. Columns are laid out edge to edge and given
+  // a gap only once they are wide enough to still read as columns without one.
+  function columns(width, left, right) {
+    var span = Math.max(10, width - left - right);
+    var step = span / count;
+    var bar = Math.max(1, step - (step >= 6 ? 2 : 0));
+
+    // A handful of samples would otherwise be a handful of slabs the width of
+    // the panel. The column keeps its slot - which is what the pointer is
+    // matched against - and is drawn centred inside it.
+    var capped = Math.min(bar, 54);
+
+    return { left: left, step: step, bar: capped, inset: (bar - capped) / 2 };
+  }
+
+  function roundedTop(ctx, x, y, w, h, r) {
+    r = Math.min(r, w / 2, h);
+    ctx.beginPath();
+    ctx.moveTo(x, y + h);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h);
+    ctx.closePath();
+  }
+
+  var LABEL_FONT = "11px Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+
+  // -- Taxonomic composition ------------------------------------------------
+
+  var rankSelect = document.getElementById("rank");
+  var orderSelect = document.getElementById("order");
+  var legend = document.getElementById("legend");
+  var barsCanvas = document.getElementById("bars");
+  var note = document.getElementById("axis-note");
+  var level = null;
+
+  function drawComposition() {
+    if (!level) return;
+
+    var names = count <= 60;
+    var plotHeight = 300;
+    var band = names ? 96 : 10;
+    var view = surface(barsCanvas, TOP + plotHeight + band + 6);
+    var ctx = view.ctx;
+    var geometry = columns(view.width, 46, 8);
+    var colors = palette(level.taxa);
+    var rows = level.values;
+    var floor = TOP + plotHeight;
+
+    // The scale first, one hairline a shade off the page
+    ctx.strokeStyle = ink("--border");
+    ctx.fillStyle = ink("--muted");
+    ctx.lineWidth = 1;
+    ctx.font = LABEL_FONT;
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+
+    for (var mark = 0; mark <= 100; mark += 25) {
+      var y = Math.round(floor - (mark / 100) * plotHeight) + 0.5;
+
+      ctx.beginPath();
+      ctx.moveTo(geometry.left, y);
+      ctx.lineTo(view.width - 8, y);
+      ctx.stroke();
+      ctx.fillText(mark + "%", geometry.left - 8, y);
+    }
+
+    for (var slot = 0; slot < count; slot++) {
+      var sample = order[slot];
+      var x = geometry.left + slot * geometry.step + geometry.inset;
+      var bottom = floor;
+
+      // A column narrow enough to be a hairline gets no rounding to lose
+      var clipped = geometry.bar >= 6;
+
+      if (clipped) {
+        ctx.save();
+        roundedTop(ctx, x, TOP, geometry.bar, plotHeight, 4);
+        ctx.clip();
+      }
+
+      for (var t = 0; t < rows.length; t++) {
+        var share = rows[t][sample] / 10000;
+
+        if (share <= 0) continue;
+
+        var high = share * plotHeight;
+        var gap = high >= 6 ? 2 : 0;
+
+        ctx.fillStyle = colors[t];
+        ctx.fillRect(x, bottom - high, geometry.bar, high - gap);
+        bottom -= high;
+      }
+
+      if (clipped) ctx.restore();
+    }
+
+    note.textContent = (names ? "" : thousands(count) + " samples, left to right, ")
+      + (names ? "Ordered by " : "ordered by ")
+      + orderSelect.options[orderSelect.selectedIndex].textContent.toLowerCase()
+      + ". Hover a column for the sample it belongs to.";
+
+    if (names) {
+      ctx.fillStyle = ink("--muted");
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+
+      for (var k = 0; k < count; k++) {
+        ctx.save();
+        ctx.translate(geometry.left + k * geometry.step + geometry.inset
+                      + geometry.bar / 2, floor + 12);
+        ctx.rotate(-Math.PI / 4);
+        ctx.fillText(samples[order[k]], 0, 0);
+        ctx.restore();
+      }
+    }
+
+    return { geometry: geometry, height: plotHeight };
+  }
+
+  function drawLegend() {
+    var colors = palette(level.taxa);
+    var html = "";
+
+    for (var t = 0; t < level.taxa.length; t++) {
+      var taxon = level.taxa[t];
+      var tail = t === level.taxa.length - 1;
+
+      html += '<tr><td class="taxon"><span class="swatch" style="background:'
+        + colors[t] + '"></span><span>' + escape(taxon.label)
+        + (taxon.lineage ? '<span class="rank-path">' + escape(taxon.lineage) + "</span>" : "")
+        + "</span></td>"
+        + '<td class="num">' + percent(taxon.mean) + "</td>"
+        + '<td class="num">'
+        + (tail ? "&mdash;" : taxon.prevalence + "%") + "</td></tr>";
+    }
+
+    legend.innerHTML = html;
+  }
+
+  function escape(text) {
+    return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  // -- Alpha diversity ------------------------------------------------------
+
+  // The four the panels plot. Chao1 and Simpson are in the table and the file:
+  // one estimator and one index of the same two things is enough on screen.
+  var PANELS = [
+    { key: "reads", title: "Read depth", note: "reads assigned to ASVs", integer: true },
+    { key: "observed", title: "Observed ASVs", note: "distinct ASVs seen", integer: true },
+    { key: "shannon", title: "Shannon index", note: "richness and evenness together", places: 2 },
+    { key: "evenness", title: "Pielou's evenness", note: "0 = one ASV dominates, 1 = all equal", places: 3 }
+  ];
+
+  var SUMMARY = [
+    { key: "reads", title: "Read depth", integer: true },
+    { key: "observed", title: "Observed ASVs", integer: true },
+    { key: "chao1", title: "Chao1 richness", places: 1 },
+    { key: "shannon", title: "Shannon index", places: 2 },
+    { key: "simpson", title: "Simpson index", places: 3 },
+    { key: "evenness", title: "Pielou's evenness", places: 3 }
+  ];
+
+  function values(key) {
+    return key === "reads" ? reads : alpha[key];
+  }
+
+  function format(spec, value) {
+    if (value === undefined || value === null) return "—";
+    return spec.integer ? thousands(value) : value.toFixed(spec.places);
+  }
+
+  function drawPanel(canvas, spec) {
+    var series = values(spec.key) || [];
+    var height = 128;
+    var view = surface(canvas, TOP + height);
+    var ctx = view.ctx;
+    var geometry = columns(view.width, 46, 8);
+    var floor = TOP + height;
+    var top = 0;
+
+    for (var i = 0; i < series.length; i++) if (series[i] > top) top = series[i];
+    if (top <= 0) top = 1;
+
+    ctx.strokeStyle = ink("--border");
+    ctx.fillStyle = ink("--muted");
+    ctx.lineWidth = 1;
+    ctx.font = LABEL_FONT;
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+
+    [0, 0.5, 1].forEach(function (fraction) {
+      var y = Math.round(floor - fraction * height) + 0.5;
+
+      ctx.beginPath();
+      ctx.moveTo(geometry.left, y);
+      ctx.lineTo(view.width - 8, y);
+      ctx.stroke();
+
+      if (fraction > 0) ctx.fillText(format(spec, top * fraction), geometry.left - 8, y);
+    });
+
+    ctx.fillStyle = ink("--series-1");
+
+    for (var slot = 0; slot < count; slot++) {
+      var value = series[order[slot]] || 0;
+      var high = (value / top) * height;
+
+      if (high <= 0) continue;
+
+      var x = geometry.left + slot * geometry.step + geometry.inset;
+
+      if (geometry.bar >= 6) {
+        roundedTop(ctx, x, floor - high, geometry.bar, high, 4);
+        ctx.fill();
+      } else {
+        ctx.fillRect(x, floor - high, geometry.bar, high);
+      }
+    }
+
+    return { geometry: geometry, height: height };
+  }
+
+  function drawSummary() {
+    var html = "";
+
+    SUMMARY.forEach(function (spec) {
+      var series = (values(spec.key) || []).slice().sort(function (a, b) { return a - b; });
+
+      if (!series.length) return;
+
+      var middle = series.length % 2
+        ? series[(series.length - 1) / 2]
+        : (series[series.length / 2 - 1] + series[series.length / 2]) / 2;
+
+      html += "<tr><td>" + spec.title + "</td><td class=\"num\">" + format(spec, series[0])
+        + "</td><td class=\"num\">" + format(spec, middle)
+        + "</td><td class=\"num\">" + format(spec, series[series.length - 1]) + "</td></tr>";
+    });
+
+    document.getElementById("summary").innerHTML = html;
+  }
+
+  // -- Pointer --------------------------------------------------------------
+
+  function slotAt(chart, event) {
+    var box = chart.canvas.getBoundingClientRect();
+    var slot = Math.floor((event.clientX - box.left - chart.state.geometry.left)
+                          / chart.state.geometry.step);
+
+    return slot >= 0 && slot < count ? slot : -1;
+  }
+
+  function showTip(event, html) {
+    tip.innerHTML = html;
+    tip.hidden = false;
+
+    var box = tip.getBoundingClientRect();
+    var x = Math.min(event.clientX + 14, window.innerWidth - box.width - 8);
+    var y = Math.min(event.clientY + 16, window.innerHeight - box.height - 8);
+
+    tip.style.left = Math.max(8, x) + "px";
+    tip.style.top = Math.max(8, y) + "px";
+  }
+
+  function attach(canvas, describe) {
+    var chart = { canvas: canvas, state: null, describe: describe };
+
+    charts.push(chart);
+
+    canvas.addEventListener("mousemove", function (event) {
+      if (!chart.state) return;
+
+      var slot = slotAt(chart, event);
+
+      if (slot < 0) { tip.hidden = true; return; }
+
+      showTip(event, chart.describe(order[slot], event, chart));
+    });
+
+    canvas.addEventListener("mouseleave", function () { tip.hidden = true; });
+
+    return chart;
+  }
+
+  // -- Wiring ---------------------------------------------------------------
+
+  var ORDERS = [
+    { id: "name", label: "Sample name" },
+    { id: "composition", label: "Most abundant taxon" },
+    { id: "reads", label: "Read depth" },
+    { id: "shannon", label: "Shannon index" }
+  ];
+
+  function reorder() {
+    var choice = orderSelect.value;
+    var indices = samples.map(function (_, i) { return i; });
+
+    if (choice === "name") {
+      indices.sort(function (a, b) {
+        return samples[a].localeCompare(samples[b], undefined, { numeric: true });
+      });
+    } else if (choice === "composition" && level) {
+      indices.sort(function (a, b) { return level.values[0][b] - level.values[0][a]; });
+    } else {
+      var series = values(choice) || [];
+      indices.sort(function (a, b) { return (series[b] || 0) - (series[a] || 0); });
+    }
+
+    order = indices;
+  }
+
+  var compositionChart = null;
+  var panelCharts = [];
+
+  function redraw() {
+    if (compositionChart) compositionChart.state = drawComposition();
+
+    panelCharts.forEach(function (chart) {
+      chart.state = drawPanel(chart.canvas, chart.spec);
+    });
+  }
+
+  if (levels.length) {
+    levels.forEach(function (entry, index) {
+      var option = document.createElement("option");
+      option.value = String(index);
+      option.textContent = entry.name;
+      rankSelect.appendChild(option);
+    });
+
+    // Genus is what a reader asks for first, and the deepest rank the run went
+    // to is the nearest thing to it when it was not reached
+    var start = levels.length - 1;
+    levels.forEach(function (entry, index) { if (entry.rank === 6) start = index; });
+
+    rankSelect.value = String(start);
+    level = levels[start];
+
+    ORDERS.forEach(function (choice) {
+      if (choice.id !== "name" && choice.id !== "composition" && !values(choice.id)) return;
+
+      var option = document.createElement("option");
+      option.value = choice.id;
+      option.textContent = choice.label;
+      orderSelect.appendChild(option);
+    });
+
+    compositionChart = attach(barsCanvas, function (sample) {
+      var html = '<div class="name">' + escape(samples[sample]) + "</div>";
+
+      for (var t = 0; t < level.taxa.length; t++) {
+        var share = level.values[t][sample];
+
+        if (share <= 0) continue;
+
+        html += '<div class="row">' + escape(level.taxa[t].label)
+          + " <b>" + percent(share) + "</b></div>";
+      }
+
+      return html;
+    });
+
+    rankSelect.addEventListener("change", function () {
+      level = levels[rankSelect.value];
+      if (orderSelect.value === "composition") reorder();
+      drawLegend();
+      redraw();
+    });
+
+    orderSelect.addEventListener("change", function () { reorder(); redraw(); });
+
+    drawLegend();
+  }
+
+  if (alpha.shannon) {
+    var panels = document.getElementById("panels");
+
+    PANELS.forEach(function (spec) {
+      if (!values(spec.key)) return;
+
+      var figure = document.createElement("figure");
+      figure.innerHTML = "<figcaption>" + spec.title + "<span>" + spec.note
+        + "</span></figcaption>";
+
+      var canvas = document.createElement("canvas");
+      figure.appendChild(canvas);
+      panels.appendChild(figure);
+
+      var chart = attach(canvas, function (sample) {
+        return '<div class="name">' + escape(samples[sample]) + "</div>"
+          + '<div class="row">' + spec.title + " <b>"
+          + format(spec, (values(spec.key) || [])[sample]) + "</b></div>";
+      });
+
+      chart.spec = spec;
+      panelCharts.push(chart);
+    });
+
+    drawSummary();
+  }
+
+  // Which half of the panel is open. A canvas in a hidden section is laid out
+  // at no width, so whatever is shown is drawn after it is shown - and the
+  // controls belong to the composition chart, so they go with it.
+  function open(which) {
+    buttons.forEach(function (button) {
+      var on = button.getAttribute("data-plot") === which;
+
+      button.className = on ? ON : OFF;
+
+      if (sections[button.getAttribute("data-plot")]) {
+        sections[button.getAttribute("data-plot")].hidden = !on;
+      }
+    });
+
+    display(rankSelect.parentNode, which === "composition");
+    tip.hidden = true;
+    redraw();
+  }
+
+  buttons.forEach(function (button) {
+    var which = button.getAttribute("data-plot");
+    var empty = which === "composition" ? !levels.length : !alpha.shannon;
+
+    if (empty) {
+      display(button, false);
+      return;
+    }
+
+    button.addEventListener("click", function () { open(which); });
+  });
+
+  reorder();
+  open(levels.length ? "composition" : "diversity");
+
+  window.addEventListener("resize", redraw);
+})();
+</script>
+
+</body>
+</html>

@@ -10,14 +10,20 @@ https://$AWS_S3_BUCKET/download/<uid>
 
 It answers with the whole of `nxf/<uid>/` as a single zip, named for the run
 rather than for its uid — `PQ9999999-3xk9mp2q.zip`. Unpacking it and opening
-`index.html` gives the same dashboard offline: every link on that page is
-relative, so the tabs, the file index and the folder listings all still resolve
-against the extracted folder.
+`index.html` gives the same dashboard: every link in it is relative, so the
+navigation bar, the Overview, the file index and the folder listings all still
+resolve against the extracted folder.
 
-The dashboard's **Download everything** button points here, at the right end of
-its tab row. It is the one absolute link on the page, since the zip is served by
-a behavior of the distribution rather than sitting beside the page — which is
-also why it is the one link that does not resolve in an unpacked copy.
+**A copy read off a disk still wants a network**, because the three pages of the
+dashboard fetch Tailwind and their fonts from a CDN — see [How the pages are
+styled](index.md#how-the-pages-are-styled). Everything is there and every link
+works; with no network at all it is the styling that is missing, not the
+results.
+
+The **Download Everything** button points here, under the quick downloads in the
+Overview's sidebar. It is the one absolute link on the page, since the zip is
+served by a behavior of the distribution rather than sitting beside the page —
+which is also why it is the one link that does not resolve in an unpacked copy.
 
 ## Why it is not just a Lambda that returns a zip
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# ampliseq_composition.sh - Build the composition and diversity page for a run.
+# ampliseq_composition.sh - Work out what a run found, for the dashboard to plot.
 #
 # Author: Daniel Smith
 # Date:   August 27th, 2026
@@ -13,17 +13,16 @@
 # compute at all unless the run was given a sample metadata sheet, which these
 # runs are not; see docs/results/composition.md.
 #
-# So both are worked out here, from two tables the pipeline does produce, and
-# written into one page the dashboard opens in a tab:
+# So both are worked out here, from two tables the pipeline does produce:
 #
 #   qiime2/rel_abundance_tables/rel-table-<rank>.tsv   composition per rank
 #   qiime2/abundance_tables/feature-table.tsv          ASV counts, for diversity
 #
-# The page draws to a canvas rather than to elements, so a column per sample
-# stays a column per sample at any number of samples. Only the eight most
-# abundant taxa of each rank are drawn, the rest summed into "Other": past eight
-# fills no reader can tell one colour from the next, and the full tables are
-# published beside this page for anyone who needs every row.
+# and left in ./composition_data.json, which publish_dashboard.sh writes into the
+# Overview page for its two plots to draw. Only the eight most abundant taxa of
+# each rank are kept, the rest summed into "Other": past eight fills no reader
+# can tell one colour from the next, and the full tables are published for anyone
+# who needs every row.
 #
 # Diversity is reported per sample as observed ASVs, Chao1, Shannon, Simpson and
 # Pielou's evenness, computed on the unrarefied counts. Nothing is rarefied
@@ -31,19 +30,23 @@
 # to group by - and the read depth each index was computed at is published in the
 # same table for the reader to judge them against.
 #
-# Either half is skipped when the table behind it was not produced, and the page
-# is not written at all if neither was - which is what keeps the tab off a run
-# that has nothing to put in it.
+# Either half is skipped when the table behind it was not produced, and nothing
+# is written at all if neither was - which is what leaves the Overview's panel on
+# its empty state for a run with nothing to plot.
+#
+# The same tables answer what the Overview's sidebar reports, so the run's
+# headline numbers - samples, ASVs, reads in and reads kept, and how deep the
+# classifier got - are counted here as well and left in ./run_statistics.tsv for
+# ampliseq_upload.sh to read.
 #
 # Usage:     ampliseq_composition.sh [results_dir]
 #            defaults to ./results, the outdir set in the ampliseq params file
 # Called by: ampliseq_upload.sh, before it indexes and uploads the results
 # Requires:  GNU awk
-# Reads:     templates/ampliseq/composition.html
-# Outputs:   <results_dir>/composition_and_diversity.html
-#            <results_dir>/alpha_diversity.tsv
-# Env:       NEXTFLOW_DIR and the log/warn/fail and render_template helpers,
-#            sourced from .env
+# Outputs:   <results_dir>/alpha_diversity.tsv
+#            ./composition_data.json
+#            ./run_statistics.tsv
+# Env:       NEXTFLOW_DIR and the log/warn/fail helpers, sourced from .env
 
 set -euo pipefail
 
@@ -52,8 +55,6 @@ source /data/prod/nextflow/.env
 RESULTS_DIR="${1:-results}"
 RESULTS_DIR="${RESULTS_DIR%/}"
 
-readonly PAGE_TEMPLATE="$NEXTFLOW_DIR/templates/ampliseq/composition.html"
-
 # The ASV counts every diversity index here is computed from
 readonly FEATURE_TABLE="$RESULTS_DIR/qiime2/abundance_tables/feature-table.tsv"
 
@@ -61,8 +62,20 @@ readonly FEATURE_TABLE="$RESULTS_DIR/qiime2/abundance_tables/feature-table.tsv"
 # tax_agglom_min..tax_agglom_max covered
 readonly REL_TABLE_DIR="$RESULTS_DIR/qiime2/rel_abundance_tables"
 
-readonly PAGE="$RESULTS_DIR/composition_and_diversity.html"
 readonly ALPHA_TABLE="$RESULTS_DIR/alpha_diversity.tsv"
+
+# What the Overview's two plots are drawn from, in the run directory rather than
+# in the results: it is that page's own data, and every number in it comes from
+# a table that is published
+readonly PLOT_DATA="composition_data.json"
+
+# Reads surviving each stage of the pipeline, one row per sample, which is the
+# only place the reads that went in are counted
+readonly OVERALL_SUMMARY="$RESULTS_DIR/overall_summary.tsv"
+
+# The run's headline numbers, in the run directory rather than in the results:
+# they are the dashboard's sidebar, not an output of the analysis
+readonly STATS_FILE="run_statistics.tsv"
 
 # How many taxa of each rank are drawn in their own colour before the tail is
 # summed into "Other". Eight is what the palette carries; a ninth fill would be
@@ -72,10 +85,6 @@ readonly TOP_TAXA=8
 # The rank each rel-table-<n>.tsv is agglomerated to, indexed by that number
 RANK_NAMES=(Domain Phylum Class Order Family Genus Species)
 
-if [[ ! -r "$PAGE_TEMPLATE" ]]; then
-    fail "The composition page template is missing from the server ($PAGE_TEMPLATE)."
-fi
-
 if [[ ! -d "$RESULTS_DIR" ]]; then
     fail "There is no '$RESULTS_DIR' directory to summarise."
 fi
@@ -84,12 +93,12 @@ WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
 # Every sample of the run, in the order the ASV table names them. This is the
-# order the whole page is built in: the composition of a sample and its
+# order everything below is built in: the composition of a sample and its
 # diversity have to line up column for column, and only one of the two tables
 # can decide that.
 readonly SAMPLE_ORDER="$WORK/samples.txt"
 
-# Per-sample diversity, as the table published beside the page. Read depth is
+# Per-sample diversity, as the table published with the results. Read depth is
 # part of it: an index computed on 50 reads is not the same measurement as one
 # computed on 50,000, and a reader can only see that if the depth is there.
 #
@@ -164,8 +173,8 @@ write_alpha_table() {
     ' "$FEATURE_TABLE" "$FEATURE_TABLE"
 }
 
-# The same table as the arrays the page plots, plus the sample names every other
-# array on the page is ordered by
+# The same table as the arrays the plots read, plus the sample names every other
+# array is ordered by
 alpha_json() {
     LC_ALL=C awk -F'\t' '
         function json_string(s) {
@@ -354,29 +363,131 @@ level_json() {
     ' "$file" "$file"
 }
 
+# One row per ASV, under the comment lines biom writes above them
+count_asvs() {
+    LC_ALL=C awk -F'\t' '!/^#/ && NF > 1 { n++ } END { print n + 0 }' "$FEATURE_TABLE"
+}
+
+# Reads as they arrived, summed over every sample. Which column counts them
+# depends on what the run did: cutadapt reports everything it processed, and a
+# run that skipped primer trimming starts at DADA2's input instead.
+total_input_reads() {
+    LC_ALL=C awk -F'\t' '
+        NR == 1 {
+            for (i = 1; i <= NF; i++) at[$i] = i
+
+            split("cutadapt_total_processed DADA2_input input_reads input", want, " ")
+
+            for (i = 1; i in want; i++) {
+                if (want[i] in at) { pick = at[want[i]]; break }
+            }
+            next
+        }
+
+        pick { total += $pick + 0 }
+
+        END { print total + 0 }
+    ' "$OVERALL_SUMMARY"
+}
+
+# What share of the reads a rank's table places at that rank, as a whole
+# percentage. A sequence the classifier could not take that deep carries an
+# empty field, or a bare rank prefix, where the name would be.
+rank_classified_pct() {
+    local file="$1" rank="$2"
+
+    LC_ALL=C awk -F'\t' -v rank="$rank" '
+        function classified(taxon,   parts) {
+            split(taxon, parts, ";")
+            return parts[rank] != "" && parts[rank] !~ /^[A-Za-z]__$/
+        }
+
+        /^#OTU ID/ { columns = NF; next }
+        /^#/ { next }
+
+        {
+            named = classified($1)
+
+            for (i = 2; i <= columns; i++) {
+                total += $i + 0
+                if (named) placed += $i + 0
+            }
+        }
+
+        END { print (total > 0 ? int(placed / total * 100 + 0.5) : 0) }
+    ' "$file"
+}
+
+# Read depth across the samples, off the diversity table just written - so what
+# is reported as kept is what the analysis actually counted
+read_depth_stats() {
+    LC_ALL=C awk -F'\t' '
+        FNR == 1 { next }
+
+        {
+            reads = $2 + 0
+            sum += reads
+
+            if (n++ == 0 || reads < min) min = reads
+            if (reads > max) max = reads
+        }
+
+        END {
+            printf "reads_retained\t%d\nreads_avg\t%d\nreads_min\t%d\nreads_max\t%d\n", \
+                sum + 0, (n ? sum / n : 0) + 0.5, min + 0, max + 0
+        }
+    ' "$ALPHA_TABLE"
+}
+
+# The run's headline numbers, as key and value, for the dashboard's sidebar.
+# Each is left out rather than guessed at when the table behind it is missing.
+write_run_statistics() {
+    local genus_table="$REL_TABLE_DIR/rel-table-6.tsv"
+    local species_table="$REL_TABLE_DIR/rel-table-7.tsv"
+
+    {
+        printf 'samples\t%s\n' "$(wc -l < "$SAMPLE_ORDER")"
+        printf 'asvs\t%s\n' "$(count_asvs)"
+
+        read_depth_stats
+
+        if [[ -r "$OVERALL_SUMMARY" ]]; then
+            printf 'reads_total\t%s\n' "$(total_input_reads)"
+        fi
+
+        if [[ -r "$genus_table" ]]; then
+            printf 'genus_pct\t%s\n' "$(rank_classified_pct "$genus_table" 6)"
+        fi
+
+        if [[ -r "$species_table" ]]; then
+            printf 'species_pct\t%s\n' "$(rank_classified_pct "$species_table" 7)"
+        fi
+    } > "$STATS_FILE"
+}
+
 log "Summarising composition and diversity under $RESULTS_DIR..."
 
 DATA=""
 
-# 1. Diversity, and with it the sample order the rest of the page follows
+# 1. Diversity, and with it the sample order everything else follows
 if [[ -r "$FEATURE_TABLE" ]]; then
     if ! write_alpha_table > "$ALPHA_TABLE"; then
-        warn "The diversity indices could not be computed; the page will not show them."
+        warn "The diversity indices could not be computed; the Overview will not show them."
         rm -f "$ALPHA_TABLE"
     else
         tail -n +2 "$ALPHA_TABLE" | cut -f1 > "$SAMPLE_ORDER"
 
-        # An ASV table naming no samples is a table of nothing, and a page
-        # reporting on nothing is worse than no page
+        # An ASV table naming no samples is a table of nothing, and a plot
+        # of nothing is worse than no plot
         if [[ -s "$SAMPLE_ORDER" ]]; then
             DATA=$(alpha_json)
         else
-            warn "The ASV table names no samples; the page will not be written."
+            warn "The ASV table names no samples; nothing will be plotted."
             rm -f "$ALPHA_TABLE"
         fi
     fi
 else
-    warn "No ASV table at $FEATURE_TABLE; the page will not show diversity."
+    warn "No ASV table at $FEATURE_TABLE; the Overview will not show diversity."
 fi
 
 # 2. Composition, one rank at a time, in the order a reader reads them
@@ -397,24 +508,30 @@ if [[ -n "$DATA" ]]; then
     done
 
     if [[ -z "$LEVELS" ]]; then
-        warn "No relative abundance tables under $REL_TABLE_DIR; composition is left off the page."
+        warn "No relative abundance tables under $REL_TABLE_DIR; composition is left unplotted."
     fi
 
     DATA+=",\"levels\":[$LEVELS]"
 fi
 
+# 3. The same tables, counted for the dashboard's sidebar
+if [[ -n "$DATA" ]]; then
+    if ! write_run_statistics; then
+        warn "The run statistics could not be counted; the dashboard will show fewer numbers."
+        rm -f "$STATS_FILE"
+    fi
+fi
+
 if [[ -z "$DATA" ]]; then
-    log "Nothing to summarise; no composition page written."
+    log "Nothing to summarise; the Overview will show no plots."
     exit 0
 fi
 
 SAMPLE_COUNT=$(wc -l < "$SAMPLE_ORDER")
 
-if ! render_template "$PAGE_TEMPLATE" \
-        SAMPLE_COUNT "$SAMPLE_COUNT" \
-        DATA         "{$DATA}" > "$PAGE"; then
-    rm -f "$PAGE"
-    fail "The composition page could not be built."
+if ! printf '{%s}\n' "$DATA" > "$PLOT_DATA"; then
+    rm -f "$PLOT_DATA"
+    fail "The composition and diversity data could not be written."
 fi
 
-log "Wrote $PAGE for $SAMPLE_COUNT samples."
+log "Wrote $PLOT_DATA for $SAMPLE_COUNT samples."

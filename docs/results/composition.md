@@ -4,9 +4,11 @@ Two questions come back on nearly every 16S request: **what was in each sample**
 and **how varied was each sample**. Neither is answered well by what
 nf-core/ampliseq publishes, so
 [`ampliseq_composition.sh`](../../scripts/ampliseq_composition.sh) works both out
-from tables the pipeline does produce and writes them into one page —
-`composition_and_diversity.html`, the `Composition & diversity` tab of
-[the results page](index.md).
+from tables the pipeline does produce and leaves them in
+`composition_data.json`, which
+[`publish_dashboard.sh`](../../scripts/publish_dashboard.sh) writes into the
+Overview of [the results page](index.md) — the view a reader lands on, and the
+panel with a tab-link for each of those two questions.
 
 ## Why the pipeline's own answers were not enough
 
@@ -16,7 +18,7 @@ taxon. At six samples that is fine. At a few thousand it is hundreds of thousand
 of elements, and the browser stops being able to draw it — which matters here
 because a single request can carry that many samples. It is still published, and
 the file index still lists it under `Taxonomy`, for a reader who wants QIIME's
-own controls and its per-rank CSVs. It is not offered a tab.
+own controls and its per-rank CSVs. It is not what the Overview plots.
 
 **Alpha diversity.** ampliseq does not compute it at all for these runs. The
 gate in the dev workflow is:
@@ -42,12 +44,13 @@ need no grouping to be meaningful.
 averaged barplots — all of which need metadata or replace the whole report
 template. No parameter adds figures to what a metadata-free run publishes.
 
-## What is on the page
+## What is in the panel
 
-**Taxonomic composition** — one column per sample, stacked to 100%, with a
-control for the taxonomic rank and one for the order the samples are in (by name,
-by the share of the most abundant taxon, by read depth, or by Shannon index).
-Hovering a column names the sample and gives its full breakdown.
+**Taxonomic composition** — one column per sample, stacked to 100%, with the
+panel's own control for the taxonomic rank and one for the order the samples are
+in (by name, by the share of the most abundant taxon, by read depth, or by
+Shannon index). Hovering a column names the sample and gives its full
+breakdown.
 
 **Alpha diversity** — read depth, observed ASVs, the Shannon index and Pielou's
 evenness, one small chart each, in the same sample order as the chart above, with
@@ -84,7 +87,25 @@ in the same table. A reader can then see for themselves that the sample with 50
 reads is not evidence of low richness.
 
 All of it is written to `alpha_diversity.tsv` in the results root, which the file
-index lists under `Diversity` and the page links to.
+index lists under `Diversity` and the panel links to.
+
+## The numbers in the sidebar beside them
+
+The tables the plots are drawn from also answer what the [Overview's
+sidebar](index.md#what-is-on-the-overview) reports, so the same pass counts
+them: how many samples and ASVs there were, how many reads went in and how many
+reached an ASV, the mean, thinnest and deepest sample, and what share of the
+reads the classifier could place at genus and at species. Reads in come from
+`overall_summary.tsv` — cutadapt's own count of what it processed, or DADA2's
+input for a run that skipped primer trimming — and everything else from the ASV
+and relative abundance tables.
+
+They are written as key and value to `run_statistics.tsv` in the **run**
+directory, beside `composition_data.json` and for the same reason: both are the
+page's own data rather than an output of the analysis, and every number in them
+is derivable from a table that is published. `ampliseq_upload.sh` reads them
+back when it renders the pages, and a run without the statistics gets a tile for
+its sample count and nothing else.
 
 ## Colour
 
@@ -95,8 +116,8 @@ one — so a ninth taxon is not given a ninth hue.
 
 The eight are a validated categorical set, and the *order* they are assigned in
 is what keeps neighbouring fills apart under colour vision deficiency, so they
-are assigned in that order and never cycled. Three of the light-mode steps sit
-below 3:1 against a white page, which is why the legend is a **table** carrying
+are assigned in that order and never cycled. Three of the steps sit below 3:1
+against a white page, which is why the legend is a **table** carrying
 each taxon's name, lineage, mean share and prevalence rather than a row of
 swatches: identity is never carried by colour alone.
 
@@ -104,11 +125,11 @@ Sorting the samples, or switching rank, never reassigns a colour to a different
 taxon within a rank — a hue learned in one order still means the same thing in
 the next.
 
-## When the page is not written
+## When there is nothing to plot
 
-Each half is skipped if the table behind it is missing, and the page is not
-written at all if both are — a run that produced no ASV table has no tab, because
-[`dashboard_view`](index.md#what-is-on-it) only adds a tab for a file that
-exists. The step is called before `index_directories.sh` so that the two files it
-leaves behind are in the folder listings, and a failure in it is a warning rather
-than a failed run: results without this page are still results.
+Each half is skipped if the table behind it is missing, and nothing is written at
+all if both are — which leaves the Overview's panel on its empty state, the same
+one a taxprofiler run gets. The step is called before `index_directories.sh` so
+that the table it leaves in the results is in the folder listings, and a failure
+in it is a warning rather than a failed run: results without these plots are
+still results.

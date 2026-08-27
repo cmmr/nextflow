@@ -2,19 +2,20 @@
 <!--
   listing.html - Listing page for one folder of a published run.
 
-  Rendered by scripts/index_directories.sh, once for every subdirectory of a
-  results folder, and uploaded to S3 with the folder it describes. S3 serves
-  objects rather than directories, so without these pages the folder links the
-  report and the landing page carry lead nowhere.
+  Rendered by scripts/index_directories.sh into every directory of a results
+  folder, the results folder included, as directory_listing.html - never as
+  index.html, which across a published run means a page something wrote to be
+  read. S3 serves objects rather than directories, so without these pages the
+  folder links the report and the landing page carry lead nowhere.
 
   Everything is inline and every link is relative, because this file is served
   from S3 next to the objects it lists and has no origin to fetch from.
 
-  Placeholders are COMMON_CSS, DIR_PATH and ROWS, each wrapped in doubled
-  underscores. They are deliberately not spelled that way in this comment - the
-  renderer substitutes the whole file, comment included, and would paste the
-  listing in here too. ROWS is markup the renderer emits itself, having escaped
-  and URL-encoded every name it read off the disk.
+  Placeholders are COMMON_CSS, DIR_PATH, UP_LINK and ROWS, each wrapped in
+  doubled underscores. They are deliberately not spelled that way in this comment
+  - the renderer substitutes the whole file, comment included, and would paste
+  the listing in here too. UP_LINK and ROWS are markup the renderer emits itself,
+  having escaped and URL-encoded every name it read off the disk.
 -->
 <html lang="en">
 <head>
@@ -26,12 +27,15 @@ __COMMON_CSS__
 
 header h1 {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0;
 }
 
 main {
   flex: 1 1 auto;
   overflow: auto;
-  padding: 14px 22px 28px;
+  padding: 18px 22px 30px;
 }
 table { max-width: 900px; }
 
@@ -44,9 +48,10 @@ td.name .dir { font-weight: 600; }
 <header>
   <div>
     <h1>__DIR_PATH__</h1>
-    <!-- The report is framed by the run's landing page, so up leaves the frame
-         rather than nesting a second page inside it -->
-    <p class="meta"><a href="../index.html" target="_top">&uarr; Up one folder</a></p>
+    <!-- Up one folder at a time to the results folder's own listing, and from
+         there out of the frame to the landing page - which is what stops the
+         chain nesting a second dashboard inside the first -->
+    <p class="meta">__UP_LINK__</p>
   </div>
 </header>
 

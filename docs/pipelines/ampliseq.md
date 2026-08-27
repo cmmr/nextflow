@@ -73,7 +73,8 @@ what was sequenced and writes `detected_params.yaml` — `sequencing_type`,
 `savont_options` — which `wrike_job.sh` layers over the pipeline's defaults.
 
 [`ampliseq_upload.sh`](../../scripts/ampliseq_upload.sh) zips `raw-sequences/` into the
-results folder (`zip -0` — the reads are already compressed), gives every folder
+results folder (`zip -0` — the reads are already compressed), builds the
+[composition and diversity page](../results/composition.md), gives every folder
 in it a listing page, uploads the folder to `s3://$AWS_S3_BUCKET/nxf/<uid>/`, and
 writes the report URL to a Wrike custom field. Nextflow's `work/` directory is
 deliberately left behind.
@@ -84,8 +85,9 @@ this pipeline's output is declared in three lines of that script and one text
 file:
 
 ```bash
-dashboard_view report  "Analysis report"   "summary_report/summary_report.html"
-dashboard_view quality "Sequence quality"  "multiqc/multiqc_report.html"
+dashboard_view report  "Analysis report"         "summary_report/summary_report.html"
+dashboard_view profile "Composition & diversity" "composition_and_diversity.html"
+dashboard_view quality "Sequence quality"        "multiqc/multiqc_report.html"
 dashboard_button "raw-sequences.zip"
 dashboard_button "qiime2/abundance_tables/feature-table.biom"
 ```

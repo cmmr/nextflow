@@ -19,7 +19,7 @@
 # Usage:     wrike_sqs_listener.sh      # never returns; start under a supervisor
 # Calls:     wrike_task_handler.sh, wrike_delete_handler.sh, both by absolute path
 # Requires:  aws, jq, sinfo (Slurm)
-# Env:       NEXTFLOW_DIR, AWS_SQS_QUEUE_URL, AWS_REGION, WRIKE_DASHBOARDS_FOLDER_ID,
+# Env:       NEXTFLOW_DIR, AWS_SQS_QUEUE_URL, AWS_REGION, WRIKE_FOLDER_ID,
 #            the log/warn helpers and AWS credentials, sourced from .env
 
 set -euo pipefail
@@ -102,7 +102,7 @@ while true; do
             # How a `run` submission arrives. This fires for any parent change
             # on a task the webhook can see, so check that "Dashboards" is what
             # was added.
-            if echo "$MESSAGE_BODY" | jq -e --arg folder "$WRIKE_DASHBOARDS_FOLDER_ID" \
+            if echo "$MESSAGE_BODY" | jq -e --arg folder "$WRIKE_FOLDER_ID" \
                     '[.[0].addedParents[]?] | any(. == $folder)' > /dev/null; then
                 log "Routing to wrike_task_handler.sh for $EVENT_TYPE event."
                 "$NEXTFLOW_DIR/scripts/wrike_task_handler.sh" "$MESSAGE_BODY" &

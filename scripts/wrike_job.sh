@@ -127,6 +127,9 @@ if [[ ! -f "$NEXTFLOW_DIR/pipelines/$PIPELINE_VERSION.sh" ]]; then
     PIPELINE_VERSION="$PIPELINE_UPPER"
 fi
 
+update_wrike_custom_field "$WRIKE_PIPELINE_NAME_CFID" "$PIPELINE_VERSION" \
+    || warn "Could not set the pipeline name on task $TASK_ID."
+
 # 3. A rerun takes its command line and its params file from the run it
 #    reproduces; only the samples are this run's own.
 if [[ -n "$PIPELINE_RERUN_UID" ]]; then

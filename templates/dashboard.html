@@ -10,19 +10,19 @@
   Everything is inline and every link is relative, because this file is served
   from S3 next to the objects it points at and has no origin to fetch from.
 
-  Three views share one page: a tab loads a report into the viewer frame, and
-  the file index below is shown by :target instead. That way a reader without
-  scripting still reaches every view.
+  The header and the row of tabs under it are one strip: the run's name and the
+  notes about it on top, the views it offers along the bottom edge, and a single
+  rule closing the whole thing off. Below that a report sits on the page with a
+  margin around it, and the file index takes the frame's place when its own
+  fragment is the target - so a reader without scripting still reaches every
+  view.
 
-  The header carries the run on the left and the deletion date on the right;
-  the row of tabs under it carries the downloads at its right end.
-
-  Placeholders are COMMON_CSS, TASK_NAME, RUN_ID, RUN_DATE, SAMPLE_COUNT,
-  EXPIRY, BUTTONS, TABS, VIEW_SRC, GROUP_NAV and SECTIONS, each wrapped in doubled
-  underscores. They are deliberately not spelled that way in this comment - the
-  renderer substitutes the whole file, comment included, and would fill these in
-  too. The task name is user-authored text and is HTML-escaped on the way in;
-  everything else is markup the renderer escaped itself.
+  Placeholders are COMMON_CSS, TASK_NAME, FACTS, BUTTONS, TABS, VIEW_SRC,
+  GROUP_NAV and SECTIONS, each wrapped in doubled underscores. They are
+  deliberately not spelled that way in this comment - the renderer substitutes
+  the whole file, comment included, and would fill these in too. The task name is
+  user-authored text and is HTML-escaped on the way in; everything else is markup
+  the renderer escaped itself.
 -->
 <html lang="en">
 <head>
@@ -32,13 +32,20 @@
 <style>
 __COMMON_CSS__
 
-/* One row of views above the frame that holds them, with what the run can be
+/* The header runs into the tabs below it rather than being ruled off from
+   them; the one rule under the tabs closes both. */
+header {
+  padding: 15px 22px 13px;
+  border-bottom: 0;
+}
+
+/* One row of views along the bottom of that strip, with what the run can be
    downloaded as at the other end of it */
 nav.tabs {
   flex: 0 0 auto;
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 4px 20px;
   padding: 0 22px;
@@ -51,19 +58,21 @@ nav.tabs .views {
   gap: 2px;
 }
 nav.tabs .views a {
-  padding: 10px 15px;
-  border-bottom: 3px solid transparent;
+  padding: 9px 14px 8px;
+  border-bottom: 2px solid transparent;
+  border-radius: 6px 6px 0 0;
   color: var(--muted);
   font-size: 14px;
   font-weight: 600;
   text-decoration: none;
   white-space: nowrap;
 }
-nav.tabs .views a:hover { color: var(--text); }
+nav.tabs .views a:hover { background: var(--row); color: var(--text); }
 nav.tabs .views a.active {
-  color: var(--text);
+  color: var(--accent);
   border-bottom-color: var(--accent);
 }
+nav.tabs .views a.active:hover { background: transparent; }
 
 /* Sized to sit inside the row without setting its height. It shrinks so that
    on a narrow screen it wraps within itself rather than widening the page. */
@@ -71,15 +80,23 @@ nav.tabs .buttons {
   flex: 0 1 auto;
   min-width: 0;
   margin-left: auto;
-  padding: 5px 0;
+  padding: 5px 0 7px;
 }
 nav.tabs a.button { padding: 5px 11px; font-size: 12.5px; }
 /* Named for what it fetches rather than for a file, so not set in the face
    filenames are read in */
 nav.tabs a.button.all { font-family: inherit; font-size: 13px; }
 
-/* The report is the page; everything above it is a strip. */
-iframe {
+/* The report is the page, but it is set in from the tabs rather than butted
+   against them - the margin is what separates one page's chrome from
+   another's, and is all that separates them. */
+.stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  padding: 16px 22px 22px;
+}
+.stage iframe {
   flex: 1 1 auto;
   width: 100%;
   border: 0;
@@ -92,15 +109,15 @@ iframe {
    group menu jumps to. */
 #files { display: none; }
 #files:target { display: flex; }
-#files:target ~ iframe { display: none; }
+#files:target ~ .stage { display: none; }
 #files:has(:target) { display: flex; }
-#files:has(:target) ~ iframe { display: none; }
+#files:has(:target) ~ .stage { display: none; }
 
 #files {
   flex: 1 1 auto;
   overflow: auto;
   gap: 34px;
-  padding: 24px 22px 40px;
+  padding: 26px 22px 40px;
 }
 
 /* The group menu, beside the groups on anything wider than a phone */
@@ -116,7 +133,7 @@ iframe {
 }
 #files .menu a {
   padding: 6px 10px;
-  border-radius: 5px;
+  border-radius: 6px;
   color: var(--muted);
   font-size: 13.5px;
   font-weight: 600;
@@ -129,24 +146,24 @@ iframe {
   min-width: 0;
   max-width: 900px;
 }
-#files .group { margin: 0 0 30px; }
+#files .group { margin: 0 0 34px; }
 #files .group h2 {
   margin: 0 0 4px;
-  padding-bottom: 6px;
+  padding-bottom: 7px;
   border-bottom: 1px solid var(--border);
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted);
 }
 #files .group table { font-size: 14px; }
-#files .group td { padding: 9px 10px; }
+#files .group td { padding: 10px; }
 #files .group tbody tr:nth-child(odd) { background: transparent; }
 #files .group tr:hover { background: var(--row); }
 #files .desc {
   display: block;
-  margin-top: 2px;
+  margin-top: 3px;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
                Helvetica, Arial, sans-serif;
   font-size: 13px;
@@ -169,7 +186,8 @@ iframe {
 }
 
 @media (max-width: 800px) {
-  #files { flex-direction: column; gap: 18px; }
+  .stage { padding: 12px 12px 16px; }
+  #files { flex-direction: column; gap: 18px; padding: 20px 16px 32px; }
   #files .menu {
     position: static;
     width: auto;
@@ -183,12 +201,8 @@ iframe {
 <body>
 
 <header>
-  <div>
-    <h1>__TASK_NAME__</h1>
-    <!-- The sample count brings its own separator, so it can render as nothing -->
-    <p class="meta">Completed __RUN_DATE__ &middot; uid <code>__RUN_ID__</code> __SAMPLE_COUNT__</p>
-  </div>
-  __EXPIRY__
+  <h1>__TASK_NAME__</h1>
+  <div class="facts">__FACTS__</div>
 </header>
 
 <nav class="tabs">
@@ -201,7 +215,9 @@ iframe {
   <div class="groups">__SECTIONS__</div>
 </section>
 
-<iframe id="viewer" name="viewer" src="__VIEW_SRC__" title="Report"></iframe>
+<div class="stage">
+  <iframe id="viewer" name="viewer" src="__VIEW_SRC__" title="Report"></iframe>
+</div>
 
 <script>
 (function () {
@@ -209,7 +225,9 @@ iframe {
   var viewer = document.getElementById("viewer");
 
   // The countdown is worked out when the page is read rather than when it was
-  // published, so a link opened weeks later still says how long is left.
+  // published, so a link opened weeks later still says how long is left. The
+  // page is published saying the results are available until that date; only a
+  // date that has since passed needs the wording changed.
   var expiry = document.querySelector(".expiry[data-expires]");
   if (expiry) {
     var parts = expiry.getAttribute("data-expires").split("-");
@@ -220,9 +238,9 @@ iframe {
     var left = expiry.querySelector(".countdown");
 
     if (days > 1)        left.textContent = " · " + days + " days left";
-    else if (days === 1) left.textContent = " · tomorrow";
-    else if (days === 0) left.textContent = " · today";
-    else                 left.textContent = " · passed";
+    else if (days === 1) left.textContent = " · 1 day left";
+    else if (days === 0) left.textContent = " · last day";
+    else                 expiry.querySelector(".label").textContent = "Deleted on ";
 
     if (days <= 14) expiry.className = "expiry soon";
   }

@@ -13,9 +13,14 @@
 # rather than under an extra results/ level. Nextflow's work/ directory is left
 # behind.
 #
-# The folders go up browsable: index_directories.sh gives each one a listing
-# page first, since a bucket has no directories for the report's folder links to
-# land on.
+# The folders go up browsable: index_directories.sh gives each one a
+# directory_listing.html first, since a bucket has no directories for the
+# report's folder links to land on. The one such link the report writes as "../"
+# is repointed at the listing for the results folder, since a folder URL for the
+# top of a run is the dashboard the report is being read inside.
+#
+# ampliseq_composition.sh runs before both, and leaves behind the composition and
+# diversity page the dashboard opens in a tab of its own.
 #
 # The archive is stored, not compressed (zip -0): the reads are already gzipped.
 # zip stores what a symlink points at, so linked samples are archived as real
@@ -32,8 +37,9 @@
 # Requires:  aws, zip, curl and jq (via the Wrike helpers)
 # Reads:     templates/dashboard.html and templates/ampliseq/outputs.conf, via
 #            the dashboard helpers
-# Runs:      index_directories.sh, over the results folder
-# Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, WRIKE_S3_RESULTS_URL_CFID,
+# Runs:      ampliseq_composition.sh and index_directories.sh, over the results
+#            folder
+# Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, WRIKE_DASHBOARD_URL_CFID,
 #            the Wrike and dashboard helper functions and the log/fail/is_valid_uid
 #            helpers, all sourced from .env
 # Outputs:   ./message.out on error
@@ -58,6 +64,9 @@ FASTQ_ZIP="$RESULTS_DIR/$FASTQ_ZIP_NAME"
 # Written by ampliseq_samplesheet.sh, in the run directory rather than in the
 # results: the number of samples after any merging
 SAMPLE_COUNT_FILE="sample_count.txt"
+
+# ampliseq's own account of the run, and the first thing the dashboard shows
+SUMMARY_REPORT="$RESULTS_DIR/summary_report/summary_report.html"
 
 # What the landing page's "All output files" view lists, in the order it lists it
 readonly OUTPUT_CATALOG="$NEXTFLOW_DIR/templates/ampliseq/outputs.conf"
@@ -106,26 +115,44 @@ else
     log "No $FASTQ_DIR directory; skipping raw sequence archive."
 fi
 
-# 2. Give every folder below the results root a listing page, so that the folder
+# 2. Work out the two things a requester asks for first - what was in each
+#    sample, and how varied each sample was - and write the page that shows
+#    them. Ahead of the listings, so the files it leaves behind are in them.
+if ! "$NEXTFLOW_DIR/scripts/ampliseq_composition.sh" "$RESULTS_DIR"; then
+    warn "The composition and diversity page could not be built; it will be missing."
+fi
+
+# 3. Give every folder below the results root a listing page, so that the folder
 #    links the report and the landing page carry still resolve once the results
 #    are objects in a bucket rather than directories on disk.
 if ! "$NEXTFLOW_DIR/scripts/index_directories.sh" "$RESULTS_DIR"; then
     warn "The results folders could not be indexed; their listings will be missing."
 fi
 
-# 3. Publish everything below the landing page
+# 4. Send the report's link to the "base results folder" to the listing page for
+#    it. That link is written as "../", which resolves to the landing page this
+#    report is being read inside of - so following it opens a second copy of the
+#    dashboard in the dashboard's own frame. index_directories.sh has just
+#    written the listing the reader was actually after.
+if [[ -w "$SUMMARY_REPORT" ]]; then
+    sed -i 's|href="\.\./"|href="../directory_listing.html"|g' "$SUMMARY_REPORT" \
+        || warn "The report's link to the results folder could not be redirected."
+fi
+
+# 5. Publish everything below the landing page
 log "Initiating S3 upload for Task $TASK_ID..."
 
 if ! UPLOAD_OUTPUT=$(upload_results_tree "$RESULTS_DIR" "$S3_RESULTS_DIR"); then
     fail "The results could not be uploaded to S3:"$'\n'"$UPLOAD_OUTPUT"
 fi
 
-# 4. Build the page that frames all of it, from what the run produced.
+# 6. Build the page that frames all of it, from what the run produced.
 dashboard_reset "$RESULTS_DIR" "$OUTPUT_CATALOG"
 
 #    The first view is the one the page opens on
-dashboard_view report  "Analysis report"   "summary_report/summary_report.html"
-dashboard_view quality "Sequence quality"  "multiqc/multiqc_report.html"
+dashboard_view report  "Analysis report"         "summary_report/summary_report.html"
+dashboard_view profile "Composition & diversity" "composition_and_diversity.html"
+dashboard_view quality "Sequence quality"        "multiqc/multiqc_report.html"
 
 #    The reads are the bulky download most people came for; the ASV table
 #    carries its taxonomy as observation metadata
@@ -154,29 +181,28 @@ fi
 TASK_NAME=${TASK_NAME%%$'\n'*}
 : "${TASK_NAME:=Sequencing results}"
 
-#    The sample count carries its own separator, so a run whose count was never
-#    recorded leaves that part of the line out. Validated as a number because it
-#    is read from a file and written into the page.
-SAMPLE_COUNT_HTML=""
+#    How many samples the header says this run covers. A count that was never
+#    recorded, or that is not a number, leaves that note off the header
+#    altogether. Validated because it is read from a file and written into the
+#    page.
+SAMPLE_COUNT=""
 if [[ -r "$SAMPLE_COUNT_FILE" ]]; then
     read -r SAMPLE_COUNT < "$SAMPLE_COUNT_FILE" || true
 
-    if [[ "${SAMPLE_COUNT:-}" =~ ^[0-9]+$ && "$SAMPLE_COUNT" -gt 0 ]]; then
-        SAMPLE_COUNT_HTML="&middot; $SAMPLE_COUNT samples"
-        [[ "$SAMPLE_COUNT" -eq 1 ]] && SAMPLE_COUNT_HTML="&middot; 1 sample"
-    else
+    if [[ ! "${SAMPLE_COUNT:-}" =~ ^[0-9]+$ ]]; then
         warn "No usable sample count in $SAMPLE_COUNT_FILE; leaving it off the page."
+        SAMPLE_COUNT=""
     fi
 fi
 
-# 5. Land the page last, once nothing it points at is still uploading. This
+# 7. Land the page last, once nothing it points at is still uploading. This
 #    overwrites the progress page published to this key, which is how a reader
 #    watching the run is handed the report.
 #
 #    --content-type because reading the body from stdin leaves aws nothing to
 #    guess from, and a page served as binary downloads instead of rendering.
-if ! DASHBOARD=$(render_dashboard "$RUN_ID" "$TASK_NAME" "$(date '+%B %-d, %Y')" \
-        "$SAMPLE_COUNT_HTML" "$EXPIRES_ON"); then
+if ! DASHBOARD=$(render_dashboard "$RUN_ID" "$TASK_NAME" "$(date '+%b %-d, %Y')" \
+        "$SAMPLE_COUNT" "$EXPIRES_ON"); then
     fail "The results were uploaded, but the page that presents them could not be built."
 fi
 
@@ -185,5 +211,5 @@ if ! UPLOAD_OUTPUT=$(printf '%s\n' "$DASHBOARD" \
     fail "The results were uploaded, but the page that presents them was not:"$'\n'"$UPLOAD_OUTPUT"
 fi
 
-update_wrike_custom_field "$WRIKE_S3_RESULTS_URL_CFID" "$S3_RESULTS_URL"
+update_wrike_custom_field "$WRIKE_DASHBOARD_URL_CFID" "$S3_RESULTS_URL"
 log "Upload successful: $S3_RESULTS_URL"

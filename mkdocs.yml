@@ -49,6 +49,7 @@ nav:
       - taxprofiler: pipelines/taxprofiler.md
   - Results:
       - results/index.md
+      - Composition and diversity: results/composition.md
       - Browsable folders: results/browsable-folders.md
       - Downloading a whole run:
           - results/downloads.md

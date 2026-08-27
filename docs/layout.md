@@ -24,6 +24,7 @@ scripts/
   index_directories.sh     Writes a listing page into every results folder. Pipeline-agnostic.
   ampliseq_samplesheet.sh  PRE_PROCESS_CMDS for the ampliseq pipeline.
   ampliseq_detect_region.sh   Likewise; measures which 16S region was sequenced.
+  ampliseq_composition.sh  Builds the composition and diversity page. Run by ampliseq_upload.sh.
   ampliseq_upload.sh       POST_PROCESS_CMDS for the ampliseq pipeline.
   taxprofiler_samplesheet.sh  PRE_PROCESS_CMDS for the taxprofiler pipelines.
   taxprofiler_upload.sh       POST_PROCESS_CMDS for the taxprofiler pipelines.
@@ -53,6 +54,7 @@ templates/            Web pages published to S3 alongside a run's results.
   listing.html        Folder listing page template. Likewise.
   ampliseq/
     outputs.conf      What the dashboard's file index lists for an ampliseq run.
+    composition.html  The composition and diversity page; see docs/results/composition.md.
     report.css        The stylesheet ampliseq's own summary report is given.
     abstract.md       The section that report opens with.
   taxprofiler/

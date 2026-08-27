@@ -5,9 +5,9 @@
 # Date:   August 26th, 2026
 #
 # Sourced by .env rather than executed. Every pipeline's upload script publishes
-# the same page from templates/dashboard.html: a header carrying the date the
-# results are deleted on, one tab per report, buttons for what the run can be
-# downloaded as, and an index of every output file worth naming.
+# the same page from templates/dashboard.html: a header carrying the run's name
+# and what is known about it, one tab per report, buttons for what the run can
+# be downloaded as, and an index of every output file worth naming.
 #
 # An upload script declares what its pipeline produced and then renders:
 #
@@ -23,7 +23,8 @@
 #
 # The file index comes from the catalog - templates/<pipeline>/outputs.conf -
 # which names paths, globs and folders in the order they should be read, grouped
-# under headings.
+# under headings. A folder is listed as one row pointing at the
+# directory_listing.html index_directories.sh wrote into it.
 #
 # Defines: dashboard_reset, dashboard_view, dashboard_button, render_dashboard,
 #          upload_results_tree, TEXT_EXTENSIONS, DOWNLOAD_EXTENSIONS
@@ -160,16 +161,42 @@ dashboard_expiry() {
 
     if [[ ! "$expires" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
         printf '<div class="expiry none" title="These results stay online until you ask your'
-        printf ' CMMR contact to remove them.">No deletion date</div>'
+        printf ' CMMR contact to remove them.">No expiration date</div>'
         return 0
     fi
 
     printf '<div class="expiry" data-expires="%s" title="This page and every file it links to' \
         "$expires"
-    printf ' are deleted then. Save anything you want to keep, or ask your CMMR contact to keep'
-    printf ' them online for longer.">Deleted <span class="date">%s</span>' \
+    printf ' are deleted after that date. Save anything you want to keep, or ask your CMMR'
+    printf ' contact to keep them online for longer.">'
+    printf '<span class="label">Available until </span><span class="date">%s</span>' \
         "$(escape_html "$(date -d "$expires" '+%b %-d, %Y')")"
     printf '<span class="countdown"></span></div>'
+}
+
+# The notes the header carries beside the run's name, in the order they read:
+# how much data this is, when it finished, and how long it stays online. Each is
+# left out rather than written empty, so the row only says what is known.
+#
+# The uid is not among them. It names the run in the address bar and on the
+# Wrike task, and a reader of the results has no use for it.
+dashboard_facts() {
+    local run_date="$1" sample_count="$2" expires="$3"
+    local noun="samples"
+
+    if [[ "$sample_count" =~ ^[0-9]+$ && "$sample_count" -gt 0 ]]; then
+        (( sample_count == 1 )) && noun="sample"
+
+        printf '<span class="fact"><span class="value">%s</span> %s</span>' \
+            "$sample_count" "$noun"
+    fi
+
+    if [[ -n "$run_date" ]]; then
+        printf '<span class="fact">Completed <span class="value">%s</span></span>' \
+            "$(escape_html "$run_date")"
+    fi
+
+    dashboard_expiry "$expires"
 }
 
 dashboard_trim() {
@@ -205,11 +232,12 @@ dashboard_entry() {
 
         [[ -d "$full" ]] || return 0
 
-        # index.html is the listing page itself, which is not one of the outputs
-        count=$(find -L "$full" -type f ! -name index.html | wc -l)
+        # The listing pages index_directories.sh writes are how the folder is
+        # read, not something the run produced
+        count=$(find -L "$full" -type f ! -name directory_listing.html | wc -l)
         (( count > 0 )) || return 0
 
-        dashboard_row "${path}index.html" "${label:-$path}" "$description" \
+        dashboard_row "${path}directory_listing.html" "${label:-$path}" "$description" \
             "$count files" "folder"
         return 0
     fi
@@ -288,6 +316,8 @@ dashboard_index() {
 
 # The whole page. Every value substituted into it is either escaped here or
 # markup the functions above escaped themselves.
+# run_date is already written out for a reader; sample_count is a bare number,
+# or empty for a run that never recorded one.
 render_dashboard() {
     local run_id="$1" task_name="$2" run_date="$3" sample_count="$4" expires="$5"
 
@@ -303,10 +333,7 @@ render_dashboard() {
 
     render_template "$NEXTFLOW_DIR/templates/dashboard.html" \
         TASK_NAME    "$(escape_html "$task_name")" \
-        RUN_ID       "$run_id" \
-        RUN_DATE     "$run_date" \
-        SAMPLE_COUNT "$sample_count" \
-        EXPIRY       "$(dashboard_expiry "$expires")" \
+        FACTS        "$(dashboard_facts "$run_date" "$sample_count" "$expires")" \
         BUTTONS      "$DASHBOARD_BUTTONS$(dashboard_zip_button "$run_id")" \
         TABS         "$(dashboard_tabs)" \
         VIEW_SRC     "$(dashboard_first_view)" \

@@ -22,16 +22,13 @@
 # Env:      WRIKE_API_TOKEN from secrets/.env, and TASK_ID at the call site
 
 export WRIKE_BOT_USER_ID="KUAYXHNY"
-export WRIKE_NXFPIPE_SPACE_ID="MQAAAAEN9xux"
-export WRIKE_NXFPIPE_WORKFLOW_ID="IEAAIKU5K4HRVOKU"
-export WRIKE_NXFPIPE_REQUEST_FORM_ID="IEAAIKU5LIACYIUI"
-export WRIKE_DASHBOARDS_FOLDER_ID="MQAAAAEN9zQV"
-export WRIKE_S3_RESULTS_URL_CFID="IEAAIKU5JUANAH3J"
-
-# The date a finished run's dashboard is torn down on. wrike_task_handler.sh
-# writes it from the request form's "Dashboard Retention" answer, and
-# wrike_expiration.sh reads every task's copy once a day. An empty field means
-# the results are kept indefinitely, which is what "Unlimited" leaves.
+export WRIKE_SPACE_ID="MQAAAAEN9xux"
+export WRIKE_WORKFLOW_ID="IEAAIKU5K4HRVOKU"
+export WRIKE_REQUEST_FORM_ID="IEAAIKU5LIACYIUI"
+export WRIKE_FOLDER_ID="MQAAAAEN9zQV"
+export WRIKE_DASHBOARD_URL_CFID="IEAAIKU5JUANAH3J"
+export WRIKE_PIPELINE_NAME_CFID="IEAAIKU5JUANAH3C"
+export WRIKE_RETENTION_CFID="IEAAIKU5JUANE5TN"
 export WRIKE_EXPIRATION_CFID="IEAAIKU5JUANEX3T"
 
 # How far ahead of that date wrike_expiration.sh warns, and the shortest a
@@ -61,7 +58,7 @@ export WRIKE_EXPIRATION_NOTICE_DAYS=14
 # takes the default, so an absent answer means "the pipeline's own default" and
 # is not an error. IDs are listed with:
 #
-#   call_wrike_api GET spaces/$WRIKE_NXFPIPE_SPACE_ID/customfields \
+#   call_wrike_api GET spaces/$WRIKE_SPACE_ID/customfields \
 #       | jq -r '.data[] | "\(.id)\t\(.title)"'
 #
 # "Nextflow Pipeline" is the one whose options carry a description after the name

@@ -7,7 +7,7 @@ events it subscribes to, and the Lambda's source are below.
 
 ## Set env variables
 
-`WRIKE_API_TOKEN`, `AWS_WEBHOOK_BRIDGE`, `WRIKE_WEBHOOK_SECRET`, and `WRIKE_DASHBOARDS_FOLDER_ID`
+`WRIKE_API_TOKEN`, `AWS_WEBHOOK_BRIDGE`, `WRIKE_WEBHOOK_SECRET`, and `WRIKE_FOLDER_ID`
 
 ```bash
 source /data/prod/nextflow/.env
@@ -28,7 +28,7 @@ statement in the listener; an event that is not subscribed here simply never
 arrives, with nothing to show for it in any log.**
 
 ```bash
-call_wrike_api POST "folders/$WRIKE_DASHBOARDS_FOLDER_ID/webhooks" \
+call_wrike_api POST "folders/$WRIKE_FOLDER_ID/webhooks" \
 -d "hookUrl=$AWS_WEBHOOK_BRIDGE" \
 -d "secret=$WRIKE_WEBHOOK_SECRET" \
 --data-urlencode "events=[TaskCreated,TaskParentsAdded,TaskDeleted,TaskParentsRemoved]"

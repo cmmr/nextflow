@@ -30,7 +30,7 @@
 #            form too.
 # Triggers:  wrike_task_handler.sh, by way of the Wrike webhook and SQS
 # Requires:  curl and jq (via call_wrike_api)
-# Env:       WRIKE_API_TOKEN, NEXTFLOW_DIR, WRIKE_DASHBOARDS_FOLDER_ID,
+# Env:       WRIKE_API_TOKEN, NEXTFLOW_DIR, WRIKE_FOLDER_ID,
 #            WRIKE_FORM_ANSWERS, the Wrike helper functions and the
 #            log/warn/fail helpers, from .env
 #
@@ -180,7 +180,7 @@ fi
 # 6. File it under "Dashboards", which fires the TaskParentsAdded that puts the
 #    request on the rails. The staging space is left attached; detaching it would
 #    fire the TaskParentsRemoved that wrike_delete_handler.sh tears runs down on.
-if ! update_wrike_add_parent "$WRIKE_DASHBOARDS_FOLDER_ID" > /dev/null; then
+if ! update_wrike_add_parent "$WRIKE_FOLDER_ID" > /dev/null; then
     discard_staged_task
     fail "Could not file the task under \"Dashboards\"."
 fi

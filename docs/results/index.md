@@ -14,8 +14,12 @@ it is served from S3 alongside the objects it points at.
 
 ## What is on it
 
-**A header** carrying the Wrike task name, the completion date, the uid and the
-sample count on the left, and the deletion date on the right.
+**A header** carrying the Wrike task name on the left, and on the right a row of
+small bordered notes: the sample count, the completion date, and how long the
+results stay online. The three share one shape, so the corner reads as one set
+rather than as a caption plus a badge, and the header carries no rule of its
+own — it runs into the tab row below it, and the one rule under the tabs closes
+both.
 
 The task name is re-read from Wrike at upload time rather than taken from the
 `wrike_task_name.txt` copy recorded at submission, since the requester may have
@@ -23,9 +27,14 @@ renamed the task since filing it. That copy is the fallback, and a generic
 heading the one after that. The sample count comes from `sample_count.txt`,
 which the samplesheet script writes into the run directory — the count *after*
 merging entries that share a sample name. A run without that file leaves the
-figure out.
+note out rather than writing an empty one.
 
-**The expiration notice**, in the top right corner of the header. See
+**The uid is not on the page.** It names the run in the address bar, in the S3
+prefix and on the Wrike task, and a reader of the results has no use for it. The
+expired page still carries it, under `reference`, because that page is asking the
+reader to quote something back to us.
+
+**The expiration notice**, the last of those three notes. See
 [The expiration notice](#the-expiration-notice) below.
 
 **A row of tabs**, one per report the run produced plus the file index. Each
@@ -41,13 +50,20 @@ they do not read as another view of the page.
 
 | Tab | ampliseq | taxprofiler |
 |---|---|---|
-| first | `summary_report/summary_report.html` | `multiqc/multiqc_report.html` |
-| second | `multiqc/multiqc_report.html` | — |
+| `#report` | `summary_report/summary_report.html` | — |
+| `#profile` | [`composition_and_diversity.html`](composition.md) | — |
+| `#quality` | `multiqc/multiqc_report.html` | `multiqc/multiqc_report.html` |
 | `#files` | the file index | the file index |
 
-Which of the two reports is more useful depends on the question being asked, so
-neither is buried: the pipeline's own narrative report is what the page opens
-on, and the per-sample sequencing quality report is one click away.
+Which of these is most useful depends on the question being asked, so none is
+buried: the pipeline's own narrative report is what an ampliseq page opens on,
+and what was found and how varied it was — the two things most requesters open
+the link for — is the tab beside it.
+
+**The report is set in from the tabs, not butted against them.** It sits on the
+page with a margin around it and nothing drawn around it, so the chrome of the
+dashboard and the chrome of whatever report is loaded into it do not run
+together.
 
 **The file index**, under the `All output files` tab — a grouped, annotated
 catalogue of everything the run published, with a menu of the groups beside it.
@@ -56,10 +72,17 @@ See [The file index](#the-file-index) below.
 ## The expiration notice
 
 A published dashboard has a deletion date, and the page says so in the corner of
-the header: *"Deleted Sep 24, 2026 · 38 days left"*. It is quiet — muted text in
-a bordered pill — until the date is inside the last two weeks, when it turns
-red. What a reader should do about it is in the tooltip rather than the header,
-so the notice states the deadline without shouting it.
+the header: *"Available until Sep 24, 2026 · 38 days left"*. It is written from
+the reader's side — the date is the last day the link works, not the day we run
+the delete — and stays quiet, muted text in a bordered pill, until the date is
+inside the last two weeks, when it turns red. What a reader should do about it
+is in the tooltip rather than the header, so the notice states the deadline
+without shouting it.
+
+If the date has already passed by the time the page is opened, the script that
+works out the countdown rewrites the label to *"Deleted on Sep 24, 2026"*. That
+is the only case the wording changes in, and one the reader should not normally
+reach: the expiration pass replaces the whole page well before it.
 
 **The date is rendered into the page; the countdown is worked out in the
 reader's browser.** The notice carries `data-expires="2026-09-24"`, and a few
@@ -76,7 +99,7 @@ both read it from the same place, so the page cannot promise a date the daily
 pass will not honour.
 
 A run whose `Availability` answer was `Unlimited` leaves the field unset. Its
-notice says *"No deletion date"* rather than disappearing, since "no date" is
+notice says *"No expiration date"* rather than disappearing, since "no date" is
 itself worth stating.
 
 ## The file index
@@ -97,8 +120,9 @@ Sequences  | qiime2/representative_sequences/          | | The same sequences af
 ```
 
 - A **path** may be a glob, which lists one row per file it matches.
-- A path ending in `/` is a **folder**, listed as one row linking to its
-  [listing page](browsable-folders.md) and counted rather than sized.
+- A path ending in `/` is a **folder**, listed as one row linking to the
+  `directory_listing.html` inside it — see [Browsable
+  folders](browsable-folders.md) — and counted rather than sized.
 - An entry matching **nothing is left out**, and a group left with no entries
   disappears with them. That is what makes one catalogue describe every run of
   the pipeline: an ONT run has no `dada2/` and lists `savont/` instead, a run
@@ -186,17 +210,20 @@ not, which is what stops a reader's browser polling once the results land.
 
 ## One page, one stylesheet
 
-All five published pages — dashboard, progress, listing, expired, and the
-folder listings — share
+Every published page — dashboard, progress, expired, the folder listings, and
+the [composition and diversity page](composition.md) — shares
 [`templates/common.css`](../../templates/common.css): the palette, the header
-notice, the buttons, the tables. `render_template` in
+notice, the buttons, the tables. The one page that adds to it is the composition
+page, which needs a categorical palette for its fills and defines those eight
+colours in its own style block. `render_template` in
 [`utilities.sh`](../../scripts/utilities.sh) inlines it into whichever template
 it is filling in, alongside that page's own placeholders:
 
 ```bash
-render_template "$INDEX_TEMPLATE" \
-    DIR_PATH "$(escape_html "$REL_PATH")" \
-    ROWS     "$ROWS" > "$DIR/$INDEX_NAME"
+render_template "$LISTING_TEMPLATE" \
+    DIR_PATH "$(escape_html "$title")" \
+    UP_LINK  "$up_link" \
+    ROWS     "$rows" > "$dir/$LISTING_NAME"
 ```
 
 Inlined, not linked, because these pages are served from S3 next to the objects

@@ -7,24 +7,27 @@
 #
 # S3 serves objects, not directories, so a reader who follows one of the folder
 # links summary_report.html carries lands on nothing. This walks a finished
-# results folder and renders templates/listing.html into each subdirectory
-# below it: subfolders first, then files with their sizes, every entry linked,
-# and a link back up.
+# results folder and renders templates/listing.html into every directory of it,
+# the results folder included: subfolders first, then files with their sizes,
+# every entry linked, and a link back up.
 #
-# A directory that already holds an index.html keeps it, so pages the pipeline
-# published itself are left alone. That also makes a second run over the same
-# results folder a no-op.
+# The listings are called directory_listing.html, never index.html. Across a
+# published run those two names mean different things and never collide:
 #
-# Whether a link here opens in the browser or downloads is settled by the content
-# type the upload gives each object, not by the page: see TEXT_EXTENSIONS in
-# publish_dashboard.sh.
+#   index.html              a page something wrote to be read - the run's
+#                           landing page at the top, QIIME 2's barplot under
+#                           qiime2/barplot/
+#   directory_listing.html  the listing of whatever folder it sits in, written
+#                           here
 #
-# The results folder itself is skipped. Its index.html is the run's landing
-# page, which ampliseq_upload.sh renders and uploads after everything else.
+# CloudFront maps a folder URL onto the second of those; see
+# docs/results/cloudfront.md. Every link written here names the file outright
+# rather than relying on that, so an unpacked copy of the download zip browses
+# the same way the published run does.
 #
 # Usage:     index_directories.sh [results_dir]
 #            defaults to ./results, the outdir set in the ampliseq params file
-# Called by: ampliseq_upload.sh, just before it copies the folder to S3
+# Called by: ampliseq_upload.sh and taxprofiler_upload.sh, before the upload
 # Requires:  GNU find and awk
 # Reads:     templates/listing.html, the listing template
 # Env:       NEXTFLOW_DIR and the log/warn/fail, escape_html and render_template
@@ -37,32 +40,35 @@ source /data/prod/nextflow/.env
 RESULTS_DIR="${1:-results}"
 RESULTS_DIR="${RESULTS_DIR%/}"
 
-readonly INDEX_NAME="index.html"
+readonly LISTING_NAME="directory_listing.html"
 
 # One listing page, filled in per directory. Every link in it is relative, so it
 # only works from the same prefix as the entries it names.
-readonly INDEX_TEMPLATE="$NEXTFLOW_DIR/templates/listing.html"
+readonly LISTING_TEMPLATE="$NEXTFLOW_DIR/templates/listing.html"
 
 if [[ ! -d "$RESULTS_DIR" ]]; then
     fail "There is no '$RESULTS_DIR' directory to index."
 fi
 
-if [[ ! -r "$INDEX_TEMPLATE" ]]; then
-    fail "The folder listing template is missing from the server ($INDEX_TEMPLATE)."
+if [[ ! -r "$LISTING_TEMPLATE" ]]; then
+    fail "The folder listing template is missing from the server ($LISTING_TEMPLATE)."
 fi
 
 # One directory's entries as table rows. find reports type, size and name; the
 # sort puts folders ahead of files - d before f - and orders each group by name.
 #
+# Anything named in the second argument is left out, which is how a listing
+# omits itself and how the results folder's listing omits the landing page.
+#
 # Symlinks are followed, because publishDir may link a published file rather
 # than copy it and because the upload follows them too: what the row reports is
 # what S3 will hold.
 render_rows() {
-    local dir="$1"
+    local dir="$1" omit="${2:-}"
 
     find -L "$dir" -mindepth 1 -maxdepth 1 -printf '%y\t%s\t%f\n' \
         | LC_ALL=C sort -t$'\t' -k1,1 -k3,3 \
-        | LC_ALL=C awk -F'\t' '
+        | LC_ALL=C awk -F'\t' -v omit="$omit" -v listing="$LISTING_NAME" '
             # HTML-escape, a character at a time
             function esc(s,   out, i, c) {
                 out = ""
@@ -101,7 +107,11 @@ render_rows() {
             BEGIN {
                 for (i = 0; i < 256; i++) ord[sprintf("%c", i)] = i
                 split("B KB MB GB TB PB", unit, " ")
+                split(omit, hidden, " ")
+                for (i in hidden) skip[hidden[i]] = 1
             }
+
+            $1 == "f" && ($3 in skip) { next }
 
             {
                 n++
@@ -118,8 +128,8 @@ render_rows() {
                     # A folder is addressed by its own listing page, since the
                     # bucket has no directory to serve
                     if (type[i] == "d")
-                        printf "<tr><td class=\"name\"><a class=\"dir\" href=\"%s/index.html\">%s/</a></td>" \
-                               "<td class=\"size\"></td></tr>\n", enc(name[i]), esc(name[i])
+                        printf "<tr><td class=\"name\"><a class=\"dir\" href=\"%s/%s\">%s/</a></td>" \
+                               "<td class=\"size\"></td></tr>\n", enc(name[i]), listing, esc(name[i])
                     else
                         printf "<tr><td class=\"name\"><a href=\"%s\">%s</a></td>" \
                                "<td class=\"size\">%s</td></tr>\n", enc(name[i]), esc(name[i]), human(size[i])
@@ -129,37 +139,57 @@ render_rows() {
         '
 }
 
+# One listing page, written where its caller says. A listing that cannot be
+# built is not worth failing a run over, and whatever rows did come out are
+# kept: the folder gets a page either way, so the link that led here resolves.
+#
+# Rows are never escaped - render_rows emits the markup itself, having escaped
+# and encoded every name it read off the disk.
+write_listing() {
+    local dir="$1" title="$2" up_link="$3" omit="${4:-}"
+    local rows=""
+
+    if ! rows=$(render_rows "$dir" "$omit"); then
+        warn "The contents of $dir could not be listed in full."
+    fi
+
+    if [[ -z "$rows" ]]; then
+        rows="<p class=\"empty\">This folder is empty.</p>"
+    fi
+
+    render_template "$LISTING_TEMPLATE" \
+        DIR_PATH "$(escape_html "$title")" \
+        UP_LINK  "$up_link" \
+        ROWS     "$rows" > "$dir/$LISTING_NAME"
+}
+
 log "Indexing the folders under $RESULTS_DIR..."
 
 INDEXED=0
 
-# Real directories only: an index.html written through a symlink would land in
+# Real directories only: a listing written through a symlink would land in
 # nextflow's work directory rather than in the results.
 while IFS= read -r DIR; do
-    [[ -e "$DIR/$INDEX_NAME" ]] && continue
-
     # Named the way a reader arrives at it - from the run's prefix, not from
     # this machine
     REL_PATH="${DIR#"$RESULTS_DIR"/}"
 
-    # A listing that cannot be built is not worth failing a run over, and
-    # whatever rows did come out are kept: the folder gets a page either way, so
-    # the link that led here resolves.
-    if ! ROWS=$(render_rows "$DIR"); then
-        warn "The contents of $DIR could not be listed in full."
-    fi
-
-    if [[ -z "$ROWS" ]]; then
-        ROWS="<p class=\"empty\">This folder is empty.</p>"
-    fi
-
-    # Rows are never escaped - render_rows emits the markup itself, having
-    # escaped and encoded every name it read off the disk.
-    render_template "$INDEX_TEMPLATE" \
-        DIR_PATH "$(escape_html "$REL_PATH")" \
-        ROWS     "$ROWS" > "$DIR/$INDEX_NAME"
+    write_listing "$DIR" "$REL_PATH" \
+        "<a href=\"../$LISTING_NAME\">&uarr; Up one folder</a>" "$LISTING_NAME"
 
     INDEXED=$((INDEXED + 1))
 done < <(find "$RESULTS_DIR" -mindepth 1 -type d)
 
-log "Indexed $INDEXED folders."
+# The results folder itself, which is where every "up one folder" ends - so it
+# is the page that leaves the frame. The landing page reads these listings
+# inside itself, and loading it into its own frame would open a second copy of
+# the dashboard in the first.
+#
+# The landing page is left out of the listing as well as being what the link at
+# the top goes to. It is never on disk here - the upload script pipes it
+# straight to S3 - but a rerun over an unpacked copy would otherwise list it.
+write_listing "$RESULTS_DIR" "All output files" \
+    "<a href=\"index.html\" target=\"_top\">&uarr; Results dashboard</a>" \
+    "$LISTING_NAME index.html"
+
+log "Indexed $INDEXED folders, plus the results folder itself."

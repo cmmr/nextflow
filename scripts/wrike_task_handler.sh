@@ -46,7 +46,7 @@
 # Requires:  jq, sbatch/squeue (Slurm), aws, openssl (via derive_uid), curl (via
 #            call_wrike_api)
 # Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, RUN_ID_SALT,
-#            WRIKE_S3_RESULTS_URL_CFID, WRIKE_EXPIRATION_CFID, WRIKE_FORM_ANSWERS
+#            WRIKE_DASHBOARD_URL_CFID, WRIKE_EXPIRATION_CFID, WRIKE_FORM_ANSWERS
 #            and its helpers, and the log/warn/fail/derive_uid/run_results_url
 #            helpers, all from .env
 
@@ -257,7 +257,7 @@ RESULTS_URL=$(run_results_url "$RUN_ID")
 
 publish_progress_page
 
-update_wrike_custom_field "$WRIKE_S3_RESULTS_URL_CFID" "$RESULTS_URL" \
+update_wrike_custom_field "$WRIKE_DASHBOARD_URL_CFID" "$RESULTS_URL" \
     || warn "Could not set the results URL on task $TASK_ID."
 
 # 4. Check every answer against the list the form offers. These values reach a
@@ -291,6 +291,12 @@ EXPIRES_ON=$(wrike_expiration_date "$(wrike_answer retention)")
 
 update_wrike_custom_field "$WRIKE_EXPIRATION_CFID" "$EXPIRES_ON" \
     || warn "Could not set the expiration date on task $TASK_ID."
+
+# Clear the "Dashboard Retention" field so users don't change it and expect
+# that to change the expiration date.
+update_wrike_custom_field "$WRIKE_RETENTION_CFID" "" \
+    || warn "Could not unset retention field on task $TASK_ID."
+
 
 # 6. A request naming a previous run reproduces it. That run's manifest decides
 #    which pipeline is used, so it is fetched before the name is resolved.

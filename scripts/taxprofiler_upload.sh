@@ -29,7 +29,7 @@
 # Reads:     templates/dashboard.html and templates/taxprofiler/outputs.conf, via
 #            the dashboard helpers
 # Runs:      index_directories.sh, over the results folder
-# Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, WRIKE_S3_RESULTS_URL_CFID,
+# Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, WRIKE_DASHBOARD_URL_CFID,
 #            the Wrike and dashboard helper functions and the log/fail/is_valid_uid
 #            helpers, all sourced from .env
 # Outputs:   ./message.out on error
@@ -157,18 +157,17 @@ fi
 TASK_NAME=${TASK_NAME%%$'\n'*}
 : "${TASK_NAME:=Sequencing results}"
 
-#    The sample count carries its own separator, so a run whose count was never
-#    recorded leaves that part of the line out. Validated as a number because it
-#    is read from a file and written into the page.
-SAMPLE_COUNT_HTML=""
+#    How many samples the header says this run covers. A count that was never
+#    recorded, or that is not a number, leaves that note off the header
+#    altogether. Validated because it is read from a file and written into the
+#    page.
+SAMPLE_COUNT=""
 if [[ -r "$SAMPLE_COUNT_FILE" ]]; then
     read -r SAMPLE_COUNT < "$SAMPLE_COUNT_FILE" || true
 
-    if [[ "${SAMPLE_COUNT:-}" =~ ^[0-9]+$ && "$SAMPLE_COUNT" -gt 0 ]]; then
-        SAMPLE_COUNT_HTML="&middot; $SAMPLE_COUNT samples"
-        [[ "$SAMPLE_COUNT" -eq 1 ]] && SAMPLE_COUNT_HTML="&middot; 1 sample"
-    else
+    if [[ ! "${SAMPLE_COUNT:-}" =~ ^[0-9]+$ ]]; then
         warn "No usable sample count in $SAMPLE_COUNT_FILE; leaving it off the page."
+        SAMPLE_COUNT=""
     fi
 fi
 
@@ -177,8 +176,8 @@ fi
 #
 #    --content-type because reading the body from stdin leaves aws nothing to
 #    guess from, and a page served as binary downloads instead of rendering.
-if ! DASHBOARD=$(render_dashboard "$RUN_ID" "$TASK_NAME" "$(date '+%B %-d, %Y')" \
-        "$SAMPLE_COUNT_HTML" "$EXPIRES_ON"); then
+if ! DASHBOARD=$(render_dashboard "$RUN_ID" "$TASK_NAME" "$(date '+%b %-d, %Y')" \
+        "$SAMPLE_COUNT" "$EXPIRES_ON"); then
     fail "The results were uploaded, but the page that presents them could not be built."
 fi
 
@@ -187,5 +186,5 @@ if ! UPLOAD_OUTPUT=$(printf '%s\n' "$DASHBOARD" \
     fail "The results were uploaded, but the page that presents them was not:"$'\n'"$UPLOAD_OUTPUT"
 fi
 
-update_wrike_custom_field "$WRIKE_S3_RESULTS_URL_CFID" "$S3_RESULTS_URL"
+update_wrike_custom_field "$WRIKE_DASHBOARD_URL_CFID" "$S3_RESULTS_URL"
 log "Upload successful: $S3_RESULTS_URL"

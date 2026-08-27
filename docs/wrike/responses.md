@@ -15,8 +15,8 @@ summary of it. Re-capture here after changing a field so the two can be compared
 ## Set env variables
 
 Sourcing `.env` pulls in both halves: `WRIKE_API_TOKEN` from `secrets/.env`, and
-the object IDs used below — `WRIKE_NXFPIPE_REQUEST_FORM_ID`,
-`WRIKE_NXFPIPE_SPACE_ID` — from `scripts/wrike_api.sh`, along with
+the object IDs used below — `WRIKE_REQUEST_FORM_ID`,
+`WRIKE_SPACE_ID` — from `scripts/wrike_api.sh`, along with
 `call_wrike_api` itself.
 
 ```bash
@@ -25,7 +25,7 @@ source /data/prod/nextflow/.env
 
 
 ```bash
-call_wrike_api GET spaces/$WRIKE_NXFPIPE_SPACE_ID/customfields | jq -r '.data[] | "\(.id)\t\(.title)"'
+call_wrike_api GET spaces/$WRIKE_SPACE_ID/customfields | jq -r '.data[] | "\(.id)\t\(.title)"'
 ```
 ```json
 IEAAIKU5JUANAH3C        Nextflow Pipeline
@@ -43,7 +43,7 @@ IEAAIKU5JUANE5WG        Nextflow Previous Run ID
 
 
 ```bash
-call_wrike_api GET spaces/$WRIKE_NXFPIPE_SPACE_ID/customfields
+call_wrike_api GET spaces/$WRIKE_SPACE_ID/customfields
 ```
 ```json
 {
@@ -446,7 +446,7 @@ call_wrike_api GET spaces/$WRIKE_NXFPIPE_SPACE_ID/customfields
 
 
 ```bash
-call_wrike_api GET request_forms/$WRIKE_NXFPIPE_REQUEST_FORM_ID
+call_wrike_api GET request_forms/$WRIKE_REQUEST_FORM_ID
 ```
 ```json
 {
@@ -759,7 +759,7 @@ call_wrike_api GET request_forms/$WRIKE_NXFPIPE_REQUEST_FORM_ID
 
 
 ```bash
-call_wrike_api GET "/spaces/$WRIKE_NXFPIPE_SPACE_ID/workflows"
+call_wrike_api GET "/spaces/$WRIKE_SPACE_ID/workflows"
 ```
 ```json
 {
@@ -880,7 +880,7 @@ call_wrike_api GET "/spaces/$WRIKE_NXFPIPE_SPACE_ID/workflows"
 
 
 ```bash
-call_wrike_api GET "/spaces/$WRIKE_NXFPIPE_SPACE_ID/workflows"
+call_wrike_api GET "/spaces/$WRIKE_SPACE_ID/workflows"
 ```
 ```json
 {

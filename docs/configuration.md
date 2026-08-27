@@ -55,8 +55,8 @@ The five it sources:
   `update_wrike_*` / `add_wrike_task_comment` helpers, which read `TASK_ID` from
   the environment rather than taking it as an argument. **It also defines every
   Wrike object ID the system works against:**
-  - `WRIKE_DASHBOARDS_FOLDER_ID` — the folder the webhook watches
-  - `WRIKE_PIPELINE_NAME_CFID`, `WRIKE_S3_RESULTS_URL_CFID` — custom fields the
+  - `WRIKE_FOLDER_ID` — the folder the webhook watches
+  - `WRIKE_PIPELINE_NAME_CFID`, `WRIKE_DASHBOARD_URL_CFID` — custom fields the
     bot writes the pipeline name and results URL into, which is part of what the
     Wrike Dashboards view renders
   - `WRIKE_EXPIRATION_CFID` — the date a finished run's dashboard is torn down
@@ -70,8 +70,8 @@ The five it sources:
     reader is shown is the date that will be honoured
   - `WRIKE_CUSTOM_STATUS_IDS` — the status map described in
     [Progress is the task's Status](wrike/status.md)
-  - `WRIKE_NXFPIPE_SPACE_ID`, `WRIKE_NXFPIPE_WORKFLOW_ID`,
-    `WRIKE_NXFPIPE_REQUEST_FORM_ID` — not read by the running system; they are
+  - `WRIKE_SPACE_ID`, `WRIKE_WORKFLOW_ID`,
+    `WRIKE_REQUEST_FORM_ID` — not read by the running system; they are
     what you need to re-inspect the workflow and form, as
     [the Wrike API responses](wrike/responses.md) does
 - [`scripts/publish_dashboard.sh`](../scripts/publish_dashboard.sh) — the

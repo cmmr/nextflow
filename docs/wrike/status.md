@@ -31,7 +31,7 @@ desyncs it.** Regenerate it from the live workflow — the full response is kept
 [the Wrike API responses](responses.md):
 
 ```bash
-call_wrike_api GET "/spaces/$WRIKE_NXFPIPE_SPACE_ID/workflows"
+call_wrike_api GET "/spaces/$WRIKE_SPACE_ID/workflows"
 ```
 
 A stage name that isn't a key of the map is logged and skipped, deliberately:

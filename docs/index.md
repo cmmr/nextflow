@@ -58,7 +58,7 @@ flowchart TD
    `TaskCreated` is unambiguous — a task appearing in that folder is a request.
    The two parent events are not, because they fire for *any* parent change on a
    task the webhook can see, so both are checked against
-   `WRIKE_DASHBOARDS_FOLDER_ID` before being acted on. The payload field is
+   `WRIKE_FOLDER_ID` before being acted on. The payload field is
    `addedParents` / `removedParents`; getting that name wrong fails silently, as
    the check simply never matches.
 

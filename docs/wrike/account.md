@@ -92,7 +92,7 @@ one can silently read another team's field. These nine all live in the "Nextflow
 Pipelines" space:
 
 ```bash
-call_wrike_api GET spaces/$WRIKE_NXFPIPE_SPACE_ID/customfields \
+call_wrike_api GET spaces/$WRIKE_SPACE_ID/customfields \
     | jq -r '.data[] | "\(.id)\t\(.title)"'
 ```
 
@@ -105,7 +105,7 @@ through and what came back, so an answer that did not arrive can be told from on
 that was never given.
 
 Two more fields the system writes are not questions, so they have IDs of their
-own rather than rows in that table: `WRIKE_S3_RESULTS_URL_CFID` ("Dashboard URL")
+own rather than rows in that table: `WRIKE_DASHBOARD_URL_CFID` ("Dashboard URL")
 and `WRIKE_EXPIRATION_CFID` ("Dashboard Expiration").
 
 ### The pipeline question

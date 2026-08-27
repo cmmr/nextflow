@@ -19,7 +19,7 @@
 # Requires:  jq, aws, scancel (Slurm), openssl (via derive_uid), curl (via
 #            call_wrike_api)
 # Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, S3_ZIP_PREFIX, RUN_ID_SALT,
-#            WRIKE_DASHBOARDS_FOLDER_ID,
+#            WRIKE_FOLDER_ID,
 #            the Wrike helper functions and the log/fail/derive_uid helpers, all
 #            sourced from .env
 
@@ -51,7 +51,7 @@ fi
 # run that is still on the dashboard.
 if [[ "$EVENT_TYPE" == "TaskParentsRemoved" ]]; then
     DASHBOARDS_REMOVED=$(echo "$MESSAGE_BODY" \
-        | jq -r --arg folder "$WRIKE_DASHBOARDS_FOLDER_ID" \
+        | jq -r --arg folder "$WRIKE_FOLDER_ID" \
             '.[0].removedParents[]? | select(. == $folder)')
 
     if [[ -z "$DASHBOARDS_REMOVED" ]]; then

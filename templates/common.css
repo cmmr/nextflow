@@ -83,8 +83,9 @@ header {
 }
 header h1 {
   margin: 0;
-  font-size: 17px;
-  font-weight: 600;
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
   overflow-wrap: anywhere;
 }
 header .meta {
@@ -121,10 +122,17 @@ a.button.primary {
 }
 a.button:hover { filter: brightness(1.08); }
 
-/* When the results are deleted, in the corner of the header. A quiet note
-   until the countdown script finds the date is close and reddens it; without
-   scripting it stays quiet. */
-.expiry {
+/* The bordered notes in the corner of a header - what the run is, and how long
+   it stays online. They share one shape, so the row reads as one set. */
+.facts {
+  flex: 0 1 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.fact, .expiry {
   flex: 0 0 auto;
   padding: 5px 11px;
   border: 1px solid var(--border);
@@ -135,7 +143,10 @@ a.button:hover { filter: brightness(1.08); }
   line-height: 1.35;
   white-space: nowrap;
 }
-.expiry .date { color: var(--text); font-weight: 600; }
+.fact .value, .expiry .date { color: var(--text); font-weight: 600; }
+
+/* The deletion date reddens once the countdown finds it close; without
+   scripting it stays as quiet as the notes beside it. */
 .expiry.soon {
   background: var(--alert-bg);
   border-color: var(--alert-border);

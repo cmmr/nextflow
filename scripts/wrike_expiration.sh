@@ -37,7 +37,7 @@
 # Requires:  aws, jq, GNU date, curl (via call_wrike_api), openssl (via derive_uid)
 # Reads:     templates/expired.html
 # Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, S3_ZIP_PREFIX, RUN_ID_SALT,
-#            WRIKE_DASHBOARDS_FOLDER_ID, WRIKE_EXPIRATION_CFID,
+#            WRIKE_FOLDER_ID, WRIKE_EXPIRATION_CFID,
 #            WRIKE_CUSTOM_STATUS_IDS, WRIKE_BOT_USER_ID, the Wrike helpers and
 #            the log/warn/fail/derive_uid/escape_html helpers, all from .env
 
@@ -107,7 +107,7 @@ list_dashboard_tasks() {
             args+=(--data-urlencode "nextPageToken=$token")
         fi
 
-        response=$(call_wrike_api GET "folders/$WRIKE_DASHBOARDS_FOLDER_ID/tasks" "${args[@]}") \
+        response=$(call_wrike_api GET "folders/$WRIKE_FOLDER_ID/tasks" "${args[@]}") \
             || return 1
 
         echo "$response" | jq -c '.data[]?'

@@ -31,8 +31,8 @@
 # Overview plots, which files its sidebar offers, what the run measured, and
 # which of the outputs named in templates/ampliseq/outputs.conf exist. The plots
 # and the numbers beside them are what ampliseq_composition.sh left in
-# composition_data.json and run_statistics.tsv, and the settings above them come
-# off the manifest wrike_job.sh recorded.
+# composition_data.json and run_statistics.tsv, and the settings stated beside
+# them come off the manifest wrike_job.sh recorded.
 #
 # Usage:     ampliseq_upload.sh [results_dir]
 #            defaults to ./results, the outdir set in the ampliseq params file
@@ -173,16 +173,18 @@ dashboard_reset "$RESULTS_DIR" "$OUTPUT_CATALOG"
 dashboard_view report  "Analysis Report" "summary_report/summary_report.html"
 dashboard_view quality "Quality Control" "multiqc/multiqc_report.html"
 dashboard_index_view   "File Explorer"
-dashboard_view setup   "Run Setup"       "ampliseq_args.yaml"
 
 #    The reads are the bulky download most people came for; the ASV table
 #    carries its taxonomy as observation metadata
 dashboard_button "$FASTQ_ZIP_NAME"
 dashboard_button "qiime2/abundance_tables/feature-table.biom"
 
-#    How the run was set up, as the page states it above the report. Every value
-#    comes off the manifest wrike_job.sh recorded, so the page and the record
-#    cannot disagree; anything it does not carry leaves its item off the row.
+#    How the run was set up. Every value comes off the manifest wrike_job.sh
+#    recorded, so the page and the record cannot disagree; anything it does not
+#    carry leaves its note off the sidebar. Each is stated over the numbers it
+#    explains rather than in a row of its own - what was amplified and what read
+#    it over the read totals, what they were classified against over the
+#    classification.
 PIPELINE=""
 REGION=""
 REF_TAXONOMY=""
@@ -205,9 +207,30 @@ case "$SEQUENCING_TYPE" in
     *)           PLATFORM="$SEQUENCING_TYPE" ;;
 esac
 
-dashboard_spec biotech  "Amplified region"   "$REGION"
-dashboard_spec science  "Sequencing"         "$PLATFORM"
-dashboard_spec database "Reference taxonomy" "$REF_TAXONOMY"
+#    ampliseq names a database as it is passed to it - "silva=138.2". Read as a
+#    note rather than as a parameter, it wants a space and its own capitals.
+REFERENCE=""
+if [[ -n "$REF_TAXONOMY" ]]; then
+    REFERENCE_NAME=${REF_TAXONOMY%%=*}
+    REFERENCE_VERSION=${REF_TAXONOMY#*=}
+
+    if (( ${#REFERENCE_NAME} <= 5 )); then
+        REFERENCE_NAME=${REFERENCE_NAME^^}
+    else
+        REFERENCE_NAME=${REFERENCE_NAME^}
+    fi
+
+    REFERENCE="$REFERENCE_NAME"
+    [[ "$REFERENCE_VERSION" != "$REF_TAXONOMY" ]] && REFERENCE+=" $REFERENCE_VERSION"
+fi
+
+#    The detector records the region as "16SV4"; a reader reads "16S V4"
+SEQUENCED=""
+[[ -n "$REGION" ]] && SEQUENCED=${REGION/#16S/16S }
+
+if [[ -n "$PLATFORM" ]]; then
+    SEQUENCED+="${SEQUENCED:+ · }$PLATFORM"
+fi
 
 #    What the run measured, as the sidebar reports it. The counts are whole
 #    numbers written out in the units a sidebar has room for; the bars are only
@@ -216,15 +239,10 @@ declare -A STATS=()
 
 if [[ -r "$STATS_FILE" ]]; then
     while IFS=$'\t' read -r STAT_KEY STAT_VALUE; do
-        if [[ "$STAT_VALUE" =~ ^[0-9]+$ ]]; then
+        if [[ "$STAT_VALUE" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
             STATS["$STAT_KEY"]="$STAT_VALUE"
         fi
     done < "$STATS_FILE"
-fi
-
-if [[ -n "${STATS[samples]:-}" ]]; then
-    dashboard_stat_group "SAMPLES & ASVs"
-    dashboard_stat_tiles "${STATS[samples]}|Samples" "$(human_count "${STATS[asvs]:-0}")|Total ASVs|growth"
 fi
 
 if [[ -n "${STATS[reads_retained]:-}" ]]; then
@@ -238,25 +256,36 @@ if [[ -n "${STATS[reads_retained]:-}" ]]; then
         RETAINED_PCT=$(( RETAINED * 100 / TOTAL_READS ))
     fi
 
-    dashboard_stat_group "READ TOTALS"
+    dashboard_stat_group "READ TOTALS" "$SEQUENCED"
     dashboard_stat_bar "Total reads"    "$(human_count "$TOTAL_READS")" 100
     dashboard_stat_bar "Retained reads" "$(human_count "$RETAINED")" "$RETAINED_PCT" growth
 
     dashboard_stat_group "READS PER SAMPLE"
-    dashboard_stat_chips "$(human_count "${STATS[reads_avg]:-0}")|Avg" \
-                         "$(human_count "${STATS[reads_min]:-0}")|Min" \
+    dashboard_stat_chips "$(human_count "${STATS[reads_min]:-0}")|Min" \
+                         "$(human_count "${STATS[reads_median]:-0}")|Median" \
                          "$(human_count "${STATS[reads_max]:-0}")|Max"
 fi
 
-if [[ -n "${STATS[genus_pct]:-}" || -n "${STATS[species_pct]:-}" ]]; then
-    dashboard_stat_group "CLASSIFICATION"
+#    How many ASVs the run called, and how far down the classifier could place
+#    the reads behind them. The ASV count opens the block as the thing the
+#    shares below it are shares of.
+if [[ -n "${STATS[asvs]:-}${STATS[family_pct]:-}${STATS[genus_pct]:-}${STATS[species_pct]:-}" ]]; then
+    dashboard_stat_group "CLASSIFICATION" "$REFERENCE"
+
+    if [[ -n "${STATS[asvs]:-}" ]]; then
+        dashboard_stat_bar "Total ASVs" "$(human_count "${STATS[asvs]}")" 100
+    fi
+
+    if [[ -n "${STATS[family_pct]:-}" ]]; then
+        dashboard_stat_bar "Family level" "${STATS[family_pct]}%" "${STATS[family_pct]}" growth
+    fi
 
     if [[ -n "${STATS[genus_pct]:-}" ]]; then
-        dashboard_stat_bar "Genus level" "${STATS[genus_pct]}%" "${STATS[genus_pct]}"
+        dashboard_stat_bar "Genus level" "${STATS[genus_pct]}%" "${STATS[genus_pct]}" growth
     fi
 
     if [[ -n "${STATS[species_pct]:-}" ]]; then
-        dashboard_stat_bar "Species level" "${STATS[species_pct]}%" "${STATS[species_pct]}" secondary
+        dashboard_stat_bar "Species level" "${STATS[species_pct]}%" "${STATS[species_pct]}" growth
     fi
 fi
 

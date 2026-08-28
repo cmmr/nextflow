@@ -4,28 +4,34 @@
 
   Rendered by publish_dashboard.sh into the results folder as overview.html and
   loaded into the landing page's frame, which is where the navigation bar lives.
-  This page is templates/redesign/code.html's main content, unchanged apart from
-  the values filled into it and the plots drawn into the panel that offers them.
+  This page is templates/redesign/code.html's main content, filled in from what
+  the run produced and fitted to the frame it is read in: on a wide screen
+  nothing here scrolls, the plot panel takes whatever height is left over, and
+  the charts are drawn to fit it.
 
   That panel is the run's composition and diversity: its two tab-links choose
-  between what was in each sample and how varied each sample was, and the two
-  selects beside them choose the taxonomic rank and the order the samples are
-  drawn in. Both charts draw to a canvas rather than to elements - a run of a
-  few thousand samples is one column per sample either way, and a few thousand
-  SVG rectangles per taxon is what makes QIIME 2's own barplot unusable at that
-  size. ampliseq_composition.sh works the numbers out; a run with none leaves
-  the panel on its empty state.
+  between what was in each sample and how varied each sample was, and the
+  selects beside them choose the taxonomic rank, the diversity index, and the
+  order the samples are drawn in. One index is plotted at a time. Both charts
+  draw to a canvas rather than to elements - a run of a few thousand samples is
+  one column per sample either way, and a few thousand SVG rectangles per taxon
+  is what makes QIIME 2's own barplot unusable at that size.
+  ampliseq_composition.sh works the numbers out; a run with none leaves the
+  panel on its empty state.
 
-  The eight colours are a validated categorical set - the ordering is what keeps
+  The ten colours are a categorical set whose ordering is what keeps
   neighbouring fills apart under colour vision deficiency, so they are assigned
-  in that order and never cycled. A ninth taxon is not given a ninth colour: the
-  tail is summed into "Other", which wears the neutral. Sorting the samples
-  never reassigns them either. Three of the steps sit under 3:1 against a white
-  page, which is why the legend beside the chart is a table carrying every
-  taxon's name and share rather than a row of swatches.
+  in that order and never cycled. An eleventh taxon is not given an eleventh
+  colour: the tail is summed into "Other", which wears the neutral. Sorting the
+  samples never reassigns them either. Several of the steps sit under 3:1
+  against a white page, which is why the legend above the chart names every
+  taxon beside its swatch, and carries its share and prevalence in a tooltip.
 
-  Placeholders are COMMON_HEAD, TASK_NAME, SUBTITLE, SPECS, PLOT_DATA,
-  DOWNLOADS, ZIP_BUTTON, STATS, YEAR and FOOTER_NOTE, each wrapped in doubled
+  "Download everything" is handed up to the framing page, which packages the run
+  behind a modal of its own.
+
+  Placeholders are COMMON_HEAD, TASK_NAME, SUBTITLE, PLOT_DATA, DOWNLOADS,
+  ZIP_BUTTON, STATS, YEAR and FOOTER_NOTE, each wrapped in doubled
   underscores. They are deliberately not spelled that way in this comment - the
   renderer substitutes the whole file, comment included, and would paste the
   entire dataset in here too. The task name is user-authored text and is
@@ -51,6 +57,8 @@ __COMMON_HEAD__
   --series-6: #008300;
   --series-7: #4a3aa7;
   --series-8: #e34948;
+  --series-9: #7a5c3e;
+  --series-10: #00a0b0;
   --series-other: #b3bec9;
 
   --border: #c5c5d3;
@@ -61,9 +69,12 @@ __COMMON_HEAD__
 
 canvas { display: block; width: 100%; }
 
-.plot-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.plot-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .plot-table th {
-  padding: 0 10px 7px;
+  position: sticky;
+  top: 0;
+  background: #ffffff;
+  padding: 0 8px 6px;
   border-bottom: 1px solid var(--border);
   font-size: 11px;
   font-weight: 600;
@@ -74,7 +85,7 @@ canvas { display: block; width: 100%; }
 }
 .plot-table th:first-child { text-align: left; }
 .plot-table td {
-  padding: 7px 10px;
+  padding: 5px 8px;
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
@@ -88,12 +99,12 @@ canvas { display: block; width: 100%; }
 .plot-table td.taxon {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
 }
 .swatch {
   flex: 0 0 auto;
-  width: 11px;
-  height: 11px;
+  width: 10px;
+  height: 10px;
   border-radius: 3px;
 }
 .rank-path {
@@ -103,27 +114,7 @@ canvas { display: block; width: 100%; }
   overflow-wrap: anywhere;
 }
 
-/* One panel per index, all in the sample order the chart above them uses */
-.panels {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 16px 20px;
-}
-.panels figure { margin: 0; }
-.panels figcaption {
-  margin: 0 0 6px;
-  font-size: 13px;
-  font-weight: 600;
-}
-.panels figcaption span {
-  display: block;
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--muted);
-}
-
-/* One tooltip for every chart on the page, moved to whichever is under the
-   pointer */
+/* One tooltip for both charts, moved to whichever is under the pointer */
 .tip {
   position: fixed;
   z-index: 20;
@@ -145,103 +136,99 @@ canvas { display: block; width: 100%; }
 </style>
 </head>
 <body class="bg-surface-bg-light text-on-surface font-body-md h-screen overflow-hidden flex flex-col">
-<div class="flex flex-1 overflow-hidden">
+<div class="flex flex-1 min-h-0 overflow-hidden">
 <!-- Main Content Canvas -->
-<main class="flex-1 flex flex-col overflow-y-auto bg-surface relative">
-<div class="p-margin-page space-y-6 max-w-7xl mx-auto w-full"><div class="flex flex-col lg:flex-row gap-gutter-grid items-stretch lg:items-start">
-<div class="flex-1 flex flex-col gap-6 min-w-0">
-<div class="flex justify-between items-end">
-<div>
-<h1 class="font-headline-xl text-headline-xl text-primary">__TASK_NAME__</h1>
-<p class="text-on-surface-variant mt-1">__SUBTITLE__</p>
+<main class="flex-1 min-h-0 flex flex-col bg-surface relative overflow-y-auto lg:overflow-hidden">
+<div class="p-margin-page max-w-7xl mx-auto w-full flex flex-col gap-4 lg:flex-1 lg:min-h-0">
+<div class="shrink-0 min-w-0">
+<h1 class="font-headline-lg text-headline-lg font-bold tracking-tight text-primary">__TASK_NAME__</h1>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">__SUBTITLE__</p>
 </div>
-</div>
-__SPECS__
-<div class="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden flex flex-col shadow-sm h-[600px]">
-<div class="bg-surface-container-low border-b border-outline-variant px-4 py-2 flex flex-wrap justify-between items-center gap-y-2">
-<div class="flex items-center gap-6">
-<div class="flex items-center gap-4 ml-2">
+<div class="flex flex-col lg:flex-row gap-gutter-grid lg:flex-1 lg:min-h-0">
+<div class="flex-1 min-w-0 flex flex-col lg:min-h-0">
+<div class="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden flex flex-col shadow-sm h-[460px] lg:h-auto lg:flex-1 lg:min-h-0">
+<div class="bg-surface-container-low border-b border-outline-variant px-4 py-2 flex flex-wrap justify-between items-center gap-y-2 shrink-0">
+<div class="flex items-center gap-4 ml-1">
 <button class="font-label-caps text-label-caps font-bold text-primary border-b-2 border-primary pb-0.5" data-plot="composition">Taxonomic Composition</button>
 <button class="font-label-caps text-label-caps font-bold text-on-surface-variant opacity-60 hover:opacity-100 transition-opacity pb-0.5" data-plot="diversity">Alpha Diversity</button>
 </div>
-</div>
-<div class="flex items-center gap-3" id="plot-controls" style="display: none">
-<div class="flex items-center gap-2 bg-surface-container-lowest border border-outline-variant/50 rounded px-2 py-1">
+<div class="flex items-center gap-2" id="plot-controls" style="display: none">
+<div class="flex items-center gap-2 bg-surface-container-lowest border border-outline-variant/50 rounded px-2 py-1" id="rank-box">
 <span class="font-body-sm text-body-sm text-on-surface-variant">Rank:</span>
-<select class="bg-transparent border-none py-0 pl-0 pr-8 min-w-[140px] font-body-sm text-body-sm text-primary focus:ring-0 cursor-pointer" id="rank">
+<select class="bg-transparent border-none py-0 pl-0 pr-6 min-w-[110px] font-body-sm text-body-sm text-primary focus:ring-0 cursor-pointer" id="rank">
+</select>
+</div>
+<div class="flex items-center gap-2 bg-surface-container-lowest border border-outline-variant/50 rounded px-2 py-1" id="metric-box" style="display: none">
+<span class="font-body-sm text-body-sm text-on-surface-variant">Index:</span>
+<select class="bg-transparent border-none py-0 pl-0 pr-6 min-w-[130px] font-body-sm text-body-sm text-primary focus:ring-0 cursor-pointer" id="metric">
 </select>
 </div>
 <div class="flex items-center gap-2 bg-surface-container-lowest border border-outline-variant/50 rounded px-2 py-1">
 <span class="font-body-sm text-body-sm text-on-surface-variant">Sort:</span>
-<select class="bg-transparent border-none p-0 font-body-sm text-body-sm text-primary focus:ring-0 cursor-pointer" id="order">
+<select class="bg-transparent border-none py-0 pl-0 pr-6 min-w-[110px] font-body-sm text-body-sm text-primary focus:ring-0 cursor-pointer" id="order">
 </select>
 </div>
 </div>
 </div>
-<div class="flex-1 bg-white relative">
+<div class="flex-1 min-h-0 bg-white relative">
 <div class="absolute inset-0 p-8 flex flex-col items-center justify-center text-center opacity-50" id="plot-empty">
-<span class="material-symbols-outlined text-6xl text-outline mb-4">bar_chart</span>
+<span class="material-symbols-outlined text-6xl text-outline mb-3">bar_chart</span>
 <h3 class="font-headline-lg text-headline-lg text-on-surface">Composition &amp; Diversity Plots</h3>
 <p class="font-body-sm text-body-sm text-on-surface-variant mt-2">This run produced no abundance tables to draw.</p>
 </div>
-<div class="absolute inset-0 overflow-y-auto px-4 py-4" hidden id="plot-scroll">
-<section hidden id="composition">
-<p class="font-body-sm text-body-sm text-on-surface-variant mb-3">One column per
-sample, showing what proportion of its reads came from each of the eight most
-abundant taxa at this rank. Everything rarer is stacked together as
-&ldquo;Other&rdquo;; the full tables are in the abundance tables folder.</p>
-<canvas id="bars"></canvas>
-<p class="font-body-sm text-body-sm text-on-surface-variant mt-2 mb-4" id="axis-note"></p>
-<table class="plot-table">
-<thead>
-<tr><th>Taxon</th><th>Mean share</th><th>Samples present in</th></tr>
-</thead>
-<tbody id="legend"></tbody>
-</table>
+<div class="absolute inset-0 flex flex-col px-6 py-5" id="plot-scroll" style="display: none">
+<section class="flex-1 min-h-0 flex flex-col" id="composition" style="display: none">
+<div class="grid grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-2.5 shrink-0 max-h-[28%] overflow-y-auto pr-1 pb-5" id="legend"></div>
+<div class="flex-1 min-h-0 overflow-hidden" id="bars-box"><canvas id="bars"></canvas></div>
+<div class="shrink-0 max-w-3xl mt-4 space-y-1">
+<p class="font-body-sm text-body-sm text-on-surface">One column per sample, stacked to
+100% of that sample&rsquo;s reads. The ten most abundant taxa at this rank are drawn in
+their own colour; everything rarer is grouped as &ldquo;Other&rdquo;.</p>
+<p class="font-body-sm text-body-sm text-outline" id="axis-note"></p>
+</div>
 </section>
-<section hidden id="diversity">
-<p class="font-body-sm text-body-sm text-on-surface-variant mb-3">How much was
-found in each sample on its own: how many distinct ASVs, and how evenly the
-reads were spread across them. The read depth is plotted beside them because a
-shallow sample cannot show a high count whether or not one is there.</p>
-<div class="panels" id="panels"></div>
-<table class="plot-table mt-4">
+<section class="flex-1 min-h-0 flex flex-col" id="diversity" style="display: none">
+<div class="flex-1 min-h-0 overflow-hidden" id="metric-box-plot"><canvas id="metric-chart"></canvas></div>
+<div class="shrink-0 max-w-3xl mt-4 mb-4 space-y-1">
+<p class="font-body-sm text-body-sm text-on-surface" id="metric-about"></p>
+<p class="font-body-sm text-body-sm text-outline" id="metric-note"></p>
+</div>
+<div class="shrink-0 overflow-y-auto max-h-[38%]">
+<table class="plot-table">
 <thead>
 <tr><th>Index</th><th>Lowest</th><th>Median</th><th>Highest</th></tr>
 </thead>
 <tbody id="summary"></tbody>
 </table>
-<p class="font-body-sm text-body-sm text-on-surface-variant mt-3">Every value per
-sample, including Chao1 and the Simpson index, is in <a class="text-tertiary-container underline" href="alpha_diversity.tsv" rel="noopener" target="_blank">alpha_diversity.tsv</a>.</p>
+</div>
 </section>
 </div>
 <div class="absolute inset-0 bg-gradient-to-br from-primary-fixed/5 to-transparent pointer-events-none"></div>
 </div>
 </div>
 </div>
-<aside class="w-full lg:w-80 flex flex-col gap-gutter-grid shrink-0">
-<div class="bg-surface-container-lowest rounded-xl border border-outline-variant p-padding-card shadow-sm">
-<h3 class="font-headline-lg text-headline-lg text-primary mb-4 flex items-center gap-2">
-<span class="material-symbols-outlined text-sm">download</span>Quick Downloads
+<aside class="w-full lg:w-80 flex flex-col gap-gutter-grid shrink-0 lg:min-h-0">
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant p-padding-card shadow-sm shrink-0">
+<h3 class="text-base font-semibold text-primary mb-3 flex items-center gap-2">
+<span class="material-symbols-outlined text-[20px]">download</span>Quick Downloads
       </h3>
-<div class="flex flex-col gap-2">
+<div class="flex flex-col gap-0.5">
 __DOWNLOADS__
-<div class="mt-2 pt-3 border-t border-outline-variant/50">
-__ZIP_BUTTON__
 </div>
+<div class="mt-3 pt-3 border-t border-outline-variant/50">
+__ZIP_BUTTON__
 </div>
 </div>
 __STATS__
 </aside>
-</div></div>
+</div>
+</div>
 <!-- Footer -->
-<footer class="mt-auto bg-surface-container border-t border-outline-variant w-full mt-12">
-<div class="flex flex-col md:flex-row justify-between items-center px-margin-page py-gutter-grid w-full max-w-7xl mx-auto">
-<div class="text-on-surface-variant font-body-sm text-body-sm text-center md:text-left mb-4 md:mb-0">
+<footer class="shrink-0 bg-surface-container border-t border-outline-variant w-full">
+<div class="flex flex-col md:flex-row justify-between items-center gap-1 px-margin-page py-3 w-full max-w-7xl mx-auto">
+<div class="text-on-surface-variant font-body-sm text-body-sm text-center md:text-left">
                         © __YEAR__ Alkek Center for Metagenomics and Microbiome Research. Baylor College of Medicine.
                     </div>
-<div class="flex flex-wrap justify-center gap-6">
-</div>
 <div class="text-on-surface-variant font-body-sm text-body-sm">__FOOTER_NOTE__</div></div>
 </footer>
 </main>
@@ -250,6 +237,28 @@ __STATS__
 <div class="tip" hidden id="tip"></div>
 
 <script>
+// "Download everything" is packaged behind a modal on the page this one is
+// framed by, so the reader stays where they are while it builds. Asking for it
+// is all that happens here; anything that cannot ask - an unpacked copy opened
+// off a disk, a middle-click, a reader without scripting - follows the link.
+(function () {
+  var all = document.getElementById("download-all");
+
+  if (!all || window.parent === window) return;
+  if (window.location.protocol !== "https:" && window.location.protocol !== "http:") return;
+
+  all.addEventListener("click", function (event) {
+    try {
+      window.parent.postMessage({ nxf: "download", href: all.getAttribute("href") },
+                                window.location.origin);
+    } catch (error) {
+      return;
+    }
+
+    event.preventDefault();
+  });
+})();
+
 (function () {
   var DATA = __PLOT_DATA__;
 
@@ -274,21 +283,21 @@ __STATS__
 
   if (!count) return;
 
-  // Both of these are laid out by a display utility, which outranks the hidden
-  // attribute - so what is shown and hidden here is the property behind it
+  // The empty state and the controls are laid out by a display utility, which
+  // outranks the hidden attribute - so what is shown and hidden here is the
+  // property behind it
   function display(element, on) {
     element.style.display = on ? "" : "none";
   }
 
   display(document.getElementById("plot-empty"), false);
-  document.getElementById("plot-scroll").hidden = false;
+  display(document.getElementById("plot-scroll"), true);
   display(document.getElementById("plot-controls"), true);
 
   // Room above every plot for the label on its topmost gridline
   var TOP = 9;
 
   var tip = document.getElementById("tip");
-  var charts = [];
   var order = samples.map(function (_, i) { return i; });
 
   // Read off the stylesheet rather than repeated here, so one palette serves
@@ -319,15 +328,45 @@ __STATS__
     return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   }
 
+  function escape(text) {
+    return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                       .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  // The name of what a chart's height is measuring, up the side of it
+  function axisTitle(ctx, text, top, height) {
+    ctx.save();
+    ctx.translate(11, top + height / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.fillStyle = ink("--muted");
+    ctx.font = TITLE_FONT;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
+
+  // What the columns are, for a run with too many samples to name them
+  function axisFoot(ctx, text, left, width, y) {
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.fillStyle = ink("--muted");
+    ctx.font = TITLE_FONT;
+    ctx.fillText(text, left + (width - left) / 2, y);
+    ctx.restore();
+  }
+
   // A canvas sized to the box it was laid out in, at the pixel density of the
-  // screen it is being read on
+  // screen it is being read on. The box is what the page gave the chart, so a
+  // shorter window draws a shorter chart rather than a scrollbar.
   function surface(canvas, height) {
     var ratio = window.devicePixelRatio || 1;
     var width = canvas.parentNode.clientWidth;
 
     canvas.style.height = height + "px";
     canvas.width = Math.max(1, Math.round(width * ratio));
-    canvas.height = Math.round(height * ratio);
+    canvas.height = Math.max(1, Math.round(height * ratio));
 
     var ctx = canvas.getContext("2d");
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
@@ -364,12 +403,52 @@ __STATS__
   }
 
   var LABEL_FONT = "11px Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+  var TITLE_FONT = "600 11px Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+
+  // The names under the axis are worth the room they take only while there are
+  // few enough of them to read
+  function named() {
+    return count <= 60;
+  }
+
+  // What that costs: the names are drawn at 45 degrees, so the deepest of them
+  // reaches its own width times sin 45 below the axis. Measured rather than
+  // assumed - a run naming its samples after the plate they came off needs more
+  // room than one numbering them - and capped, since a chart squeezed to
+  // nothing is worse than a name cut short.
+  function band(ctx, total) {
+    if (!named()) return 10;
+
+    var longest = 0;
+
+    ctx.font = LABEL_FONT;
+
+    for (var i = 0; i < count; i++) {
+      longest = Math.max(longest, ctx.measureText(samples[i]).width);
+    }
+
+    return Math.min(Math.round(total * 0.4), Math.ceil(longest * 0.7071) + 20);
+  }
+
+  // One name, shortened to what the band it is drawn in can hold
+  function fitted(ctx, text, room) {
+    if (ctx.measureText(text).width <= room) return text;
+
+    var cut = text;
+
+    while (cut.length > 1 && ctx.measureText(cut + "\u2026").width > room) {
+      cut = cut.slice(0, -1);
+    }
+
+    return cut + "\u2026";
+  }
 
   // -- Taxonomic composition ------------------------------------------------
 
   var rankSelect = document.getElementById("rank");
   var orderSelect = document.getElementById("order");
   var legend = document.getElementById("legend");
+  var barsBox = document.getElementById("bars-box");
   var barsCanvas = document.getElementById("bars");
   var note = document.getElementById("axis-note");
   var level = null;
@@ -377,12 +456,13 @@ __STATS__
   function drawComposition() {
     if (!level) return;
 
-    var names = count <= 60;
-    var plotHeight = 300;
-    var band = names ? 96 : 10;
-    var view = surface(barsCanvas, TOP + plotHeight + band + 6);
+    var names = named();
+    var total = Math.max(160, barsBox.clientHeight);
+    var view = surface(barsCanvas, total);
     var ctx = view.ctx;
-    var geometry = columns(view.width, 46, 8);
+    var foot = band(ctx, total);
+    var plotHeight = Math.max(90, total - TOP - foot);
+    var geometry = columns(view.width, 58, 8);
     var colors = palette(level.taxa);
     var rows = level.values;
     var floor = TOP + plotHeight;
@@ -435,27 +515,42 @@ __STATS__
       if (clipped) ctx.restore();
     }
 
-    note.textContent = (names ? "" : thousands(count) + " samples, left to right, ")
-      + (names ? "Ordered by " : "ordered by ")
-      + orderSelect.options[orderSelect.selectedIndex].textContent.toLowerCase()
-      + ". Hover a column for the sample it belongs to.";
+    axisTitle(ctx, "Share of reads", TOP, plotHeight);
 
-    if (names) {
-      ctx.fillStyle = ink("--muted");
-      ctx.textAlign = "right";
-      ctx.textBaseline = "middle";
+    if (names) drawNames(ctx, geometry, floor, foot);
+    else       axisFoot(ctx, "Samples", geometry.left, view.width - 8, floor + 8);
 
-      for (var k = 0; k < count; k++) {
-        ctx.save();
-        ctx.translate(geometry.left + k * geometry.step + geometry.inset
-                      + geometry.bar / 2, floor + 12);
-        ctx.rotate(-Math.PI / 4);
-        ctx.fillText(samples[order[k]], 0, 0);
-        ctx.restore();
-      }
-    }
+    note.textContent = ordering()
+      + " Hover a column for the sample it belongs to, or a taxon above for what"
+      + " it is and how much of the run it accounts for.";
 
     return { geometry: geometry, height: plotHeight };
+  }
+
+  // The sample names, on their side under the columns they belong to
+  function drawNames(ctx, geometry, floor, foot) {
+    var room = (foot - 20) / 0.7071;
+
+    ctx.fillStyle = ink("--muted");
+    ctx.font = LABEL_FONT;
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+
+    for (var k = 0; k < count; k++) {
+      ctx.save();
+      ctx.translate(geometry.left + k * geometry.step + geometry.inset
+                    + geometry.bar / 2, floor + 12);
+      ctx.rotate(-Math.PI / 4);
+      ctx.fillText(fitted(ctx, samples[order[k]], room), 0, 0);
+      ctx.restore();
+    }
+  }
+
+  function ordering() {
+    var by = orderSelect.options[orderSelect.selectedIndex].textContent.toLowerCase();
+
+    return named() ? "Ordered by " + by + "."
+                   : thousands(count) + " samples, left to right, ordered by " + by + ".";
   }
 
   function drawLegend() {
@@ -465,42 +560,39 @@ __STATS__
     for (var t = 0; t < level.taxa.length; t++) {
       var taxon = level.taxa[t];
       var tail = t === level.taxa.length - 1;
+      var about = taxon.label + " — " + percent(taxon.mean) + " of an average sample"
+        + (tail ? "" : ", found in " + taxon.prevalence + "% of them")
+        + (taxon.lineage ? "\n" + taxon.lineage : "");
 
-      html += '<tr><td class="taxon"><span class="swatch" style="background:'
-        + colors[t] + '"></span><span>' + escape(taxon.label)
-        + (taxon.lineage ? '<span class="rank-path">' + escape(taxon.lineage) + "</span>" : "")
-        + "</span></td>"
-        + '<td class="num">' + percent(taxon.mean) + "</td>"
-        + '<td class="num">'
-        + (tail ? "&mdash;" : taxon.prevalence + "%") + "</td></tr>";
+      html += '<span class="flex items-start gap-2 min-w-0 text-[11px] leading-4'
+        + ' text-on-surface" title="' + escape(about) + '">'
+        + '<span class="swatch mt-0.5" style="background:' + colors[t] + '"></span>'
+        + '<span class="min-w-0 break-words">' + escape(taxon.label) + "</span></span>";
     }
 
     legend.innerHTML = html;
   }
 
-  function escape(text) {
-    return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  }
-
   // -- Alpha diversity ------------------------------------------------------
 
-  // The four the panels plot. Chao1 and Simpson are in the table and the file:
-  // one estimator and one index of the same two things is enough on screen.
-  var PANELS = [
-    { key: "reads", title: "Read depth", note: "reads assigned to ASVs", integer: true },
-    { key: "observed", title: "Observed ASVs", note: "distinct ASVs seen", integer: true },
+  // One index is plotted at a time, and this is the order they are offered in:
+  // Shannon first, because it is the one a reader asks for. Chao1 is not among
+  // them - it estimates richness from the ASVs seen once and twice, and DADA2
+  // has already dropped most of the singletons.
+  var METRICS = [
     { key: "shannon", title: "Shannon index", note: "richness and evenness together", places: 2 },
+    { key: "observed", title: "Observed ASVs", note: "distinct ASVs seen in the sample", integer: true },
+    { key: "reads", title: "Read depth", note: "reads assigned to ASVs", integer: true },
+    { key: "simpson", title: "Simpson index", note: "the chance two reads are different ASVs", places: 3 },
     { key: "evenness", title: "Pielou's evenness", note: "0 = one ASV dominates, 1 = all equal", places: 3 }
   ];
 
-  var SUMMARY = [
-    { key: "reads", title: "Read depth", integer: true },
-    { key: "observed", title: "Observed ASVs", integer: true },
-    { key: "chao1", title: "Chao1 richness", places: 1 },
-    { key: "shannon", title: "Shannon index", places: 2 },
-    { key: "simpson", title: "Simpson index", places: 3 },
-    { key: "evenness", title: "Pielou's evenness", places: 3 }
-  ];
+  var metricSelect = document.getElementById("metric");
+  var metricBox = document.getElementById("metric-box-plot");
+  var metricCanvas = document.getElementById("metric-chart");
+  var metricAbout = document.getElementById("metric-about");
+  var metricNote = document.getElementById("metric-note");
+  var metric = null;
 
   function values(key) {
     return key === "reads" ? reads : alpha[key];
@@ -511,12 +603,17 @@ __STATS__
     return spec.integer ? thousands(value) : value.toFixed(spec.places);
   }
 
-  function drawPanel(canvas, spec) {
-    var series = values(spec.key) || [];
-    var height = 128;
-    var view = surface(canvas, TOP + height);
+  function drawMetric() {
+    if (!metric) return;
+
+    var series = values(metric.key) || [];
+    var names = named();
+    var total = Math.max(140, metricBox.clientHeight);
+    var view = surface(metricCanvas, total);
     var ctx = view.ctx;
-    var geometry = columns(view.width, 46, 8);
+    var foot = band(ctx, total);
+    var height = Math.max(80, total - TOP - foot);
+    var geometry = columns(view.width, 66, 8);
     var floor = TOP + height;
     var top = 0;
 
@@ -530,7 +627,7 @@ __STATS__
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
 
-    [0, 0.5, 1].forEach(function (fraction) {
+    [0, 0.25, 0.5, 0.75, 1].forEach(function (fraction) {
       var y = Math.round(floor - fraction * height) + 0.5;
 
       ctx.beginPath();
@@ -538,7 +635,7 @@ __STATS__
       ctx.lineTo(view.width - 8, y);
       ctx.stroke();
 
-      if (fraction > 0) ctx.fillText(format(spec, top * fraction), geometry.left - 8, y);
+      if (fraction > 0) ctx.fillText(format(metric, top * fraction), geometry.left - 8, y);
     });
 
     ctx.fillStyle = ink("--series-1");
@@ -559,13 +656,23 @@ __STATS__
       }
     }
 
+    axisTitle(ctx, metric.title, TOP, height);
+
+    if (names) drawNames(ctx, geometry, floor, foot);
+    else       axisFoot(ctx, "Samples", geometry.left, view.width - 8, floor + 8);
+
+    metricAbout.textContent = metric.title + " for each sample on its own: "
+      + metric.note + ".";
+    metricNote.textContent = ordering()
+      + " Hover a column for the sample it belongs to.";
+
     return { geometry: geometry, height: height };
   }
 
   function drawSummary() {
     var html = "";
 
-    SUMMARY.forEach(function (spec) {
+    METRICS.forEach(function (spec) {
       var series = (values(spec.key) || []).slice().sort(function (a, b) { return a - b; });
 
       if (!series.length) return;
@@ -607,8 +714,6 @@ __STATS__
   function attach(canvas, describe) {
     var chart = { canvas: canvas, state: null, describe: describe };
 
-    charts.push(chart);
-
     canvas.addEventListener("mousemove", function (event) {
       if (!chart.state) return;
 
@@ -616,7 +721,7 @@ __STATS__
 
       if (slot < 0) { tip.hidden = true; return; }
 
-      showTip(event, chart.describe(order[slot], event, chart));
+      showTip(event, chart.describe(order[slot]));
     });
 
     canvas.addEventListener("mouseleave", function () { tip.hidden = true; });
@@ -652,14 +757,17 @@ __STATS__
   }
 
   var compositionChart = null;
-  var panelCharts = [];
+  var metricChart = null;
+  var open = levels.length ? "composition" : "diversity";
 
   function redraw() {
-    if (compositionChart) compositionChart.state = drawComposition();
+    if (open === "composition" && compositionChart) {
+      compositionChart.state = drawComposition();
+    }
 
-    panelCharts.forEach(function (chart) {
-      chart.state = drawPanel(chart.canvas, chart.spec);
-    });
+    if (open === "diversity" && metricChart) {
+      metricChart.state = drawMetric();
+    }
   }
 
   if (levels.length) {
@@ -709,53 +817,52 @@ __STATS__
       redraw();
     });
 
-    orderSelect.addEventListener("change", function () { reorder(); redraw(); });
-
     drawLegend();
   }
 
   if (alpha.shannon) {
-    var panels = document.getElementById("panels");
-
-    PANELS.forEach(function (spec) {
+    METRICS.forEach(function (spec, index) {
       if (!values(spec.key)) return;
 
-      var figure = document.createElement("figure");
-      figure.innerHTML = "<figcaption>" + spec.title + "<span>" + spec.note
-        + "</span></figcaption>";
+      var option = document.createElement("option");
+      option.value = String(index);
+      option.textContent = spec.title;
+      metricSelect.appendChild(option);
 
-      var canvas = document.createElement("canvas");
-      figure.appendChild(canvas);
-      panels.appendChild(figure);
+      if (!metric) { metric = spec; metricSelect.value = String(index); }
+    });
 
-      var chart = attach(canvas, function (sample) {
-        return '<div class="name">' + escape(samples[sample]) + "</div>"
-          + '<div class="row">' + spec.title + " <b>"
-          + format(spec, (values(spec.key) || [])[sample]) + "</b></div>";
-      });
+    metricChart = attach(metricCanvas, function (sample) {
+      return '<div class="name">' + escape(samples[sample]) + "</div>"
+        + '<div class="row">' + metric.title + " <b>"
+        + format(metric, (values(metric.key) || [])[sample]) + "</b></div>";
+    });
 
-      chart.spec = spec;
-      panelCharts.push(chart);
+    metricSelect.addEventListener("change", function () {
+      metric = METRICS[metricSelect.value];
+      redraw();
     });
 
     drawSummary();
   }
 
-  // Which half of the panel is open. A canvas in a hidden section is laid out
-  // at no width, so whatever is shown is drawn after it is shown - and the
-  // controls belong to the composition chart, so they go with it.
-  function open(which) {
+  orderSelect.addEventListener("change", function () { reorder(); redraw(); });
+
+  // Which half of the panel is showing. A canvas in a hidden section is laid
+  // out at no width, so whatever is shown is drawn after it is shown - and each
+  // half brings its own select with it.
+  function show(which) {
+    open = which;
+
     buttons.forEach(function (button) {
       var on = button.getAttribute("data-plot") === which;
 
       button.className = on ? ON : OFF;
-
-      if (sections[button.getAttribute("data-plot")]) {
-        sections[button.getAttribute("data-plot")].hidden = !on;
-      }
+      display(sections[button.getAttribute("data-plot")], on);
     });
 
-    display(rankSelect.parentNode, which === "composition");
+    display(document.getElementById("rank-box"), which === "composition");
+    display(document.getElementById("metric-box"), which === "diversity");
     tip.hidden = true;
     redraw();
   }
@@ -769,11 +876,27 @@ __STATS__
       return;
     }
 
-    button.addEventListener("click", function () { open(which); });
+    button.addEventListener("click", function () { show(which); });
   });
 
   reorder();
-  open(levels.length ? "composition" : "diversity");
+  show(open);
+
+  // A chart is drawn to the box it is in, so it has to be drawn again whenever
+  // that box changes size - the window resizing, the legend reflowing as the
+  // webfont arrives, or a tab bringing its own section into the layout. Without
+  // this the canvas keeps the height it was first drawn at and the sample names
+  // along the bottom are clipped by a box that has since shrunk.
+  if (window.ResizeObserver) {
+    var watcher = new ResizeObserver(function () { redraw(); });
+
+    watcher.observe(barsBox);
+    watcher.observe(metricBox);
+  }
+
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(function () { redraw(); });
+  }
 
   window.addEventListener("resize", redraw);
 })();

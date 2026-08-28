@@ -19,12 +19,12 @@
 #   qiime2/abundance_tables/feature-table.tsv          ASV counts, for diversity
 #
 # and left in ./composition_data.json, which publish_dashboard.sh writes into the
-# Overview page for its two plots to draw. Only the eight most abundant taxa of
-# each rank are kept, the rest summed into "Other": past eight fills no reader
-# can tell one colour from the next, and the full tables are published for anyone
-# who needs every row.
+# Overview page for its two plots to draw. Only the ten most abundant taxa of
+# each rank are kept, the rest summed into "Other": past ten fills no reader can
+# tell one colour from the next, and the full tables are published for anyone who
+# needs every row.
 #
-# Diversity is reported per sample as observed ASVs, Chao1, Shannon, Simpson and
+# Diversity is reported per sample as observed ASVs, Shannon, Simpson and
 # Pielou's evenness, computed on the unrarefied counts. Nothing is rarefied
 # because nothing is being compared between groups - these runs have no metadata
 # to group by - and the read depth each index was computed at is published in the
@@ -78,9 +78,9 @@ readonly OVERALL_SUMMARY="$RESULTS_DIR/overall_summary.tsv"
 readonly STATS_FILE="run_statistics.tsv"
 
 # How many taxa of each rank are drawn in their own colour before the tail is
-# summed into "Other". Eight is what the palette carries; a ninth fill would be
-# a colour a reader cannot separate from one already on screen.
-readonly TOP_TAXA=8
+# summed into "Other". Ten is what the palette carries, and a rank's list is
+# usually seven or eight named taxa plus the unclassified and unassigned shares.
+readonly TOP_TAXA=10
 
 # The rank each rel-table-<n>.tsv is agglomerated to, indexed by that number
 RANK_NAMES=(Domain Phylum Class Order Family Genus Species)
@@ -102,10 +102,13 @@ readonly SAMPLE_ORDER="$WORK/samples.txt"
 # part of it: an index computed on 50 reads is not the same measurement as one
 # computed on 50,000, and a reader can only see that if the depth is there.
 #
-# Two passes over the counts. The first totals each sample and counts the ASVs
-# seen once and twice, which Chao1 estimates the unseen ones from; the second
-# turns counts into proportions for Shannon and Simpson, which needs the totals
-# the first pass produced.
+# No Chao1. It estimates the unseen species from the ones seen exactly once and
+# twice, and DADA2 has already dropped most of the singletons - so on an ASV
+# table it is not a richness a reader should act on.
+#
+# Two passes over the counts. The first totals each sample, which the second
+# needs to turn counts into the proportions Shannon and Simpson are computed
+# from.
 write_alpha_table() {
     LC_ALL=C awk -F'\t' '
         # The header naming the samples, seen once per pass
@@ -126,9 +129,6 @@ write_alpha_table() {
 
                 total[i] += count
                 observed[i]++
-
-                if (count == 1) singletons[i]++
-                if (count == 2) doubletons[i]++
             }
             next
         }
@@ -146,17 +146,11 @@ write_alpha_table() {
         }
 
         END {
-            print "sample\treads\tobserved_asvs\tchao1\tshannon\tsimpson\tevenness"
+            print "sample\treads\tobserved_asvs\tshannon\tsimpson\tevenness"
 
             for (i = 2; i <= columns; i++) {
                 reads = total[i] + 0
                 species = observed[i] + 0
-                f1 = singletons[i] + 0
-                f2 = doubletons[i] + 0
-
-                # Chao 1984, in the bias-corrected form that stays defined when
-                # nothing was seen exactly twice
-                chao = species + (f1 * (f1 - 1)) / (2 * (f2 + 1))
 
                 # Pielou divides by the diversity of a sample in which every ASV
                 # is equally common, which is undefined for a sample holding one
@@ -166,8 +160,8 @@ write_alpha_table() {
                 # than a perfectly even one
                 simpson = reads > 0 ? 1 - concentration[i] : 0
 
-                printf "%s\t%d\t%d\t%.2f\t%.4f\t%.4f\t%.4f\n", \
-                    sample[i], reads, species, chao, shannon[i] + 0, simpson, evenness
+                printf "%s\t%d\t%d\t%.4f\t%.4f\t%.4f\n", \
+                    sample[i], reads, species, shannon[i] + 0, simpson, evenness
             }
         }
     ' "$FEATURE_TABLE" "$FEATURE_TABLE"
@@ -204,9 +198,9 @@ alpha_json() {
 
             for (i = 1; i <= n; i++) out = out (i > 1 ? "," : "") json_string(name[i])
 
-            printf "%s],%s,\"alpha\":{%s,%s,%s,%s,%s}", out, series("reads", 2), \
-                series("observed", 3), series("chao1", 4), series("shannon", 5), \
-                series("simpson", 6), series("evenness", 7)
+            printf "%s],%s,\"alpha\":{%s,%s,%s,%s}", out, series("reads", 2), \
+                series("observed", 3), series("shannon", 4), series("simpson", 5), \
+                series("evenness", 6)
         }
     ' "$ALPHA_TABLE"
 }
@@ -390,9 +384,11 @@ total_input_reads() {
     ' "$OVERALL_SUMMARY"
 }
 
-# What share of the reads a rank's table places at that rank, as a whole
-# percentage. A sequence the classifier could not take that deep carries an
-# empty field, or a bare rank prefix, where the name would be.
+# What share of the reads a rank's table places at that rank, as a percentage to
+# one decimal - two neighbouring ranks are often within a point of each other,
+# and rounding them to the same whole number reads as a mistake. A sequence the
+# classifier could not take that deep carries an empty field, or a bare rank
+# prefix, where the name would be.
 rank_classified_pct() {
     local file="$1" rank="$2"
 
@@ -414,12 +410,15 @@ rank_classified_pct() {
             }
         }
 
-        END { print (total > 0 ? int(placed / total * 100 + 0.5) : 0) }
+        END { printf "%.1f\n", (total > 0 ? placed / total * 100 : 0) }
     ' "$file"
 }
 
 # Read depth across the samples, off the diversity table just written - so what
-# is reported as kept is what the analysis actually counted
+# is reported as kept is what the analysis actually counted.
+#
+# The middle sample rather than the mean: one deeply sequenced sample drags an
+# average away from what the run's samples actually look like.
 read_depth_stats() {
     LC_ALL=C awk -F'\t' '
         FNR == 1 { next }
@@ -427,14 +426,18 @@ read_depth_stats() {
         {
             reads = $2 + 0
             sum += reads
-
-            if (n++ == 0 || reads < min) min = reads
-            if (reads > max) max = reads
+            depth[++n] = reads
         }
 
         END {
-            printf "reads_retained\t%d\nreads_avg\t%d\nreads_min\t%d\nreads_max\t%d\n", \
-                sum + 0, (n ? sum / n : 0) + 0.5, min + 0, max + 0
+            if (n) {
+                asort(depth)
+                median = n % 2 ? depth[(n + 1) / 2] \
+                               : (depth[n / 2] + depth[n / 2 + 1]) / 2
+            }
+
+            printf "reads_retained\t%d\nreads_median\t%d\nreads_min\t%d\nreads_max\t%d\n", \
+                sum + 0, median + 0.5, depth[1] + 0, depth[n] + 0
         }
     ' "$ALPHA_TABLE"
 }
@@ -442,6 +445,7 @@ read_depth_stats() {
 # The run's headline numbers, as key and value, for the dashboard's sidebar.
 # Each is left out rather than guessed at when the table behind it is missing.
 write_run_statistics() {
+    local family_table="$REL_TABLE_DIR/rel-table-5.tsv"
     local genus_table="$REL_TABLE_DIR/rel-table-6.tsv"
     local species_table="$REL_TABLE_DIR/rel-table-7.tsv"
 
@@ -453,6 +457,10 @@ write_run_statistics() {
 
         if [[ -r "$OVERALL_SUMMARY" ]]; then
             printf 'reads_total\t%s\n' "$(total_input_reads)"
+        fi
+
+        if [[ -r "$family_table" ]]; then
+            printf 'family_pct\t%s\n' "$(rank_classified_pct "$family_table" 5)"
         fi
 
         if [[ -r "$genus_table" ]]; then

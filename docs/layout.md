@@ -60,8 +60,7 @@ templates/            Web pages published to S3 alongside a run's results.
   listing.html        Folder listing page template.
   ampliseq/
     outputs.conf      What the file index lists for an ampliseq run.
-    report.css        The stylesheet ampliseq's own summary report is given.
-    abstract.md       The section that report opens with.
+    abstract.md       The section ampliseq's own summary report opens with.
   taxprofiler/
     outputs.conf      What the file index lists for a taxprofiler run.
   redesign/

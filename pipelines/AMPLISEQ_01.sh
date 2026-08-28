@@ -34,11 +34,10 @@ params_set exclude_taxa          "mitochondria,chloroplast,Francisella"
 # because Savont rejects the third value, "pseudo"
 params_set sample_inference      "pooled"
 
-# The summary report is read inside the run's dashboard, so it is dressed to
-# match it: the dashboard's palette in place of nf-core's, and an opening
-# section naming who produced the analysis and where the rest of it is.
+# The report keeps its own styling; what is replaced is what it says - a title,
+# and an opening section naming who produced the analysis and where the rest of
+# it is.
 params_set report_title          "Amplicon sequencing analysis"
-params_set report_css            "$NEXTFLOW_DIR/templates/ampliseq/report.css"
 params_set report_abstract       "$NEXTFLOW_DIR/templates/ampliseq/abstract.md"
 
 # The form's optional questions are titled after the parameters they set, and a

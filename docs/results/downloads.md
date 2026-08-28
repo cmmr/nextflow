@@ -20,10 +20,26 @@ styled](index.md#how-the-pages-are-styled). Everything is there and every link
 works; with no network at all it is the styling that is missing, not the
 results.
 
-The **Download Everything** button points here, under the quick downloads in the
+The **Download everything** button points here, under the quick downloads in the
 Overview's sidebar. It is the one absolute link on the page, since the zip is
 served by a behavior of the distribution rather than sitting beside the page —
 which is also why it is the one link that does not resolve in an unpacked copy.
+
+**The dashboard does not follow that link; it watches it.** The button's click is
+caught by the landing page, which asks the address once — which is what starts a
+build — and then polls `?status` behind a modal, drawing the builder's own
+progress. When the zip is ready the page navigates to the presigned URL, S3
+sends it as an attachment, and the reader never leaves the page they were
+reading. Closing the modal stops the watching and nothing else: the build was
+already claimed and runs to the end, so the next click finds the zip cached and
+starts the download at once.
+
+The frame the Overview is read in cannot cover the navigation bar, so the button
+posts the address up to the landing page and the modal opens there, over the
+whole window. Everything that cannot ask — a middle-click, a shared link, a
+reader without scripting, an unpacked copy with no `/download` behind it —
+follows the href and gets [the waiting page](#the-three-answers) instead, which
+is the same watch by another means.
 
 ## Why it is not just a Lambda that returns a zip
 

@@ -137,7 +137,6 @@ dashboard_reset "$RESULTS_DIR" "$OUTPUT_CATALOG"
 
 dashboard_view quality "Quality Control" "multiqc/multiqc_report.html"
 dashboard_index_view   "File Explorer"
-dashboard_view setup   "Run Setup"       "taxprofiler_args.yaml"
 
 #    The reads are the bulky download most people came for; then the interactive
 #    classification charts, one per tool and database, and taxpasta's merged
@@ -146,9 +145,9 @@ dashboard_button "$FASTQ_ZIP_NAME"
 dashboard_button "krona/*.html"
 dashboard_button "taxpasta/*.tsv"
 
-#    How the run was set up, as the page states it above the report: what was
-#    depleted before classification, and what was classified against. The
-#    databases are named by the sheet the run was given, one row per tool.
+#    How the run was set up, as the sidebar states it: what was depleted before
+#    classification, and what was classified against. The databases are named by
+#    the sheet the run was given, one row per tool.
 PIPELINE=""
 
 if [[ -r "$RUN_MANIFEST" ]]; then
@@ -167,8 +166,9 @@ if [[ -r "$DB_SHEET" ]]; then
     }' "$DB_SHEET")
 fi
 
-dashboard_spec filter_alt "Host removal" "$HOST_REMOVAL"
-dashboard_spec database   "Databases"    "$DATABASES"
+dashboard_stat_group "RUN CONFIGURATION"
+dashboard_stat_row   "Host removal" "$HOST_REMOVAL"
+dashboard_stat_row   "Databases"    "$DATABASES"
 
 #    The title is read from Wrike rather than taken from the copy recorded at
 #    submission, since the requester may have renamed the task since. That copy

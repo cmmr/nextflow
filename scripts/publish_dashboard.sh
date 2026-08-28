@@ -20,12 +20,14 @@
 #   dashboard_reset      <results_dir> <catalog>
 #   dashboard_view       <id> <label> <path>      once per report the bar offers
 #   dashboard_index_view [label]                  where the file index sits in it
-#   dashboard_spec       <icon> <label> <value>   once per setting worth naming
 #   dashboard_button     <glob>                   once per file the sidebar offers
-#   dashboard_stat_group <heading>                opens a block of the statistics
-#   dashboard_stat_tiles <value|label|tone> ...   a row of counts under it
+#   dashboard_stat_group <heading> [note]         opens a block of the statistics
+#   dashboard_stat_row   <label> <value>          a reading with no bar under it
+#   dashboard_stat_tiles <value|label|tone> ...   a row of counts
 #   dashboard_stat_chips <value|label> ...        the same row, set small
 #   dashboard_stat_bar   <label> <reading> <percent> [tone]
+#                        tone: growth for a share of the reads that were kept;
+#                        a total is left toneless and wears the navy
 #   publish_dashboard <s3_dir> <run_id> <task_name> <subtitle> <pipeline> \
 #                     <run_date> <sample_count> <expires> [plot_data]
 #
@@ -43,10 +45,11 @@
 # Icons are Material Symbols names, from the font the design system loads:
 # biotech, database, filter_alt, science, folder_zip, data_object and so on.
 #
-# Defines: dashboard_reset, dashboard_view, dashboard_index_view, dashboard_spec,
-#          dashboard_button, dashboard_stat_group, dashboard_stat_tiles,
-#          dashboard_stat_chips, dashboard_stat_bar, publish_dashboard,
-#          upload_results_tree, TEXT_EXTENSIONS, DOWNLOAD_EXTENSIONS
+# Defines: dashboard_reset, dashboard_view, dashboard_index_view,
+#          dashboard_button, dashboard_stat_group, dashboard_stat_row,
+#          dashboard_stat_tiles, dashboard_stat_chips, dashboard_stat_bar,
+#          publish_dashboard, upload_results_tree, TEXT_EXTENSIONS,
+#          DOWNLOAD_EXTENSIONS
 # Requires: aws, GNU find; the escape_html/escape_url/human_size/render_template
 #           helpers from utilities.sh
 # Env:      NEXTFLOW_DIR
@@ -63,13 +66,12 @@ DOWNLOAD_EXTENSIONS=(zip gz bz2 xz tar tgz qza qzv biom rds rda parquet)
 # The two states of a link in the navigation bar, as the design writes them. The
 # page's own script swaps between these, so both are spelled the same in both
 # places.
-readonly DASHBOARD_NAV_ON="text-on-primary border-b-2 border-secondary-fixed font-bold pb-1 hover:bg-primary-container transition-colors px-2 py-1 rounded"
-readonly DASHBOARD_NAV_OFF="text-primary-fixed-dim opacity-80 hover:bg-primary-container transition-colors px-2 py-1 rounded"
+readonly DASHBOARD_NAV_ON="text-on-primary border-b-2 border-secondary-fixed font-bold pb-1 px-2 py-1 rounded text-[13px] tracking-[0.02em] hover:bg-primary-container transition-colors"
+readonly DASHBOARD_NAV_OFF="text-primary-fixed/80 hover:text-on-primary hover:bg-primary-container transition-colors px-2 py-1 rounded text-[13px] tracking-[0.02em] font-medium"
 
 DASHBOARD_RESULTS_DIR=""
 DASHBOARD_CATALOG=""
 DASHBOARD_VIEWS=()
-DASHBOARD_SPECS=()
 DASHBOARD_DOWNLOADS=""
 DASHBOARD_STATS=""
 DASHBOARD_STAT_GROUP_OPEN=""
@@ -78,7 +80,6 @@ dashboard_reset() {
     DASHBOARD_RESULTS_DIR="${1%/}"
     DASHBOARD_CATALOG="$2"
     DASHBOARD_VIEWS=()
-    DASHBOARD_SPECS=()
     DASHBOARD_DOWNLOADS=""
     DASHBOARD_STATS=""
     DASHBOARD_STAT_GROUP_OPEN=""
@@ -137,28 +138,19 @@ dashboard_index_view() {
     DASHBOARD_VIEWS+=("files|${1:-File Explorer}|files.html")
 }
 
-# One setting the run was given, in the row above the plots. A value that was
-# never recorded leaves the whole item out rather than naming an empty one.
-dashboard_spec() {
-    local icon="$1" label="$2" value="$3"
-    local markup
+# How many samples the run covered, as the pill beside the statistics heading -
+# the count every other number in that card is a count over
+dashboard_sample_pill() {
+    local sample_count="$1"
+    local noun="samples"
 
-    [[ -n "$value" ]] || return 0
+    [[ "$sample_count" =~ ^[0-9]+$ && "$sample_count" -gt 0 ]] || return 0
 
-    # The design alternates the two accents along the row
-    if (( ${#DASHBOARD_SPECS[@]} % 2 == 0 )); then
-        markup='<div class="w-10 h-10 rounded-full bg-secondary-fixed/20 flex items-center justify-center text-secondary">'
-    else
-        markup='<div class="w-10 h-10 rounded-full bg-tertiary-fixed-dim/20 flex items-center justify-center text-tertiary">'
-    fi
+    (( sample_count == 1 )) && noun="sample"
 
-    markup="<div class=\"flex items-center gap-3\">$markup"
-    markup+="<span class=\"material-symbols-outlined\">$(escape_html "$icon")</span></div><div>"
-    markup+="<p class=\"font-label-caps text-label-caps text-on-surface-variant\">$(escape_html "$label")</p>"
-    markup+="<p class=\"font-body-md text-body-md text-on-surface font-semibold\">$(escape_html "$value")</p>"
-    markup+="</div></div>"
-
-    DASHBOARD_SPECS+=("$markup")
+    printf '<span class="inline-flex items-center gap-1.5 shrink-0 rounded-full border border-outline-variant bg-surface-container px-2.5 py-1 font-label-caps text-label-caps text-on-surface-variant">'
+    printf '<span class="material-symbols-outlined text-[14px]">science</span>%s %s</span>' \
+        "$sample_count" "$noun"
 }
 
 # One quick download per file matching a glob, labelled with its own filename
@@ -171,13 +163,13 @@ dashboard_button() {
 
         name=${path#"$DASHBOARD_RESULTS_DIR/"}
 
-        DASHBOARD_DOWNLOADS+="<a class=\"flex items-center justify-between p-2 rounded hover:bg-surface-container transition-colors group\""
+        DASHBOARD_DOWNLOADS+="<a class=\"flex items-center justify-between gap-2 px-2 py-1.5 rounded hover:bg-surface-container transition-colors group\""
         DASHBOARD_DOWNLOADS+=" href=\"$(escape_url "$name")\"$(dashboard_link_attributes "$name")>"
-        DASHBOARD_DOWNLOADS+="<div class=\"flex items-center gap-2\">"
-        DASHBOARD_DOWNLOADS+="<span class=\"material-symbols-outlined text-on-surface-variant group-hover:text-primary transition-colors\">"
+        DASHBOARD_DOWNLOADS+="<span class=\"flex items-center gap-2 min-w-0\">"
+        DASHBOARD_DOWNLOADS+="<span class=\"material-symbols-outlined text-[20px] text-on-surface-variant group-hover:text-primary transition-colors\">"
         DASHBOARD_DOWNLOADS+="$(dashboard_file_icon "$name")</span>"
-        DASHBOARD_DOWNLOADS+="<span class=\"font-code-md text-code-md text-on-surface\">$(escape_html "${name##*/}")</span></div>"
-        DASHBOARD_DOWNLOADS+="<span class=\"material-symbols-outlined text-sm text-on-surface-variant opacity-0 group-hover:opacity-100 transition-opacity\">"
+        DASHBOARD_DOWNLOADS+="<span class=\"text-[13px] leading-5 text-on-surface truncate\">$(escape_html "${name##*/}")</span></span>"
+        DASHBOARD_DOWNLOADS+="<span class=\"material-symbols-outlined text-[18px] shrink-0 text-on-surface-variant opacity-0 group-hover:opacity-100 transition-opacity\">"
         DASHBOARD_DOWNLOADS+="file_download</span></a>"
     done
 }
@@ -185,12 +177,15 @@ dashboard_button() {
 # The button for the whole run as one zip, which every run has. Its address is
 # the only absolute link on the page: the zip is served by a behavior of the
 # distribution rather than sitting beside the page, so it is also the one link
-# that does not resolve in an unpacked copy. It opens in a tab of its own, since
-# what answers it is a redirect or a page saying the zip is still being built.
+# that does not resolve in an unpacked copy.
+#
+# The landing page catches the click and packages the run behind a modal. The
+# href is what everything else follows - a middle-click, a shared link, a reader
+# without scripting - and answers with a redirect or the page that waits.
 dashboard_zip_button() {
-    printf '<a class="w-full bg-primary-container text-on-primary-container px-4 py-2 rounded-lg font-label-caps text-label-caps hover:bg-primary hover:text-on-primary transition-colors flex items-center justify-center gap-2"'
-    printf ' href="/download/%s" target="_blank" rel="noopener">' "$(escape_url "$1")"
-    printf '<span class="material-symbols-outlined text-sm">archive</span>Download Everything</a>'
+    printf '<a class="w-full bg-primary text-on-primary px-3 py-2 rounded-lg text-[13px] font-semibold hover:bg-primary-container transition-colors flex items-center justify-center gap-2"'
+    printf ' id="download-all" href="/download/%s" target="_blank" rel="noopener">' "$(escape_url "$1")"
+    printf '<span class="material-symbols-outlined text-[18px]">archive</span>Download everything</a>'
 }
 
 # Close whichever block of the statistics is open, so the next heading starts
@@ -202,12 +197,40 @@ dashboard_end_stat_group() {
     fi
 }
 
+# One block of the sidebar. The note is the run's own setting for what the
+# block reports - the region and instrument over the read totals, the reference
+# database over the classification - so a number is read beside what produced
+# it.
 dashboard_stat_group() {
+    local heading="$1" note="${2:-}"
+
     dashboard_end_stat_group
 
-    DASHBOARD_STATS+="<div><h4 class=\"font-label-caps text-label-caps text-on-surface-variant mb-3\">"
-    DASHBOARD_STATS+="$(escape_html "$1")</h4>"
+    DASHBOARD_STATS+="<div><h4 class=\"flex items-baseline justify-between gap-2 font-label-caps text-label-caps text-on-surface-variant mb-2.5\">"
+    DASHBOARD_STATS+="<span class=\"shrink-0\">$(escape_html "$heading")</span>"
+
+    if [[ -n "$note" ]]; then
+        DASHBOARD_STATS+="<span class=\"min-w-0 truncate text-right text-[11px] font-normal tracking-normal normal-case text-outline\""
+        DASHBOARD_STATS+=" title=\"$(escape_html "$note")\">$(escape_html "$note")</span>"
+    fi
+
+    DASHBOARD_STATS+="</h4>"
     DASHBOARD_STAT_GROUP_OPEN=1
+}
+
+# One reading with no bar under it, for a value that is not a share of anything
+dashboard_stat_row() {
+    local label="$1" value="$2"
+
+    [[ -n "$value" ]] || return 0
+
+    DASHBOARD_STATS+="<div class=\"flex justify-between items-baseline gap-2 mb-1.5 last:mb-0\">"
+    DASHBOARD_STATS+="<span class=\"font-body-sm text-body-sm font-medium text-on-surface shrink-0\">"
+    DASHBOARD_STATS+="$(escape_html "$label")</span>"
+    DASHBOARD_STATS+="<span class=\"font-body-sm text-body-sm text-on-surface-variant text-right\">"
+    DASHBOARD_STATS+="$(escape_html "$value")</span></div>"
+
+    return 0
 }
 
 # A row of counts, each declared as value|label|tone. The tone names the accent
@@ -240,8 +263,8 @@ dashboard_tiles() {
 # The headline counts, two to a row
 dashboard_stat_tiles() {
     dashboard_tiles \
-        "bg-surface-container p-3 rounded-lg border border-outline-variant/30 flex flex-col items-center justify-center text-center" \
-        2 "font-headline-xl text-headline-xl mb-1" \
+        "bg-surface-container p-2.5 rounded-lg border border-outline-variant/30 flex flex-col items-center justify-center text-center" \
+        2 "font-headline-lg text-headline-lg leading-7" \
         "font-body-sm text-body-sm text-on-surface-variant" "$@"
 }
 
@@ -250,71 +273,50 @@ dashboard_stat_tiles() {
 dashboard_stat_chips() {
     dashboard_tiles \
         "bg-surface-container p-2 rounded-lg border border-outline-variant/30 flex flex-col items-center justify-center text-center" \
-        3 "font-bold text-body-md" \
-        "text-[10px] font-label-caps text-on-surface-variant" "$@"
+        3 "font-bold text-body-md leading-5" \
+        "text-[10px] leading-3 font-label-caps text-on-surface-variant" "$@"
 }
 
 # One measurement as a labelled bar. The reading is written out for a reader -
-# "14.8k" - and the percentage is only how far the bar is filled.
+# "14.8k", "12.7%" - and the percentage is only how far the bar is filled.
 dashboard_stat_bar() {
     local label="$1" reading="$2" percent="$3" tone="${4:-}"
 
     case "$tone" in
         growth)    tone="bg-bio-growth" ;;
-        secondary) tone="bg-secondary" ;;
         *)         tone="bg-primary-container" ;;
     esac
 
-    [[ "$percent" =~ ^[0-9]+$ ]] || percent=0
-    (( percent > 100 )) && percent=100
+    [[ "$percent" =~ ^[0-9]+(\.[0-9]+)?$ ]] || percent=0
 
-    DASHBOARD_STATS+="<div class=\"mb-3\"><div class=\"flex justify-between font-body-sm text-body-sm mb-1\">"
-    DASHBOARD_STATS+="<span class=\"font-medium text-on-surface\">$(escape_html "$label")</span>"
+    # A share can be given to a decimal, so the ceiling is compared as one
+    if awk -v p="$percent" 'BEGIN { exit !(p > 100) }'; then
+        percent=100
+    fi
+
+    DASHBOARD_STATS+="<div class=\"mb-2.5 last:mb-0\"><div class=\"flex justify-between items-baseline gap-2 mb-1\">"
+    DASHBOARD_STATS+="<span class=\"font-body-sm text-body-sm font-medium text-on-surface\">$(escape_html "$label")</span>"
     DASHBOARD_STATS+="<span class=\"font-code-sm text-code-sm text-on-surface-variant\">$(escape_html "$reading")</span></div>"
-    DASHBOARD_STATS+="<div class=\"h-2 w-full bg-surface-variant rounded-full overflow-hidden\">"
+    DASHBOARD_STATS+="<div class=\"h-1.5 w-full bg-surface-variant rounded-full overflow-hidden\">"
     DASHBOARD_STATS+="<div class=\"h-full $tone rounded-full\" style=\"width: $percent%;\"></div></div></div>"
 
     return 0
 }
 
-# The statistics card, or nothing when the run measured nothing worth a sidebar.
-# A run that declared none still gets its sample count, which every pipeline
-# records.
+# The statistics card, or nothing when the run has neither a setting to name nor
+# anything measured to report
 dashboard_stats_card() {
-    local sample_count="$1"
-    local noun="Samples"
-
-    if [[ -z "$DASHBOARD_STATS" ]]; then
-        [[ "$sample_count" =~ ^[0-9]+$ && "$sample_count" -gt 0 ]] || return 0
-
-        (( sample_count == 1 )) && noun="Sample"
-
-        dashboard_stat_group "SEQUENCING"
-        dashboard_stat_tiles "$sample_count|$noun"
-    fi
+    local sample_count="${1:-}"
 
     dashboard_end_stat_group
 
-    printf '<div class="bg-surface-container-lowest rounded-xl border border-outline-variant p-padding-card shadow-sm flex-1">'
-    printf '<h3 class="font-headline-lg text-headline-lg text-primary mb-4 flex items-center gap-2">'
-    printf '<span class="material-symbols-outlined text-sm">analytics</span>Run Statistics</h3>'
-    printf '<div class="flex flex-col gap-8">%s</div></div>' "$DASHBOARD_STATS"
-}
+    [[ -n "$DASHBOARD_STATS" ]] || return 0
 
-# The row of settings above the plots, or nothing when none were declared
-dashboard_specs_card() {
-    local markup="" item
-
-    (( ${#DASHBOARD_SPECS[@]} > 0 )) || return 0
-
-    for item in "${DASHBOARD_SPECS[@]}"; do
-        [[ -n "$markup" ]] && markup+='<div class="w-px h-10 bg-outline-variant hidden sm:block"></div>'
-
-        markup+="$item"
-    done
-
-    printf '<div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-4 flex flex-wrap gap-8 items-center shadow-sm">%s</div>' \
-        "$markup"
+    printf '<div class="bg-surface-container-lowest rounded-xl border border-outline-variant p-padding-card shadow-sm lg:flex-1 lg:min-h-0 lg:overflow-y-auto">'
+    printf '<h3 class="text-base font-semibold text-primary mb-4 flex items-center justify-between gap-2">'
+    printf '<span class="flex items-center gap-2"><span class="material-symbols-outlined text-[20px]">analytics</span>Run Statistics</span>'
+    printf '%s</h3>' "$(dashboard_sample_pill "$sample_count")"
+    printf '<div class="flex flex-col gap-5">%s</div></div>' "$DASHBOARD_STATS"
 }
 
 # The quick downloads, or a line saying the run named none
@@ -404,10 +406,10 @@ dashboard_footer_note() {
     for part in "$pipeline" "$run_id"; do
         [[ -n "$part" ]] || continue
 
-        note+="${note:+ | }$part"
+        note+="${note:+ · }$(escape_html "$part")"
     done
 
-    escape_html "$note"
+    printf '%s' "$note"
 }
 
 dashboard_trim() {
@@ -558,7 +560,6 @@ render_overview() {
     render_template "$NEXTFLOW_DIR/templates/overview.html" \
         TASK_NAME   "$(escape_html "$task_name")" \
         SUBTITLE    "$(escape_html "$subtitle")" \
-        SPECS       "$(dashboard_specs_card)" \
         PLOT_DATA   "$(dashboard_plot_data "$plot_data")" \
         DOWNLOADS   "$(dashboard_downloads)" \
         ZIP_BUTTON  "$(dashboard_zip_button "$run_id")" \

@@ -38,17 +38,11 @@ it.
 | `#report` | `summary_report/summary_report.html` | — |
 | `#quality` | `multiqc/multiqc_report.html` | `multiqc/multiqc_report.html` |
 | `#files` | `files.html` | `files.html` |
-| `#setup` | `ampliseq_args.yaml` | `taxprofiler_args.yaml` |
 
 The open view is remembered in the URL fragment, so `#quality` is a link
 straight to the MultiQC report with the bar still around it. Each link also
 carries `target="view"`, so the bar works with scripting off — the script only
 keeps the fragment and the underline in step with the frame.
-
-`Run Setup` is the params file as the run resolved it, which is why it is a
-plain text file rather than a page: it is the record, and there is nothing to
-add to it. It is served as `text/plain`, like every other table and log — see
-[What a link does when you click it](#what-a-link-does-when-you-click-it).
 
 **The expiration notice**, at the end of the bar. See [The expiration
 notice](#the-expiration-notice) below.
@@ -64,34 +58,47 @@ The task name is re-read from Wrike at upload time rather than taken from the
 renamed the task since filing it. That copy is the fallback, and a generic
 heading the one after that.
 
-**How the run was set up**, as a row of labelled values under the headline: the
-region the reads were measured to cover, what sequenced them and what they were
-classified against for ampliseq; what was depleted and what was classified
-against for taxprofiler. Each is read off `pipeline_manifest.json`, the same
-record a rerun is rebuilt from, so the page and the record cannot disagree — and
-a setting the manifest does not carry leaves its value off the row rather than
-naming an empty one.
+**The plots**, in the panel below: what was in each sample, and how varied each
+sample was, under the panel's two tab-links, with the taxonomic rank, the
+diversity index and the sample order beside them. One index is plotted at a
+time. This is the pair of questions most requesters open the link for, which is
+why it is the view they land on rather than one they have to find.
+[`ampliseq_composition.sh`](composition.md) works the numbers out and leaves
+them in `composition_data.json`, which is written into the page; a run that
+produced nothing to plot leaves the panel on its empty state, which is what a
+taxprofiler run gets.
 
-**The plots**, in the panel below it: what was in each sample, and how varied
-each sample was, under the panel's two tab-links, with the taxonomic rank and
-the sample order beside them. This is the pair of questions most requesters open
-the link for, which is why it is the view they land on rather than one they have
-to find. [`ampliseq_composition.sh`](composition.md) works the numbers out and
-leaves them in `composition_data.json`, which is written into the page; a run
-that produced nothing to plot leaves the panel on its empty state, which is what
-a taxprofiler run gets.
+**The panel takes whatever height is left.** On a screen wide enough for the
+sidebar, the Overview is exactly as tall as the frame it is read in: the chart
+is drawn to the space the page has rather than the page growing a scrollbar to
+fit the chart.
 
 **Quick downloads**, at the top of the sidebar. One row per headline file the
 pipeline declared, then [the whole run as a single zip](downloads.md) — the
 emphasised one, since it is what most readers want before the deletion date.
+That last opens a modal on the landing page rather than a tab of its own: the
+zip is packaged while the reader carries on reading, and closing the modal stops
+the watching rather than the build.
 
-**Run statistics**, under them: what the run measured, in the units a sidebar
-has room for. An ampliseq run reports its samples and ASVs, the reads that went
-in against the reads that reached an ASV, the depth of the thinnest and deepest
-sample, and how much of it the classifier could place at genus and at species.
-The same pass that works out the plots counts all of it, into
-`run_statistics.tsv`; a pipeline that counts nothing gets a tile for its sample
-count, from `sample_count.txt`, and no more.
+**Run statistics**, under them, headed by how many samples the run covered —
+from `sample_count.txt`, the count *after* entries sharing a sample name were
+merged, and the count every number under it is a count over. Then what the run
+measured, in the units a sidebar has room for. An ampliseq run reports the reads that went in against the reads
+that reached an ASV, the thinnest, middle and deepest sample, how many ASVs it
+called, and how much of it the classifier could place at family, at genus and at
+species. The same pass that works out the plots counts all of it, into
+`run_statistics.tsv`. The bars carry three colours and mean them: a total is the
+institutional navy, what survived is the growth green, and a classified share is
+teal, lightening as the rank goes deeper.
+
+**How the run was set up is stated over the numbers it explains**, rather than
+in a row of its own: the region and the instrument sit above the read totals,
+and the reference database above the classification. Each is read off
+`pipeline_manifest.json`, the same record a rerun is rebuilt from, so the page
+and the record cannot disagree — and a setting the manifest does not carry
+leaves its note off rather than naming an empty one. A taxprofiler run, which
+counts nothing of its own, gets those settings as a block of plain rows
+instead.
 
 **A footer** saying when the run finished, which pipeline version produced it,
 and the uid. That last is there so a reader asking us about these results has

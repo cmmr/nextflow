@@ -88,12 +88,10 @@ text file:
 dashboard_view report  "Analysis Report" "summary_report/summary_report.html"
 dashboard_view quality "Quality Control" "multiqc/multiqc_report.html"
 dashboard_index_view   "File Explorer"
-dashboard_view setup   "Run Setup"       "ampliseq_args.yaml"
 dashboard_button "raw-sequences.zip"
 dashboard_button "qiime2/abundance_tables/feature-table.biom"
-dashboard_spec biotech  "Amplified region"   "$REGION"
-dashboard_spec science  "Sequencing"         "$PLATFORM"
-dashboard_spec database "Reference taxonomy" "$REF_TAXONOMY"
+dashboard_stat_group "READ TOTALS"    "$SEQUENCED"
+dashboard_stat_group "CLASSIFICATION" "$REFERENCE"
 ```
 
 plus [`templates/ampliseq/outputs.conf`](../../templates/ampliseq/outputs.conf),
@@ -103,38 +101,34 @@ up. Entries whose files a given run did not produce are skipped, so an ONT run
 lists `savont/` and no `dada2/` without a catalogue of its own.
 
 Those are the links of the navigation bar, after the Overview every run opens
-on. The three settings are read off `pipeline_manifest.json`; the Overview's
-plots and the numbers beside them — samples and ASVs, reads in against reads
-kept, and how deep the classifier got — come from the
-`composition_data.json` and `run_statistics.tsv` that
+on. `$SEQUENCED` and `$REFERENCE` are read off `pipeline_manifest.json` — the
+region and instrument, and the reference database — and each is stated over the
+numbers it explains rather than in a row of its own. The numbers themselves, and
+the Overview's plots, come from the `composition_data.json` and
+`run_statistics.tsv` that
 [`ampliseq_composition.sh`](../results/composition.md) works out of the ASV and
 abundance tables.
 
 ## Dressing the summary report
 
 ampliseq renders its own report from an R Markdown template, and exposes the
-pieces of it worth replacing. Three are set in
+pieces of it worth replacing. Two are set in
 [`AMPLISEQ_01.sh`](../../pipelines/AMPLISEQ_01.sh):
 
 | Parameter | Set to |
 |---|---|
-| `report_css` | [`templates/ampliseq/report.css`](../../templates/ampliseq/report.css) — the dashboard's palette, light or dark, in place of `assets/nf-core_style.css` |
 | `report_abstract` | [`templates/ampliseq/abstract.md`](../../templates/ampliseq/abstract.md) — replaces the pipeline's `Abstract` section with one written for the client |
 | `report_title` | `Amplicon sequencing analysis` |
 
-The report is read inside the dashboard's frame. Its own stylesheet still
-follows the reader's light or dark setting, while the pages around it are light
-whichever way that setting goes — so a reader in dark mode gets a dark report
-inside a light bar until `report.css` is brought onto the design system. Its
-plots are SVGs drawn on a white canvas, so in dark mode each one sits on a white
-plate rather than being inverted into something unreadable.
+**`report_css` is not set.** The report keeps the styling nf-core ships it with,
+so what a reader sees inside the dashboard's frame is the pipeline's own report
+rather than a restyled one, and a change to that template upstream cannot leave
+a stylesheet of ours fighting it.
 
-`report_logo` is left at its default and hidden by the stylesheet: the pipeline
-stretches it to the full width of the page and paints the table of contents with
-it, which is nf-core branding on a CMMR deliverable. Attribution stays where it
-belongs — the report's subtitle still names `nf-core/ampliseq` and its version,
-and the abstract links to the project. **Nothing here carries Baylor College of
-Medicine marks**, which we have no permission to apply.
+`report_logo` is left at its default too. Attribution stays where it belongs —
+the report's subtitle names `nf-core/ampliseq` and its version, and the abstract
+links to the project. **Nothing here carries Baylor College of Medicine marks**,
+which we have no permission to apply.
 
 ## How the platform is detected
 

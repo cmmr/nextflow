@@ -7,13 +7,16 @@
 #
 # Reads the lab's standard whitespace-delimited samplesheet (sample, fastq_1 and
 # optionally fastq_2 per line, no header) and writes ./ampliseq_samplesheet.tsv,
-# doing the three things ampliseq will not do for itself:
+# doing the four things ampliseq will not do for itself:
 #
 #  - Recompresses .bz2 and uncompressed FASTQ files to .gz, which is all ampliseq reads.
 #  - Merges FASTQ files that share a sample name into one file, or one pair of
 #    files, since ampliseq requires sample names to be unique.
 #  - Renames samples that ampliseq would reject: names must be alphanumeric or
 #    underscore, and must not start with a digit.
+#  - Names the staged files so that ampliseq accepts them: it refuses an entry
+#    whose fastq_1 has the same simple name as the sample plus "_1", which is
+#    what naming a file after its sample alone produces.
 #
 # A line with no fastq_2 is single-end - a MinION run, or single-end Illumina -
 # and the fastq_2 column is left off the sheet entirely. ampliseq requires only
@@ -21,7 +24,9 @@
 # rather than one per sample, so a run that mixes the two is refused here.
 #
 # Every sample ends up as exactly one file, or one pair, in ./raw-sequences/,
-# named <sample>_1.fq.gz and <sample>_2.fq.gz, and the samplesheet points there.
+# named <sample>_seqs_1.fq.gz and <sample>_seqs_2.fq.gz, and the samplesheet
+# points there. The sample name itself is left alone: it is what the requester
+# sees throughout the results.
 # Already-gzipped inputs are symlinked rather than copied; only merged and
 # non-gzip inputs are written out. ampliseq_upload.sh archives this directory for
 # clients, and zip stores what a symlink points at, so the archive holds real data.
@@ -54,6 +59,13 @@ SAMPLE_COUNT_FILE="sample_count.txt"
 
 # Client-facing archive directory. ampliseq_upload.sh zips this by the same name.
 FASTQ_DIR="raw-sequences"
+
+# Sits between the sample name and the mate number in every staged file's name.
+# ampliseq refuses an entry whose fastq_1 has the same simple name as the sample
+# plus "_1", which is exactly what naming a file after its sample alone produces,
+# so something has to separate the two. The sample name still leads, since these
+# files are what the requester unpacks out of raw-sequences.zip.
+FASTQ_INFIX="reads"
 
 # The cluster's own build rather than a system package, so it is named by absolute
 # path. pigz and md5sum below are system tools and stay bare.
@@ -205,8 +217,8 @@ for clean_sample in "${SAMPLE_ORDER[@]}"; do
 
     # Every sample lands at the same predictable path, whether its files were
     # merged, recompressed, or linked
-    final_fq1="$FASTQ_DIR/${clean_sample}_1.fq.gz"
-    final_fq2="$FASTQ_DIR/${clean_sample}_2.fq.gz"
+    final_fq1="$FASTQ_DIR/${clean_sample}_${FASTQ_INFIX}_1.fq.gz"
+    final_fq2="$FASTQ_DIR/${clean_sample}_${FASTQ_INFIX}_2.fq.gz"
 
     # 2a. Populate the archive directory
     if [[ "$num_files" -gt 1 ]]; then

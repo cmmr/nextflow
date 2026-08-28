@@ -55,7 +55,7 @@ does not carry the same one for each: `silva=138.2` exists only under
 whitespace-delimited `sample fastq_1 [fastq_2]` sheet into what ampliseq
 requires: it recompresses `.bz2` and plain FASTQ to `.gz`, merges entries sharing
 a sample name, and sanitizes names to `[A-Za-z][A-Za-z0-9_]*`. Everything lands
-in `raw-sequences/` as `<sample>_{1,2}.fq.gz`; already-gzipped inputs are
+in `raw-sequences/` as `<sample>_seqs_{1,2}.fq.gz`; already-gzipped inputs are
 symlinked rather than copied, so the directory is nearly free in the common case.
 It also derives ampliseq's `run` column by hashing each sample's source
 directory, which groups samples that were sequenced together for error-model

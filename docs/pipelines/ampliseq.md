@@ -132,15 +132,22 @@ which we have no permission to apply.
 
 ## How the platform is detected
 
-Read layout comes from the samplesheet that was just written; platform from the
-median read length, the same 1000-base line
-[`taxprofiler_samplesheet.sh`](taxprofiler.md) draws. Together they give
-ampliseq's `sequencing_type`:
+Read layout comes from the samplesheet that was just written; platform from how
+many reads are longer than 1000 bases, the same line
+[`taxprofiler_samplesheet.sh`](taxprofiler.md) draws. A run is long-read when at
+least 5% of its reads are that long. Together they give ampliseq's
+`sequencing_type`:
 
-| | short reads | reads over 1000 b |
+| | short reads | ≥5% of reads over 1000 b |
 | --- | --- | --- |
 | **paired** | `illumina_pe` | refused — no paired-end instrument reads that long |
 | **single** | `illumina_se` | `nanopore` |
+
+**A fraction is read rather than a median** because an ONT run's read lengths are
+bimodal — unusable short reads on one side, full-length amplicons on the other —
+and its median can sit in the trough between them and call the run Illumina. No
+Illumina instrument produces a read over 1000 bases at all, so any real
+population of them settles the question.
 
 **PacBio HiFi is also single and long, and read length cannot tell it from ONT.**
 Long single-end reads are called `nanopore` because that is what the lab runs.
@@ -168,10 +175,27 @@ The five regions the system supports, in *E. coli* K-12 MG1655 16S numbering:
 | `16SV5V6` | 806F / 1053R | 785–1073 |
 | `16SFULL` | 27F / 1492R | 8–1513 |
 
-Up to 2 000 reads are taken from a spread of samples and aligned with
-`vsearch --usearch_global` to the landmark 16S genes that
-[`build_16s_reference.sh`](../../scripts/build_16s_reference.sh) assembled. Every hit
-is translated into *E. coli* numbering through `db/16s/ecoli_positions.tsv`.
+Up to eight samples are read end to end, and a reservoir keeps a uniform sample
+of each file's reads rather than its head — an ONT run writes its shortest reads
+first, and they are not the library. Of that sample, 2 000 reads go to the
+aligner for a short-read run and 10 000 for a long-read one, which carries more
+off-target material and so needs a wider sample to find 16S inside it. They are
+aligned with `vsearch --usearch_global` to the landmark 16S genes that
+[`build_16s_reference.sh`](../../scripts/build_16s_reference.sh) assembled, and every
+hit is translated into *E. coli* numbering through `db/16s/ecoli_positions.tsv`.
+
+A short query is a probe cut from inside the amplicon, so nearly all of it is
+16S and it is held to `--query_cov 0.80`. A long read still carries its barcode
+and adapters, and often more than one copy of the amplicon, so it is asked
+instead to cover a third of the gene (`--query_cov 0.30 --target_cov 0.30`). The
+host-DNA products a 16S primer pair also amplifies carry the primers without the
+gene, and never reach that.
+
+Landmark bases that are insertions relative to *E. coli*, and the ragged ends
+soft-clipped when the landmark was aligned to it, have no row in
+`ecoli_positions.tsv`. A full-length amplicon ends in exactly those, so a hit
+whose end has no *E. coli* position is snapped up to 25 bases inward to the
+nearest base that does, rather than discarded.
 
 Which coordinates are readable depends on what the reads are:
 

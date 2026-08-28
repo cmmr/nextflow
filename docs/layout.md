@@ -48,15 +48,16 @@ config/               Nextflow config, passed to `nextflow run -c`.
                       Both are documented in docs/pipelines/taxprofiler.md.
 
 templates/            Web pages published to S3 alongside a run's results.
-  tailwind.html       The head the three dashboard pages share: the Tailwind
-                      runtime, the fonts, and the design system as its theme.
+  tailwind.html       The head every page below it shares: the Tailwind runtime,
+                      the fonts, and the design system as its theme.
   dashboard.html      Landing page template: the navigation bar and its frame.
-                      Pipeline-agnostic, as are the two below.
+                      Pipeline-agnostic, as are the four below.
   overview.html       The view it opens on: the run, its plots and its sidebar.
   files.html          The annotated index of everything the run published.
-  common.css          The palette and base styling the three pages below inline.
-  progress.html       Live progress page template.
+  progress.html       Live progress page template: the task dial and the
+                      per-process bars.
   expired.html        The page left where an expired dashboard was.
+  common.css          The palette and base styling the folder listings inline.
   listing.html        Folder listing page template.
   ampliseq/
     outputs.conf      What the file index lists for an ampliseq run.

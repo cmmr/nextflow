@@ -12,7 +12,8 @@
 # progress page refreshes itself every minute; the report does not, so a browser
 # stops polling on its own the moment the run lands.
 #
-# The table is built from nextflow's console output, which wrike_job.sh tees to
+# The dial and the table are built from nextflow's console output, which
+# wrike_job.sh tees to
 # ./nextflow.out. With ANSI output off, as it is in a batch job, nextflow
 # reprints its whole table every time something changes:
 #
@@ -124,6 +125,12 @@ render_rows() {
             if (match(count, /[0-9]+ of [0-9]+/)) {
                 split(substr(count, RSTART, RLENGTH), done, / of /)
                 if (done[2] + 0 > 0) pcent = int(100 * done[1] / done[2])
+
+                # Every task of the run together, which the dial reports. A
+                # process nextflow has not given tasks yet counts for nothing
+                # rather than for nought out of nought.
+                tasks_done += done[1] + 0
+                tasks_total += done[2] + 0
             }
 
             n++
@@ -142,24 +149,62 @@ render_rows() {
         END {
             if (n == 0) exit 0
 
-            print "<table>"
-            print "<thead><tr><th>Process</th><th></th><th></th><th>Tasks</th></tr></thead>"
-            print "<tbody>"
+            # Read off the first line by the caller, which the dial is drawn from
+            printf "TOTALS %d %d\n", tasks_done, tasks_total
+
             for (i = 1; i <= n; i++) {
-                printf "<tr><td class=\"proc\">%s</td>", esc(label[i])
-                printf "<td class=\"bar\"><span><i style=\"width:%s%%\"></i></span></td>", pct[i]
-                printf "<td class=\"pct\">%s%%</td>", pct[i]
-                printf "<td class=\"cnt\">%s</td></tr>\n", esc(cnt[i])
+                fill = pct[i] >= 100 ? "bg-bio-growth" : "bg-primary-container"
+
+                printf "<div class=\"flex items-center gap-3 py-1\">"
+                printf "<span class=\"font-code-md text-code-md text-on-surface truncate"
+                printf " basis-[42%%] shrink-0\" title=\"%s\">%s</span>", esc(label[i]), esc(label[i])
+                printf "<span class=\"flex-1 h-1.5 bg-surface-variant rounded-full overflow-hidden\">"
+                printf "<span class=\"block h-full %s rounded-full\" style=\"width:%s%%\"></span></span>", \
+                    fill, pct[i]
+                printf "<span class=\"font-code-sm text-code-sm text-on-surface-variant w-9"
+                printf " text-right shrink-0\">%s%%</span>", pct[i]
+                printf "<span class=\"font-body-sm text-body-sm text-on-surface-variant w-24"
+                printf " text-right shrink-0 hidden sm:block\">%s</span>", esc(cnt[i])
+                printf "</div>\n"
             }
-            print "</tbody></table>"
-            if (more != "") printf "<p class=\"note\">%s</p>\n", esc(more)
+
+            if (more != "") {
+                printf "<p class=\"font-body-sm text-body-sm text-outline mt-3\">%s</p>\n", esc(more)
+            }
         }
     ' "$NEXTFLOW_OUT"
 }
 
+# The note in the corner of the bar. A run that has failed says so in red; every
+# other status is one the run is still in, and pulses.
+status_pill() {
+    local status="$1"
+    local tone="text-secondary-fixed bg-secondary-fixed/10 border-secondary-fixed/20"
+    local dot="bg-secondary-fixed"
+    local pulse=1
+
+    case "${status,,}" in
+        failed)    tone="text-error-red bg-error-red/10 border-error-red/20"
+                   dot="bg-error-red"
+                   pulse=0 ;;
+        completed) tone="text-bio-growth bg-bio-growth/10 border-bio-growth/20"
+                   dot="bg-bio-growth"
+                   pulse=0 ;;
+    esac
+
+    printf '<span class="flex items-center gap-2 px-3 py-1.5 rounded-full border %s' "$tone"
+    printf ' font-label-caps text-label-caps font-bold">'
+    printf '<span class="relative flex h-2 w-2">'
+
+    (( pulse )) && printf '<span class="animate-ping absolute inline-flex h-full w-full rounded-full %s opacity-75"></span>' "$dot"
+
+    printf '<span class="relative inline-flex rounded-full h-2 w-2 %s"></span></span>' "$dot"
+    printf '%s</span>' "$(escape_html "$status")"
+}
+
 publish_once() {
     local status="${1:-}"
-    local page rows task_name
+    local page rows task_name totals tasks_done tasks_total percent arc tasks
 
     if [[ ! -r "$PROGRESS_TEMPLATE" ]]; then
         warn "No progress template at $PROGRESS_TEMPLATE; skipping."
@@ -181,18 +226,46 @@ publish_once() {
     if [[ -r "$NEXTFLOW_OUT" ]]; then
         rows=$(render_rows) || rows=""
     fi
-    if [[ -z "$rows" ]]; then
-        rows="<p class=\"empty\">$STARTING_MESSAGE</p>"
+
+    # The first line render_rows writes is the run's task totals, which the dial
+    # is drawn from rather than listed with
+    tasks_done=0
+    tasks_total=0
+
+    if [[ "$rows" == TOTALS\ * ]]; then
+        totals=${rows%%$'\n'*}
+        rows=${rows#*$'\n'}
+
+        read -r _ tasks_done tasks_total <<< "$totals"
     fi
+
+    if [[ -z "$rows" ]]; then
+        rows="<p class=\"font-body-sm text-body-sm text-on-surface-variant\">$STARTING_MESSAGE</p>"
+    fi
+
+    # Percent of every task the run has started, and the arc of the dial that
+    # says so - the circle it is drawn on is 339.292 long.
+    percent=0
+    tasks="Waiting for the first task"
+
+    if (( tasks_total > 0 )); then
+        percent=$(( 100 * tasks_done / tasks_total ))
+        tasks="$tasks_done of $tasks_total tasks"
+    fi
+
+    arc=$(LC_ALL=C awk -v p="$percent" 'BEGIN { printf "%.1f", 339.292 * p / 100 }')
 
     # Rows are never escaped - render_rows emits the markup itself, having
     # escaped everything that came out of the log.
     page=$(render_template "$PROGRESS_TEMPLATE" \
-        TASK_NAME "$(escape_html "$task_name")" \
-        RUN_ID    "$RUN_ID" \
-        STATUS    "$(escape_html "$status")" \
-        UPDATED   "$(date '+%B %-d, %Y at %-I:%M %p %Z')" \
-        ROWS      "$rows") || return 1
+        TASK_NAME   "$(escape_html "$task_name")" \
+        RUN_ID      "$RUN_ID" \
+        STATUS_PILL "$(status_pill "$status")" \
+        PERCENT     "$percent" \
+        ARC         "$arc" \
+        TASKS       "$(escape_html "$tasks")" \
+        UPDATED     "$(date '+%B %-d, %Y at %-I:%M %p %Z')" \
+        ROWS        "$rows") || return 1
 
     # --content-type because reading the body from stdin leaves aws nothing to
     # guess from, and a page served as binary downloads instead of rendering.

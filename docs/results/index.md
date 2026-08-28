@@ -234,15 +234,26 @@ requester asked for has passed, and republishes `index.html` from
 leads somewhere, and still says what the run was and how to repeat it. See
 [Expiring a dashboard](../operations/expiration.md).
 
-The progress page's numbers come from parsing nextflow's console output, which
-`wrike_job.sh` tees to `nextflow.out`. Nextflow has no live status API outside
-Seqera Platform: its trace file only records tasks that have already finished,
-and its HTML report is written once at the end. What it does emit continuously is
-the same process table an interactive terminal shows — one line per change, since
-ANSI output is off in a batch job — so the table is those lines, last one per
-process winning. That is not a stable interface, so every failure in that script
-is soft: a page that cannot be built is skipped, and nothing about the run
-depends on it.
+**The progress page is a dial and a list**: every task of the run taken together
+as one percentage on the left, and one bar per process nextflow has started
+beside it — green once a process is done, navy while it is working. Under the
+dial is the count it was worked out from, *17 of 20 tasks*. A process nextflow
+has not yet given any tasks counts for nothing rather than for nought out of
+nought, so the dial only ever reports on work that exists.
+
+Those numbers come from parsing nextflow's console output, which `wrike_job.sh`
+tees to `nextflow.out`. Nextflow has no live status API outside Seqera Platform:
+its trace file only records tasks that have already finished, and its HTML report
+is written once at the end. What it does emit continuously is the same process
+table an interactive terminal shows — one line per change, since ANSI output is
+off in a batch job — so the table is those lines, last one per process winning.
+That is not a stable interface, so every failure in that script is soft: a page
+that cannot be built is skipped, and nothing about the run depends on it.
+
+The status the bar carries is the run's own — `Validating`, `Queued`, `Running`,
+`Post-Processing` — and it pulses while the run is in it. `Failed` is red and
+still, and `Completed` green, for the moment between the last stage and the
+report landing.
 
 The progress page refreshes itself every minute and the finished dashboard does
 not, which is what stops a reader's browser polling once the results land.
@@ -259,16 +270,18 @@ lifted out of it unchanged, so the design and the pages built from it cannot
 drift apart. Each page then styles itself in the utilities that head defines,
 which is how the markup stays the design's markup.
 
-Those three fetch what they need — the Tailwind runtime and the fonts — from
-their CDNs. The pages a reader sees while the run is still going, and the ones
-left behind after it, do not: the [progress
-page](../../templates/progress.html), the [expired
-page](../../templates/expired.html) and the [folder
-listings](browsable-folders.md) inline
-[`templates/common.css`](../../templates/common.css) instead, and are readable
-with no network but the one that served them. `render_template` in
-[`utilities.sh`](../../scripts/utilities.sh) inlines whichever of the two a
-template asks for, alongside that page's own placeholders:
+The [progress page](../../templates/progress.html) and the [expired
+page](../../templates/expired.html) share that head too, so every page a
+requester is ever sent to — waiting, reading, or arriving after the date — is the
+same design. All five fetch the Tailwind runtime and the fonts from their CDNs.
+
+The [folder listings](browsable-folders.md) are the exception, and inline
+[`templates/common.css`](../../templates/common.css) instead: there are one per
+directory, they are read inside another page as often as on their own, and they
+are the pages most likely to be opened out of an unpacked copy with no network.
+`render_template` in [`utilities.sh`](../../scripts/utilities.sh) inlines
+whichever of the two a template asks for, alongside that page's own
+placeholders:
 
 ```bash
 render_template "$LISTING_TEMPLATE" \

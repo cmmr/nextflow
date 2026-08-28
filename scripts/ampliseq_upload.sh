@@ -253,12 +253,14 @@ if [[ -n "${STATS[reads_retained]:-}" ]]; then
     #    share a scale, so the second one is the survival rate by eye.
     RETAINED_PCT=100
     if (( TOTAL_READS > 0 )); then
-        RETAINED_PCT=$(( RETAINED * 100 / TOTAL_READS ))
+        RETAINED_PCT=$(( (RETAINED * 100 + TOTAL_READS / 2) / TOTAL_READS ))
     fi
+
+    RETAINED_READING="$RETAINED_PCT% · $(human_count "$RETAINED")"
 
     dashboard_stat_group "READ TOTALS" "$SEQUENCED"
     dashboard_stat_bar "Total reads"    "$(human_count "$TOTAL_READS")" 100
-    dashboard_stat_bar "Retained reads" "$(human_count "$RETAINED")" "$RETAINED_PCT" growth
+    dashboard_stat_bar "Retained reads" "$RETAINED_READING" "$RETAINED_PCT" growth
 
     dashboard_stat_group "READS PER SAMPLE"
     dashboard_stat_chips "$(human_count "${STATS[reads_min]:-0}")|Min" \
@@ -266,27 +268,34 @@ if [[ -n "${STATS[reads_retained]:-}" ]]; then
                          "$(human_count "${STATS[reads_max]:-0}")|Max"
 fi
 
-#    How many ASVs the run called, and how far down the classifier could place
-#    the reads behind them. The ASV count opens the block as the thing the
-#    shares below it are shares of.
-if [[ -n "${STATS[asvs]:-}${STATS[family_pct]:-}${STATS[genus_pct]:-}${STATS[species_pct]:-}" ]]; then
+#    How many ASVs the run called, and how far down the classifier could name
+#    them. Each rank is a count of the ASVs that reached it, against the ASV
+#    total the block opens with - the same reading ampliseq's own report gives.
+if [[ -n "${STATS[asvs]:-}${STATS[phylum_asvs]:-}${STATS[genus_asvs]:-}${STATS[species_asvs]:-}" ]]; then
     dashboard_stat_group "CLASSIFICATION" "$REFERENCE"
+
+    TOTAL_ASVS=${STATS[asvs]:-0}
 
     if [[ -n "${STATS[asvs]:-}" ]]; then
         dashboard_stat_bar "Total ASVs" "$(human_count "${STATS[asvs]}")" 100
     fi
 
-    if [[ -n "${STATS[family_pct]:-}" ]]; then
-        dashboard_stat_bar "Family level" "${STATS[family_pct]}%" "${STATS[family_pct]}" growth
-    fi
+    for RANK_STAT in "Phylum level|phylum_asvs" "Genus level|genus_asvs" \
+                     "Species level|species_asvs"; do
+        RANK_LABEL=${RANK_STAT%%|*}
+        RANK_KEY=${RANK_STAT##*|}
+        RANK_COUNT=${STATS[$RANK_KEY]:-}
 
-    if [[ -n "${STATS[genus_pct]:-}" ]]; then
-        dashboard_stat_bar "Genus level" "${STATS[genus_pct]}%" "${STATS[genus_pct]}" growth
-    fi
+        [[ -n "$RANK_COUNT" ]] || continue
 
-    if [[ -n "${STATS[species_pct]:-}" ]]; then
-        dashboard_stat_bar "Species level" "${STATS[species_pct]}%" "${STATS[species_pct]}" growth
-    fi
+        RANK_PCT=0
+        if (( TOTAL_ASVS > 0 )); then
+            RANK_PCT=$(( (RANK_COUNT * 100 + TOTAL_ASVS / 2) / TOTAL_ASVS ))
+        fi
+
+        RANK_READING="$RANK_PCT% · $(human_count "$RANK_COUNT")"
+        dashboard_stat_bar "$RANK_LABEL" "$RANK_READING" "$RANK_PCT" growth
+    done
 fi
 
 #    The title is read from Wrike rather than taken from the copy recorded at

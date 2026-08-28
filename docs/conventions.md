@@ -40,6 +40,11 @@ These carry most of the system's state, and nothing works if you break them:
   the survivors to `form_answers.tsv`; pipelines read them with `form_answer`.
   The handler never interprets one, which is what keeps it ignorant of pipelines
   and keeps each pipeline version owning its own parameter names.
+- **`stage.txt` is what the progress page says the run is doing.** One sentence,
+  overwritten by `report_stage` as each stage begins, and read by
+  `nextflow_progress.sh` for the line under the run's name. It is written beside
+  `nextflow.out` rather than into it: that file is nextflow's own output, and
+  the parser that reads it should never have to tell our lines from nextflow's.
 - **The run directory is also where a stage reports success.** `notes.txt` is
   created empty beside `message.out`, and stages *append* to it — the region
   `ampliseq_detect_region.sh` measured arrives that way. `wrike_followup.sh`

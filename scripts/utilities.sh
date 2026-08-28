@@ -20,7 +20,7 @@
 # wrike_followup.sh posts whatever ends up there back to the Wrike task.
 #
 # Defines: log, warn, fail, run_results_url, escape_html, escape_url, human_size,
-#          human_count, render_template, is_valid_uid, derive_uid
+#          human_count, report_stage, render_template, is_valid_uid, derive_uid
 # Env:     RUN_ID_SALT from secrets/.env, for derive_uid only; AWS_S3_BUCKET and
 #          S3_RUN_PREFIX for run_results_url; NEXTFLOW_DIR for render_template
 
@@ -96,8 +96,21 @@ human_size() {
     }'
 }
 
-# A count, in the units a sidebar has room for: 16600 -> 16.6k, 2400000 -> 2.4M.
-# Anything under a thousand is written out in full.
+# What the run is doing right now, in one sentence a requester would recognise.
+# Written to ./stage.txt in the run directory, where nextflow_progress.sh reads
+# it for the line under the run's name - so the page can say something during
+# the stages nextflow knows nothing about, which is everything before and after
+# itself.
+#
+# Overwritten rather than appended: the page reports where the run is, not how
+# it got there. Best effort, since a run must not fail over a status line.
+report_stage() {
+    printf '%s\n' "$1" > stage.txt 2>/dev/null || true
+}
+
+# A count, in the units a sidebar has room for: 16600 -> 17k, 2400000 -> 2M.
+# Rounded to the unit rather than given a decimal, so a column of them lines
+# up. Anything under a thousand is written out in full.
 human_count() {
     local count="$1"
 
@@ -106,8 +119,7 @@ human_count() {
         if (n < 1000) { printf "%d", n; exit }
         i = 0
         while (n >= 1000 && i < 3) { n /= 1000; i++ }
-        if (n < 100) printf "%.1f%s", n, unit[i]
-        else         printf "%d%s", n + 0.5, unit[i]
+        printf "%d%s", n + 0.5, unit[i]
     }'
 }
 

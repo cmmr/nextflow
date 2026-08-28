@@ -206,10 +206,26 @@ this page. The sidebar's **Download everything** button is that link. See
 
 **That page starts as a live progress view.**
 [`nextflow_progress.sh`](../../scripts/nextflow_progress.sh), backgrounded by
-`wrike_job.sh` for the length of the nextflow stage, renders
+`wrike_job.sh` from the moment the job starts, renders
 [`templates/progress.html`](../../templates/progress.html) to the *same key*
 every minute — so a requester who opens the results link early watches the
 pipeline work. The final upload overwrites it.
+
+**It starts before nextflow does**, because the stages before nextflow are the
+ones a requester waits through with nothing to look at: recompressing and
+staging a few hundred FASTQ files, and measuring what was sequenced, take long
+enough to look like a stall. Each stage calls `report_stage` as it begins, which
+writes one sentence to `stage.txt` in the run directory, and the page says it
+under the run's name — *Preparing your sequencing files.* The watcher is stopped
+before the results are uploaded, since that upload lands the finished dashboard
+on the same key; the last thing it publishes by hand is the page that says the
+results are being packaged.
+
+**Nothing is written into `nextflow.out` to make that work.** That file is
+nextflow's own console output, teed for the record, and a line of ours in it
+would be a line the parser has to tell apart from nextflow's — and a line in the
+run's log that nextflow never printed. The stage file is beside it instead, and
+the two are read independently.
 
 The link is live before any of that — before the request has even been checked
 over. `wrike_task_handler.sh` claims the run's S3 prefix by publishing a
@@ -234,12 +250,25 @@ requester asked for has passed, and republishes `index.html` from
 leads somewhere, and still says what the run was and how to repeat it. See
 [Expiring a dashboard](../operations/expiration.md).
 
-**The progress page is a dial and a list**: every task of the run taken together
-as one percentage on the left, and one bar per process nextflow has started
-beside it — green once a process is done, navy while it is working. Under the
-dial is the count it was worked out from, *17 of 20 tasks*. A process nextflow
-has not yet given any tasks counts for nothing rather than for nought out of
-nought, so the dial only ever reports on work that exists.
+**The progress page is two dials and a list.** The first dial is every task of
+the run taken together, with the count it was worked out from under it — *17 of
+20 tasks*. A process nextflow has not yet given any tasks counts for nothing
+rather than for nought out of nought, so the dial only ever reports on work that
+exists.
+
+Beside it, one bar per process: **navy once the process is done, green with its
+stripes running while its tasks are in flight**, and an empty track for one
+nextflow has not started. A process with tasks submitted but none finished still
+shows a sliver, so "started" and "not started" never look the same.
+
+**The second dial is not about this run.** It is how much of the cluster's
+running work belongs to it: `squeue` is asked for every running job, and a job
+is this run's when its work directory is under the run's own — which is what
+every task nextflow submits looks like. A run whose executor is local has none
+of those, so the count falls back to every job the submitting user is running.
+It answers the question a reader on a slow day actually has, which is whether
+the machine is busy with somebody else. The dial is left off the page entirely
+when `squeue` cannot be asked.
 
 Those numbers come from parsing nextflow's console output, which `wrike_job.sh`
 tees to `nextflow.out`. Nextflow has no live status API outside Seqera Platform:

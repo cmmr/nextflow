@@ -126,6 +126,8 @@ declare -A SAMPLE_FQ2_MAP=()
 # own header rather than from a file of its own.
 READ_LAYOUT=""
 
+report_stage "Checking your samplesheet and staging the sequencing files."
+
 # 1. Read and validate the samplesheet line by line.
 # The || clause picks up a final line that is missing its trailing newline.
 line=""

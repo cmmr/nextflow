@@ -49,6 +49,10 @@ readonly PROGRESS_TEMPLATE="$NEXTFLOW_DIR/templates/progress.html"
 # What wrike_job.sh tees nextflow's console output to
 readonly NEXTFLOW_OUT="nextflow.out"
 
+# One line saying what the run is doing, written by report_stage as each stage
+# starts. Nextflow's own output only covers the middle of a run.
+readonly STAGE_FILE="stage.txt"
+
 readonly DEFAULT_INTERVAL=60
 
 # Shown before nextflow has printed its first process line, which can take a
@@ -137,6 +141,7 @@ render_rows() {
             label[n] = pretty(name)
             pct[n]   = pcent
             cnt[n]   = count
+            state[n] = count == "" ? "waiting" : (pcent >= 100 ? "done" : "active")
             next
         }
 
@@ -153,14 +158,23 @@ render_rows() {
             printf "TOTALS %d %d\n", tasks_done, tasks_total
 
             for (i = 1; i <= n; i++) {
-                fill = pct[i] >= 100 ? "bg-bio-growth" : "bg-primary-container"
+                # Done is the institutional navy; work in flight is the growth
+                # green, with the stripes the page animates
+                fill = ""
+                if (state[i] == "done")   fill = "bg-primary-container"
+                if (state[i] == "active") fill = "bg-bio-growth stripe"
 
                 printf "<div class=\"flex items-center gap-3 py-1\">"
                 printf "<span class=\"font-code-md text-code-md text-on-surface truncate"
                 printf " basis-[42%%] shrink-0\" title=\"%s\">%s</span>", esc(label[i]), esc(label[i])
                 printf "<span class=\"flex-1 h-1.5 bg-surface-variant rounded-full overflow-hidden\">"
-                printf "<span class=\"block h-full %s rounded-full\" style=\"width:%s%%\"></span></span>", \
-                    fill, pct[i]
+
+                if (fill != "") {
+                    printf "<span class=\"block h-full %s rounded-full\" style=\"width:%s%%\"></span>", \
+                        fill, (state[i] == "active" && pct[i] < 3 ? 3 : pct[i])
+                }
+
+                printf "</span>"
                 printf "<span class=\"font-code-sm text-code-sm text-on-surface-variant w-9"
                 printf " text-right shrink-0\">%s%%</span>", pct[i]
                 printf "<span class=\"font-body-sm text-body-sm text-on-surface-variant w-24"
@@ -173,6 +187,84 @@ render_rows() {
             }
         }
     ' "$NEXTFLOW_OUT"
+}
+
+# How much of the cluster's running work is this run's, as "mine total basis".
+#
+# Nextflow submits every task as its own Slurm job from a work directory under
+# this one, so a running job belongs to this run when its work directory does.
+# A run whose executor is local has none of those, and falls back to every job
+# the submitting user has running.
+#
+# Prints nothing when squeue cannot answer, which is what leaves the dial off
+# the page rather than drawing a nought.
+cluster_share() {
+    local me
+
+    command -v squeue > /dev/null 2>&1 || return 0
+    me=$(id -un 2>/dev/null) || return 0
+
+    squeue --states=RUNNING --noheader --format='%u|%Z' 2>/dev/null \
+        | LC_ALL=C awk -F'|' -v me="$me" -v here="$PWD" '
+            { total++ }
+
+            index($2, here) == 1 { run++ }
+            $1 == me             { mine++ }
+
+            END {
+                if (total == 0) exit 1
+
+                if (run > 0) printf "%d %d run\n", run, total
+                else         printf "%d %d user\n", mine + 0, total
+            }
+        '
+}
+
+# The style of a dial's arc: how much of the ring to draw, and - for a ring with
+# nothing to draw - a flat cap, since a round one on an arc of zero length is
+# drawn as a dot at twelve o'clock.
+dial_arc() {
+    local percent="$1" circumference="$2"
+
+    if (( percent <= 0 )); then
+        printf 'stroke-dasharray: 0 %s; stroke-linecap: butt' "$circumference"
+        return 0
+    fi
+
+    LC_ALL=C awk -v p="$percent" -v c="$circumference" \
+        'BEGIN { printf "stroke-dasharray: %.1f %s", c * p / 100, c }'
+}
+
+# That share as the second dial, or nothing at all when there was no answer
+cluster_dial() {
+    local mine="$1" total="$2" basis="$3"
+    local percent arc caption
+
+    [[ "$total" =~ ^[0-9]+$ ]] && (( total > 0 )) || return 0
+
+    percent=$(( 100 * mine / total ))
+    arc=$(dial_arc "$percent" 301.593)
+
+    if [[ "$basis" == "run" ]]; then
+        caption="$mine of $total running jobs on the cluster are this run's"
+    else
+        caption="$mine of $total running jobs on the cluster are yours"
+    fi
+
+    printf '<div class="flex flex-col items-center gap-2 pt-5 border-t border-outline-variant w-full"'
+    printf ' title="%s">' "$(escape_html "$caption")"
+    printf '<div class="relative w-[104px] h-[104px]">'
+    printf '<svg class="dial cluster w-full h-full" viewBox="0 0 120 120">'
+    printf '<circle class="text-surface-variant" cx="60" cy="60" r="48" stroke="currentColor"></circle>'
+    printf '<circle class="text-secondary" cx="60" cy="60" r="48" stroke="currentColor"'
+    printf ' style="%s"></circle></svg>' "$arc"
+    printf '<div class="absolute inset-0 flex flex-col items-center justify-center">'
+    printf '<span class="text-body-md font-bold text-primary leading-none">%s%%</span>' "$percent"
+    printf '<span class="font-label-caps text-label-caps text-on-surface-variant mt-1">Cluster</span>'
+    printf '</div></div>'
+    printf '<p class="font-body-sm text-body-sm text-on-surface-variant text-center">%s of %s jobs</p>' \
+        "$mine" "$total"
+    printf '</div>'
 }
 
 # The note in the corner of the bar. A run that has failed says so in red; every
@@ -205,6 +297,7 @@ status_pill() {
 publish_once() {
     local status="${1:-}"
     local page rows task_name totals tasks_done tasks_total percent arc tasks
+    local stage share mine total basis cluster
 
     if [[ ! -r "$PROGRESS_TEMPLATE" ]]; then
         warn "No progress template at $PROGRESS_TEMPLATE; skipping."
@@ -220,6 +313,26 @@ publish_once() {
     task_name="Pipeline run"
     if [[ -r "$WRIKE_TASK_NAME_FILE" ]]; then
         read -r task_name < "$WRIKE_TASK_NAME_FILE" || true
+    fi
+
+    # What the run is doing right now, which wrike_job.sh writes as it moves
+    # from one stage to the next. Nextflow is only one of them, and the ones
+    # before it are why this page exists before there is a task to count.
+    #
+    # The pages published before the job starts have no stage file to read, so
+    # the status stands in for one.
+    stage=""
+    if [[ -r "$STAGE_FILE" ]]; then
+        read -r stage < "$STAGE_FILE" || true
+    fi
+
+    if [[ -z "$stage" ]]; then
+        case "${status,,}" in
+            validating) stage="Checking your request." ;;
+            queued)     stage="Waiting for a slot on the cluster." ;;
+            failed)     stage="This run did not finish." ;;
+            *)          stage="Your analysis is running." ;;
+        esac
     fi
 
     rows=""
@@ -253,7 +366,15 @@ publish_once() {
         tasks="$tasks_done of $tasks_total tasks"
     fi
 
-    arc=$(LC_ALL=C awk -v p="$percent" 'BEGIN { printf "%.1f", 339.292 * p / 100 }')
+    arc=$(dial_arc "$percent" 339.292)
+
+    # How busy the cluster is with everyone else, which is the other thing a
+    # reader waiting on a queue wants to know
+    cluster=""
+    if share=$(cluster_share) && [[ -n "$share" ]]; then
+        read -r mine total basis <<< "$share"
+        cluster=$(cluster_dial "$mine" "$total" "$basis")
+    fi
 
     # Rows are never escaped - render_rows emits the markup itself, having
     # escaped everything that came out of the log.
@@ -261,9 +382,11 @@ publish_once() {
         TASK_NAME   "$(escape_html "$task_name")" \
         RUN_ID      "$RUN_ID" \
         STATUS_PILL "$(status_pill "$status")" \
+        STAGE       "$(escape_html "$stage")" \
         PERCENT     "$percent" \
         ARC         "$arc" \
         TASKS       "$(escape_html "$tasks")" \
+        CLUSTER     "$cluster" \
         UPDATED     "$(date '+%B %-d, %Y at %-I:%M %p %Z')" \
         ROWS        "$rows") || return 1
 

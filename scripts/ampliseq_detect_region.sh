@@ -100,7 +100,7 @@ readonly VSEARCH_CONTAINER="${VSEARCH_CONTAINER:-docker://quay.io/biocontainers/
 # head: an ONT run writes its shortest reads first, and they are not the library.
 readonly MAX_SAMPLES=8
 readonly MAX_READS_SHORT=2000
-readonly MAX_READS_LONG=10000
+readonly MAX_READS_LONG=40000
 readonly MIN_READ_LENGTH=100
 readonly PROBE_LENGTH=150
 readonly MAX_AMBIGUOUS=3
@@ -114,8 +114,15 @@ readonly MAX_AMBIGUOUS=3
 readonly LONG_READ_THRESHOLD=1000
 readonly LONG_READ_FRACTION=0.05
 
-# What the alignment has to produce before its answer is trusted
+# What the alignment has to produce before its answer is trusted. Only a few
+# percent of an ONT amplicon run aligns - the rest is off-target product, reads
+# too short to cover the gene, and the adapters and barcodes still on them - so
+# the count is reached by looking at a wide sample rather than by asking much of
+# it. A run that produced too few reads to reach it and one that sequenced
+# something other than 16S both end up here, and they are told apart by what
+# share of the sample aligned rather than by how much of it did.
 readonly MIN_ALIGNED_READS=200
+readonly MIN_ALIGNED_FRACTION=0.02
 readonly MIN_STRAND_FRACTION=0.8
 
 # How far into a landmark to look for a base that has an E. coli position, when
@@ -169,6 +176,8 @@ fi
 [[ -r "$SAMPLESHEET" ]] || fail "Samplesheet '$SAMPLESHEET' is not readable."
 
 THREADS="${SLURM_CPUS_PER_TASK:-${SLURM_CPUS_ON_NODE:-1}}"
+
+report_stage "Measuring which 16S region was sequenced."
 
 # 1. Read layout, from the sheet ampliseq_samplesheet.sh wrote: it leaves the
 #    fastq_2 column off entirely for a single-end run.
@@ -449,13 +458,26 @@ ALIGNED_TOTAL=$(( ${M[aligned_1]:-0} + ${M[aligned_2]:-0} ))
 
 log "Aligned $ALIGNED_TOTAL of $SAMPLED_READS reads."
 
+# Why the alignment came up short, which is either that the run is too small to
+# measure or that what it amplified is not 16S. Reported apart because they ask
+# the requester for different things - more sequencing, or a look at the PCR.
 report_too_few_aligned() {
+    local scanned="Only $ALIGNED_TOTAL of $SAMPLED_READS reads, sampled evenly from the"
+    scanned+=" $SCANNED_READS reads of ${#CHOSEN[@]} of this run's samples, align to 16S"
+
     REASON="The 16S region of this run's reads could not be determined."
-    REASON+=" Only $ALIGNED_TOTAL of $SAMPLED_READS reads, sampled evenly from the"
-    REASON+=" $SCANNED_READS reads of ${#CHOSEN[@]} of this run's samples, align to"
-    REASON+=" 16S at all. That usually means most of what was amplified is not 16S:"
-    REASON+=" a 16S primer pair also amplifies host DNA, and those products carry"
-    REASON+=" the primers without the gene."
+
+    if awk -v a="$ALIGNED_TOTAL" -v s="$SAMPLED_READS" -v m="$MIN_ALIGNED_FRACTION" \
+            'BEGIN { exit !(s > 0 && a / s >= m) }'; then
+        REASON+=" $scanned, which is too few to measure an amplicon from even though"
+        REASON+=" they are the share of 16S a run of this kind carries. This run is"
+        REASON+=" too small to place: it needs to be sequenced deeper."
+    else
+        REASON+=" $scanned at all. That usually means most of what was amplified is"
+        REASON+=" not 16S: a 16S primer pair also amplifies host DNA, and those"
+        REASON+=" products carry the primers without the gene."
+    fi
+
     fail "$REASON"
 }
 

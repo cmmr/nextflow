@@ -56,7 +56,8 @@
 #                wrike_job.sh <PIPELINE_NAME> <WRIKE_ATTACHMENT_ID> [<RERUN_UID>]
 # Called by: wrike_task_handler.sh
 # Sources:   pipelines/<PIPELINE_NAME>.sh
-# Runs:      scripts/nextflow_progress.sh, backgrounded during the nextflow stage
+# Runs:      scripts/nextflow_progress.sh, backgrounded from the first stage to
+#            the end of the nextflow one, and once more before post-processing
 # Requires:  nextflow (as $NEXTFLOW_DIR/bin/nextflow), curl and jq (via the
 #            Wrike helpers)
 # Env:       NEXTFLOW_DIR, the Wrike helper functions, the params helpers, and
@@ -90,6 +91,18 @@ if ! TASK_ID=$(read_wrike_task_id); then
 fi
 
 update_wrike_pipeline_progress "Initializing"
+report_stage "Getting your run ready."
+
+# Publish a progress page for the length of the run, from here rather than from
+# the nextflow stage: staging a few hundred FASTQ files takes long enough that a
+# reader opening the link deserves to be told that is what is happening.
+# Backgrounded and cosmetic; the loop reports its own trouble and keeps going.
+"$NEXTFLOW_DIR/scripts/nextflow_progress.sh" --watch &
+PROGRESS_PID=$!
+
+# Stop it however this script ends - including when Slurm cancels the job - so
+# no orphan keeps publishing over a finished run's report.
+trap 'kill "$PROGRESS_PID" 2>/dev/null || true' EXIT
 
 # 1. Fetch the samplesheet attached to the requesting task.
 #    -L follows Wrike's redirect to the actual storage backend.
@@ -158,6 +171,7 @@ fi
 #    on PATH.
 if [[ ${#PRE_PROCESS_CMDS[@]} -gt 0 ]]; then
     update_wrike_pipeline_progress "Pre-Processing"
+    report_stage "Preparing your sequencing files."
 
     for stage_command in "${PRE_PROCESS_CMDS[@]}"; do
         $stage_command
@@ -242,15 +256,7 @@ jq -n \
 chmod +x nextflow_command.sh
 
 update_wrike_pipeline_progress "Running"
-
-# Publish a progress page for the length of the run. Backgrounded and cosmetic;
-# the loop reports its own trouble and keeps going.
-"$NEXTFLOW_DIR/scripts/nextflow_progress.sh" --watch &
-PROGRESS_PID=$!
-
-# Stop it however this script ends - including when Slurm cancels the job - so
-# no orphan keeps publishing over a finished run's report.
-trap 'kill "$PROGRESS_PID" 2>/dev/null || true' EXIT
+report_stage "Running the analysis."
 
 # Teed because nextflow's console output is the only live account it gives of its
 # own progress, and nextflow_progress.sh reads it from nextflow.out. It still
@@ -279,6 +285,12 @@ fi
 # 7. Post-process, e.g. uploading results to S3. Unquoted for the same reason as above.
 if [[ ${#POST_PROCESS_CMDS[@]} -gt 0 ]]; then
     update_wrike_pipeline_progress "Post-Processing"
+    report_stage "Packaging and publishing your results."
+
+    # One last page, by hand: the watcher was stopped above because the upload
+    # below lands the finished dashboard on the same key, and a loop still
+    # running would publish over it.
+    "$NEXTFLOW_DIR/scripts/nextflow_progress.sh" "Post-Processing" || true
 
     for stage_command in "${POST_PROCESS_CMDS[@]}"; do
         $stage_command

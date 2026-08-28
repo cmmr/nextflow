@@ -19,10 +19,14 @@
 #   qiime2/abundance_tables/feature-table.tsv          ASV counts, for diversity
 #
 # and left in ./composition_data.json, which publish_dashboard.sh writes into the
-# Overview page for its two plots to draw. Only the ten most abundant taxa of
-# each rank are kept, the rest summed into "Other": past ten fills no reader can
+# Overview page for its two plots to draw. Only the eleven most abundant taxa of
+# each rank are kept, the rest summed into "Other": past that fills no reader can
 # tell one colour from the next, and the full tables are published for anyone who
 # needs every row.
+#
+# A run publishes agglomerated tables only for the ranks tax_agglom_min..
+# tax_agglom_max covered, which stops at genus by default. Species is read out of
+# QIIME 2's barplot instead, which carries every rank the taxonomy names.
 #
 # Diversity is reported per sample as observed ASVs, Shannon, Simpson and
 # Pielou's evenness, computed on the unrarefied counts. Nothing is rarefied
@@ -62,6 +66,15 @@ readonly FEATURE_TABLE="$RESULTS_DIR/qiime2/abundance_tables/feature-table.tsv"
 # tax_agglom_min..tax_agglom_max covered
 readonly REL_TABLE_DIR="$RESULTS_DIR/qiime2/rel_abundance_tables"
 
+# QIIME 2's barplot data, one level-<n>.csv per rank the taxonomy carries, as
+# counts per sample. It reaches the ranks the tables above stop short of.
+readonly BARPLOT_DIR="$RESULTS_DIR/qiime2/barplot"
+
+# One row per ASV with a column per rank, which is what the classification
+# counts are read off. Named for the database the run used, so it is matched
+# rather than spelled out.
+readonly TAXONOMY_DIR="$RESULTS_DIR/dada2"
+
 readonly ALPHA_TABLE="$RESULTS_DIR/alpha_diversity.tsv"
 
 # What the Overview's two plots are drawn from, in the run directory rather than
@@ -78,11 +91,11 @@ readonly OVERALL_SUMMARY="$RESULTS_DIR/overall_summary.tsv"
 readonly STATS_FILE="run_statistics.tsv"
 
 # How many taxa of each rank are drawn in their own colour before the tail is
-# summed into "Other". Ten is what the palette carries, and a rank's list is
+# summed into "Other". Eleven is what the palette carries, and a rank's list is
 # usually seven or eight named taxa plus the unclassified and unassigned shares.
-readonly TOP_TAXA=10
+readonly TOP_TAXA=11
 
-# The rank each rel-table-<n>.tsv is agglomerated to, indexed by that number
+# The rank each rank-<n> table is agglomerated to, indexed by that number
 RANK_NAMES=(Domain Phylum Class Order Family Genus Species)
 
 if [[ ! -d "$RESULTS_DIR" ]]; then
@@ -221,12 +234,18 @@ level_json() {
             -v orderfile="$SAMPLE_ORDER" -v top="$TOP_TAXA" '
         # The deepest rank the classifier named, and whether it got that far.
         # "Bacteria;;;" is a sequence placed in a domain and nowhere below it.
-        function label(taxon,   parts, count, i) {
+        # A species is named by its epithet alone, which only reads as a species
+        # beside the genus above it.
+        function label(taxon,   parts, count, i, name) {
             count = split(taxon, parts, ";")
 
             for (i = count; i >= 1; i--) {
                 if (parts[i] == "") continue
-                return i == count ? parts[i] : "Unclassified " parts[i]
+
+                name = (i == SPECIES && parts[GENUS] != "") \
+                     ? parts[GENUS] " " parts[i] : parts[i]
+
+                return i == count ? name : "Unclassified " name
             }
 
             return "Unassigned"
@@ -244,6 +263,9 @@ level_json() {
                 deepest = i
                 break
             }
+
+            # The genus belongs to the species name rather than the path above it
+            if (deepest == SPECIES && parts[GENUS] != "") deepest = GENUS
 
             out = ""
 
@@ -289,6 +311,10 @@ level_json() {
         }
 
         BEGIN {
+            # Where the genus and species sit in a Silva-style taxonomy string
+            GENUS = 6
+            SPECIES = 7
+
             while ((getline line < orderfile) > 0) position[line] = ++samples
         }
 
@@ -363,14 +389,19 @@ count_asvs() {
 }
 
 # Reads as they arrived, summed over every sample. Which column counts them
-# depends on what the run did: cutadapt reports everything it processed, and a
-# run that skipped primer trimming starts at DADA2's input instead.
+# depends on what the run did, so the earliest stage the summary carries is the
+# one taken: chopper opens a nanopore run, cutadapt an Illumina one that trimmed
+# primers, and DADA2 one that did not.
+#
+# cutadapt writes its counts with thousands separators, so everything that is
+# not part of the number is stripped before it is read as one.
 total_input_reads() {
     LC_ALL=C awk -F'\t' '
         NR == 1 {
             for (i = 1; i <= NF; i++) at[$i] = i
 
-            split("cutadapt_total_processed DADA2_input input_reads input", want, " ")
+            split("chopper_input cutadapt_total_processed DADA2_input input_reads input",
+                  want, " ")
 
             for (i = 1; i in want; i++) {
                 if (want[i] in at) { pick = at[want[i]]; break }
@@ -378,40 +409,123 @@ total_input_reads() {
             next
         }
 
-        pick { total += $pick + 0 }
+        pick {
+            reads = $pick
+            gsub(/[^0-9.]/, "", reads)
+            total += reads + 0
+        }
 
         END { print total + 0 }
     ' "$OVERALL_SUMMARY"
 }
 
-# What share of the reads a rank's table places at that rank, as a percentage to
-# one decimal - two neighbouring ranks are often within a point of each other,
-# and rounding them to the same whole number reads as a mistake. A sequence the
-# classifier could not take that deep carries an empty field, or a bare rank
-# prefix, where the name would be.
-rank_classified_pct() {
-    local file="$1" rank="$2"
+# The table for one rank, in the shape level_json reads: taxa down the rows,
+# samples across, each cell that sample's share of its own reads.
+#
+# The agglomerated table is used wherever the run published one. Past
+# tax_agglom_max there is none, so the rank is converted out of the barplot's
+# counts instead - the same numbers transposed and divided by each sample's
+# total. Prints the path to whichever it used, and nothing when the run carries
+# neither.
+rank_table() {
+    local rank="$1"
+    local published="$REL_TABLE_DIR/rel-table-$rank.tsv"
+    local barplot="$BARPLOT_DIR/level-$rank.csv"
+    local converted="$WORK/rel-table-$rank.tsv"
 
-    LC_ALL=C awk -F'\t' -v rank="$rank" '
-        function classified(taxon,   parts) {
-            split(taxon, parts, ";")
-            return parts[rank] != "" && parts[rank] !~ /^[A-Za-z]__$/
+    if [[ -r "$published" ]]; then
+        printf '%s' "$published"
+        return 0
+    fi
+
+    [[ -r "$barplot" ]] || return 1
+
+    LC_ALL=C awk -F',' '
+        NR == 1 {
+            for (i = 2; i <= NF; i++) taxon[i] = $i
+            columns = NF
+            next
         }
 
-        /^#OTU ID/ { columns = NF; next }
-        /^#/ { next }
-
         {
-            named = classified($1)
+            sample[++n] = $1
 
             for (i = 2; i <= columns; i++) {
-                total += $i + 0
-                if (named) placed += $i + 0
+                count[i, n] = $i + 0
+                total[n] += $i + 0
             }
         }
 
-        END { printf "%.1f\n", (total > 0 ? placed / total * 100 : 0) }
-    ' "$file"
+        END {
+            printf "# Converted from the barplot\n#OTU ID"
+
+            for (s = 1; s <= n; s++) printf "\t%s", sample[s]
+
+            printf "\n"
+
+            for (i = 2; i <= columns; i++) {
+                printf "%s", taxon[i]
+
+                for (s = 1; s <= n; s++) {
+                    printf "\t%.17g", (total[s] > 0 ? count[i, s] / total[s] : 0)
+                }
+
+                printf "\n"
+            }
+        }
+    ' "$barplot" > "$converted" || return 1
+
+    printf '%s' "$converted"
+}
+
+# The per-ASV taxonomy the classification counts are read off, named for the
+# database the run classified against. addSpecies writes the longer table; the
+# shorter one is what a run that skipped it leaves.
+asv_taxonomy_table() {
+    local path
+
+    for path in "$TAXONOMY_DIR"/ASV_tax_species.*.tsv "$TAXONOMY_DIR"/ASV_tax.*.tsv; do
+        [[ -r "$path" ]] || continue
+
+        printf '%s' "$path"
+        return 0
+    done
+
+    return 1
+}
+
+# How many of the run's ASVs the classifier named at one rank, which is what
+# ampliseq's own report counts. Taken over the ASVs the filtered table kept
+# rather than everything DADA2 called, so the count is a share of the ASV total
+# reported beside it. A sequence the classifier could not take that deep carries
+# an empty field, or a bare rank prefix, where the name would be.
+rank_classified_asvs() {
+    local taxonomy="$1" rank="$2"
+
+    LC_ALL=C awk -F'\t' -v rank="$rank" '
+        # The ASVs that survived filtering, under the comments biom writes
+        NR == FNR {
+            if ($0 !~ /^#/ && NF > 1) kept[$1] = 1
+            next
+        }
+
+        FNR == 1 { next }
+
+        {
+            id = $1
+            gsub(/"/, "", id)
+
+            if (!(id in kept)) next
+
+            # ASV_ID opens the row, so a rank sits one column further along
+            name = $(rank + 1)
+            gsub(/"/, "", name)
+
+            if (name != "" && name !~ /^[A-Za-z]__$/) named++
+        }
+
+        END { print named + 0 }
+    ' "$FEATURE_TABLE" "$taxonomy"
 }
 
 # Read depth across the samples, off the diversity table just written - so what
@@ -445,9 +559,9 @@ read_depth_stats() {
 # The run's headline numbers, as key and value, for the dashboard's sidebar.
 # Each is left out rather than guessed at when the table behind it is missing.
 write_run_statistics() {
-    local family_table="$REL_TABLE_DIR/rel-table-5.tsv"
-    local genus_table="$REL_TABLE_DIR/rel-table-6.tsv"
-    local species_table="$REL_TABLE_DIR/rel-table-7.tsv"
+    local taxonomy=""
+
+    taxonomy=$(asv_taxonomy_table) || true
 
     {
         printf 'samples\t%s\n' "$(wc -l < "$SAMPLE_ORDER")"
@@ -459,16 +573,10 @@ write_run_statistics() {
             printf 'reads_total\t%s\n' "$(total_input_reads)"
         fi
 
-        if [[ -r "$family_table" ]]; then
-            printf 'family_pct\t%s\n' "$(rank_classified_pct "$family_table" 5)"
-        fi
-
-        if [[ -r "$genus_table" ]]; then
-            printf 'genus_pct\t%s\n' "$(rank_classified_pct "$genus_table" 6)"
-        fi
-
-        if [[ -r "$species_table" ]]; then
-            printf 'species_pct\t%s\n' "$(rank_classified_pct "$species_table" 7)"
+        if [[ -n "$taxonomy" ]]; then
+            printf 'phylum_asvs\t%s\n' "$(rank_classified_asvs "$taxonomy" 2)"
+            printf 'genus_asvs\t%s\n' "$(rank_classified_asvs "$taxonomy" 6)"
+            printf 'species_asvs\t%s\n' "$(rank_classified_asvs "$taxonomy" 7)"
         fi
     } > "$STATS_FILE"
 }
@@ -503,9 +611,7 @@ if [[ -n "$DATA" ]]; then
     LEVELS=""
 
     for RANK in 2 3 4 5 6 7; do
-        REL_TABLE="$REL_TABLE_DIR/rel-table-$RANK.tsv"
-
-        [[ -r "$REL_TABLE" ]] || continue
+        REL_TABLE=$(rank_table "$RANK") || continue
 
         if ! LEVEL=$(level_json "$REL_TABLE" "$RANK" "${RANK_NAMES[$RANK - 1]}"); then
             warn "The rank-$RANK abundance table could not be summarised; skipping it."

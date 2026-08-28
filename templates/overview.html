@@ -19,9 +19,9 @@
   ampliseq_composition.sh works the numbers out; a run with none leaves the
   panel on its empty state.
 
-  The ten colours are a categorical set whose ordering is what keeps
+  The eleven colours are a categorical set whose ordering is what keeps
   neighbouring fills apart under colour vision deficiency, so they are assigned
-  in that order and never cycled. An eleventh taxon is not given an eleventh
+  in that order and never cycled. A twelfth taxon is not given a twelfth
   colour: the tail is summed into "Other", which wears the neutral. Sorting the
   samples never reassigns them either. Several of the steps sit under 3:1
   against a white page, which is why the legend above the chart names every
@@ -59,6 +59,7 @@ __COMMON_HEAD__
   --series-8: #e34948;
   --series-9: #7a5c3e;
   --series-10: #00a0b0;
+  --series-11: #861358;
   --series-other: #b3bec9;
 
   --border: #c5c5d3;
@@ -113,6 +114,10 @@ canvas { display: block; width: 100%; }
   color: var(--muted);
   overflow-wrap: anywhere;
 }
+
+/* A legend column is a third of the panel whatever the name in it is, so a
+   taxon too long for one breaks across lines instead of stretching the track */
+.legend-name { min-width: 0; overflow-wrap: anywhere; }
 
 /* One tooltip for both charts, moved to whichever is under the pointer */
 .tip {
@@ -178,11 +183,11 @@ canvas { display: block; width: 100%; }
 </div>
 <div class="absolute inset-0 flex flex-col px-6 py-5" id="plot-scroll" style="display: none">
 <section class="flex-1 min-h-0 flex flex-col" id="composition" style="display: none">
-<div class="grid grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-2.5 shrink-0 max-h-[28%] overflow-y-auto pr-1 pb-5" id="legend"></div>
+<div class="grid grid-cols-3 gap-x-8 gap-y-2.5 shrink-0 max-h-[34%] overflow-y-auto pb-5" id="legend"></div>
 <div class="flex-1 min-h-0 overflow-hidden" id="bars-box"><canvas id="bars"></canvas></div>
 <div class="shrink-0 max-w-3xl mt-4 space-y-1">
 <p class="font-body-sm text-body-sm text-on-surface">One column per sample, stacked to
-100% of that sample&rsquo;s reads. The ten most abundant taxa at this rank are drawn in
+100% of that sample&rsquo;s reads. The eleven most abundant taxa at this rank are drawn in
 their own colour; everything rarer is grouped as &ldquo;Other&rdquo;.</p>
 <p class="font-body-sm text-body-sm text-outline" id="axis-note"></p>
 </div>
@@ -296,6 +301,13 @@ __STATS__
 
   // Room above every plot for the label on its topmost gridline
   var TOP = 9;
+
+  // The gutter the composition chart leaves down its left for the axis title
+  // and its percentage labels, and the margin it keeps at the right. The legend
+  // is inset by both, so it sits over the columns rather than over the axis
+  // beside them.
+  var COMPOSITION_LEFT = 58;
+  var PLOT_RIGHT = 8;
 
   var tip = document.getElementById("tip");
   var order = samples.map(function (_, i) { return i; });
@@ -462,7 +474,7 @@ __STATS__
     var ctx = view.ctx;
     var foot = band(ctx, total);
     var plotHeight = Math.max(90, total - TOP - foot);
-    var geometry = columns(view.width, 58, 8);
+    var geometry = columns(view.width, COMPOSITION_LEFT, PLOT_RIGHT);
     var colors = palette(level.taxa);
     var rows = level.values;
     var floor = TOP + plotHeight;
@@ -515,7 +527,7 @@ __STATS__
       if (clipped) ctx.restore();
     }
 
-    axisTitle(ctx, "Share of reads", TOP, plotHeight);
+    axisTitle(ctx, "Relative Abundance", TOP, plotHeight);
 
     if (names) drawNames(ctx, geometry, floor, foot);
     else       axisFoot(ctx, "Samples", geometry.left, view.width - 8, floor + 8);
@@ -557,6 +569,9 @@ __STATS__
     var colors = palette(level.taxa);
     var html = "";
 
+    legend.style.paddingLeft = COMPOSITION_LEFT + "px";
+    legend.style.paddingRight = PLOT_RIGHT + "px";
+
     for (var t = 0; t < level.taxa.length; t++) {
       var taxon = level.taxa[t];
       var tail = t === level.taxa.length - 1;
@@ -567,7 +582,7 @@ __STATS__
       html += '<span class="flex items-start gap-2 min-w-0 text-[11px] leading-4'
         + ' text-on-surface" title="' + escape(about) + '">'
         + '<span class="swatch mt-0.5" style="background:' + colors[t] + '"></span>'
-        + '<span class="min-w-0 break-words">' + escape(taxon.label) + "</span></span>";
+        + '<span class="legend-name">' + escape(taxon.label) + "</span></span>";
     }
 
     legend.innerHTML = html;
@@ -613,7 +628,7 @@ __STATS__
     var ctx = view.ctx;
     var foot = band(ctx, total);
     var height = Math.max(80, total - TOP - foot);
-    var geometry = columns(view.width, 66, 8);
+    var geometry = columns(view.width, 66, PLOT_RIGHT);
     var floor = TOP + height;
     var top = 0;
 

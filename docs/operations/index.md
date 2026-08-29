@@ -48,6 +48,7 @@ name the same path and both streams interleave there. Per-run state lives in
 `$NEXTFLOW_DIR/tmp/<uid>/`, which is created as soon as a request is picked up
 and removed only when its job succeeds or its Wrike task goes away: a directory
 still present after a run ended means the run failed or the request was never
-accepted, and `status.txt`, `message.out`, and `nextflow.log` there say why —
-with `wrike_task_id.txt` naming the Wrike task it came from, since the uid does
-not lead back to one.
+accepted, and `run_state.json` and `nextflow.log` there say why — the state
+file's `.status` and `.message` carrying the account of it, and its
+`.wrike.task_id` naming the Wrike task it came from, since the uid does not lead
+back to one.

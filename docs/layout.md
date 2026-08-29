@@ -28,6 +28,7 @@ scripts/
   ampliseq_composition.sh  Works out what the Overview plots. Run by ampliseq_upload.sh.
   ampliseq_upload.sh       POST_PROCESS_CMDS for the ampliseq pipeline.
   taxprofiler_samplesheet.sh  PRE_PROCESS_CMDS for the taxprofiler pipelines.
+  taxprofiler_composition.sh  Works out what the Overview plots. Run by taxprofiler_upload.sh.
   taxprofiler_upload.sh       POST_PROCESS_CMDS for the taxprofiler pipelines.
   build_host_reference.sh     Builds a host-depletion reference. Setup, not part of a run.
   build_16s_reference.sh      Builds the 16S landmarks the region detector aligns to. Likewise.

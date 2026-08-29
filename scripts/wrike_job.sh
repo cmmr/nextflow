@@ -32,22 +32,26 @@
 # and then anything in PARAMS_LOCKED is put back, since those name files the run
 # itself creates.
 #
-# Given a third argument, this run reproduces an earlier one: rerun_manifest.json
-# is that run's own pipeline_manifest.json, and its nextflow arguments and
-# parameters replace what the pipeline file would have used.
+# Given a third argument, this run reproduces an earlier one:
+# wrike_task_handler.sh has put the manifest that run published under
+# "rerun.manifest" in the state file, and its nextflow arguments and parameters
+# replace what the pipeline file would have used.
 #
-# Two records are written before nextflow starts and copied into the published
-# results afterwards:
+# Two records are made before nextflow starts:
 #
-#   nextflow_command.sh     the fully expanded command, which is then executed,
-#                           so the record cannot drift from what ran
-#   pipeline_manifest.json  the pipeline, its nextflow arguments, and every
-#                           parameter - what a later rerun is rebuilt from
+#   nextflow_command.sh  the fully expanded command, which is then executed, so
+#                        the record cannot drift from what ran. Copied into the
+#                        published results.
+#   the state file's     the pipeline, its nextflow arguments, and every
+#   ".manifest"          parameter - what a later rerun is rebuilt from.
+#                        nextflow_progress.sh publishes the whole state file to
+#                        the run's S3 prefix, which is where a later request
+#                        naming this run reads it back from.
 #
-# Never comments on the Wrike task itself: progress goes to ./status.txt, any
-# user-facing explanation to ./message.out (what fail writes to), and anything a
-# stage wants reported on success to ./notes.txt - all of which wrike_followup.sh
-# reads once this job ends, however it ends.
+# Never comments on the Wrike task itself: progress goes to the state file's
+# ".status", any user-facing explanation to its ".message" (what fail writes to),
+# and anything a stage wants reported on success to its ".notes" - all of which
+# wrike_followup.sh reads once this job ends, however it ends.
 #
 # --output and --error name the same file, so this job's commentary and anything
 # nextflow writes to stderr interleave in one log/job_<uid>_<jobid>.out.
@@ -60,8 +64,9 @@
 #            the end of the nextflow one, and once more before post-processing
 # Requires:  nextflow (as $NEXTFLOW_DIR/bin/nextflow), curl and jq (via the
 #            Wrike helpers)
-# Env:       NEXTFLOW_DIR, the Wrike helper functions, the params helpers, and
-#            the fail/read_wrike_task_id helpers, all sourced from .env
+# Env:       NEXTFLOW_DIR, the Wrike helper functions, the params helpers, the
+#            run state helpers, and the fail/read_wrike_task_id helpers, all
+#            sourced from .env
 
 set -euo pipefail
 
@@ -78,8 +83,6 @@ ATTACHMENT_ID="$2"
 # fixed the parameters it would otherwise measure
 export PIPELINE_RERUN_UID="${3:-}"
 
-readonly RERUN_MANIFEST="rerun_manifest.json"
-readonly RUN_MANIFEST="pipeline_manifest.json"
 readonly DETECTED_PARAMS="detected_params.yaml"
 readonly RERUN_PARAMS="rerun_params.yaml"
 
@@ -90,7 +93,8 @@ if ! TASK_ID=$(read_wrike_task_id); then
     fail "Cannot tell which Wrike task this run belongs to."
 fi
 
-update_wrike_pipeline_progress "Initializing"
+report_status "Initializing"
+update_wrike_task_status "Initializing"
 report_stage "Getting your run ready."
 
 # Publish a progress page for the length of the run, from here rather than from
@@ -146,21 +150,24 @@ update_wrike_custom_field "$WRIKE_PIPELINE_NAME_CFID" "$PIPELINE_VERSION" \
 # 3. A rerun takes its command line and its params file from the run it
 #    reproduces; only the samples are this run's own.
 if [[ -n "$PIPELINE_RERUN_UID" ]]; then
-    [[ -r "$RERUN_MANIFEST" ]] \
+    state_has rerun.manifest \
         || fail "Run $PIPELINE_RERUN_UID cannot be reproduced: its record was not downloaded."
 
-    if ! RECORDED_ARGS=$(jq -er '.nextflow_args[]' "$RERUN_MANIFEST"); then
+    RERUN_MANIFEST=$(state_get_json rerun.manifest)
+
+    if ! RECORDED_ARGS=$(printf '%s' "$RERUN_MANIFEST" | jq -er '.nextflow_args[]'); then
         fail "Run $PIPELINE_RERUN_UID cannot be reproduced: its record has no nextflow arguments."
     fi
 
     mapfile -t NEXTFLOW_ARGS <<< "$RECORDED_ARGS"
 
-    PARAMS_FILE=$(jq -r '.params_file // empty' "$RERUN_MANIFEST")
+    PARAMS_FILE=$(state_get rerun.manifest.params_file)
 
     # Written as a layer rather than applied directly, so it lands in the same
     # order as every other override and is published with the rest of the run
-    jq -r '.params // {} | to_entries[] | "\(.key): \(.value | tostring | @json)"' \
-        "$RERUN_MANIFEST" > "$RERUN_PARAMS"
+    printf '%s' "$RERUN_MANIFEST" \
+        | jq -r '.params // {} | to_entries[] | "\(.key): \(.value | tostring | @json)"' \
+        > "$RERUN_PARAMS"
 
     log "Reproducing run $PIPELINE_RERUN_UID with $PIPELINE_VERSION."
 fi
@@ -170,7 +177,8 @@ fi
 #    plus its arguments. They name it by absolute path, so nothing here depends
 #    on PATH.
 if [[ ${#PRE_PROCESS_CMDS[@]} -gt 0 ]]; then
-    update_wrike_pipeline_progress "Pre-Processing"
+    report_status "Pre-Processing"
+    update_wrike_task_status "Pre-Processing"
     report_stage "Preparing your sequencing files."
 
     for stage_command in "${PRE_PROCESS_CMDS[@]}"; do
@@ -214,33 +222,37 @@ fi
 # and every parameter as resolved. wrike_task_handler.sh reads this back off S3
 # when a later request asks to reproduce this run.
 #
-# The sample count rides along because this file outlives the results:
-# wrike_expiration.sh reads it for the page it leaves where an expired dashboard
-# was, long after sample_count.txt went with the run directory.
-jq -n \
-    --argjson schema 1 \
-    --arg run_id "${PWD##*/}" \
-    --arg wrike_task_id "$TASK_ID" \
-    --arg recorded_utc "$(date -u "+%Y-%m-%dT%H:%M:%SZ")" \
-    --arg pipeline "$PIPELINE_VERSION" \
-    --arg pipeline_name "${PIPELINE_NAME:-$PIPELINE_UPPER}" \
-    --arg params_file "$PARAMS_FILE" \
-    --arg rerun_of "$PIPELINE_RERUN_UID" \
-    --arg region "$([[ -r region.txt ]] && head -1 region.txt || true)" \
-    --arg retention "$(form_answer retention)" \
-    --arg sample_count "$([[ -r sample_count.txt ]] && head -1 sample_count.txt || true)" \
-    --argjson nextflow_args "$(printf '%s\n' "${NEXTFLOW_ARGS[@]}" \
-        | jq -R -s 'split("\n") | map(select(length > 0))')" \
-    --argjson params "$(params_json)" \
-    '{schema: $schema, run_id: $run_id, wrike_task_id: $wrike_task_id,
-      recorded_utc: $recorded_utc, pipeline: $pipeline, pipeline_name: $pipeline_name,
-      params_file: $params_file, nextflow_args: $nextflow_args, params: $params}
-     | if $region       != "" then . + {region: $region}             else . end
-     | if $retention    != "" then . + {retention: $retention}       else . end
-     | if $rerun_of != "" then . + {rerun_of: $rerun_of} else . end
-     | if ($sample_count | test("^[0-9]+$"))
-       then . + {sample_count: ($sample_count | tonumber)} else . end' \
-    > "$RUN_MANIFEST"
+# The sample count rides along because the published copy outlives the run
+# directory: wrike_expiration.sh reads it for the page it leaves where an
+# expired dashboard was.
+if ! MANIFEST=$(jq -n \
+        --argjson schema 1 \
+        --arg run_id "${PWD##*/}" \
+        --arg wrike_task_id "$TASK_ID" \
+        --arg recorded_utc "$(date -u "+%Y-%m-%dT%H:%M:%SZ")" \
+        --arg pipeline "$PIPELINE_VERSION" \
+        --arg pipeline_name "${PIPELINE_NAME:-$PIPELINE_UPPER}" \
+        --arg params_file "$PARAMS_FILE" \
+        --arg rerun_of "$PIPELINE_RERUN_UID" \
+        --arg region "$(state_get region)" \
+        --arg retention "$(form_answer retention)" \
+        --arg sample_count "$(state_get samples.count)" \
+        --argjson nextflow_args "$(printf '%s\n' "${NEXTFLOW_ARGS[@]}" \
+            | jq -R -s 'split("\n") | map(select(length > 0))')" \
+        --argjson params "$(params_json)" \
+        '{schema: $schema, run_id: $run_id, wrike_task_id: $wrike_task_id,
+          recorded_utc: $recorded_utc, pipeline: $pipeline, pipeline_name: $pipeline_name,
+          params_file: $params_file, nextflow_args: $nextflow_args, params: $params}
+         | if $region    != "" then . + {region: $region}       else . end
+         | if $retention != "" then . + {retention: $retention} else . end
+         | if $rerun_of  != "" then . + {rerun_of: $rerun_of}   else . end
+         | if ($sample_count | test("^[0-9]+$"))
+           then . + {sample_count: ($sample_count | tonumber)} else . end'); then
+    fail "Could not record how this run was set up; it could not be reproduced later."
+fi
+
+state_set_json manifest "$MANIFEST" \
+    || fail "Could not record how this run was set up; it could not be reproduced later."
 
 # Write the resolved command to a script and execute that, rather than running
 # nextflow directly, so the record can never drift from what was actually run.
@@ -255,7 +267,8 @@ jq -n \
 } > nextflow_command.sh
 chmod +x nextflow_command.sh
 
-update_wrike_pipeline_progress "Running"
+report_status "Running"
+update_wrike_task_status "Running"
 report_stage "Running the analysis."
 
 # Teed because nextflow's console output is the only live account it gives of its
@@ -273,18 +286,19 @@ kill "$PROGRESS_PID" 2>/dev/null || true
 trap - EXIT
 
 # Ship the records alongside the results, since the run directory is deleted once
-# the run succeeds. pipeline_manifest.json in particular has to reach S3: it is
-# the only thing a later rerun of this run can be rebuilt from. Best-effort - a
-# pipeline that publishes somewhere other than results/ keeps its records in the
-# run directory.
+# the run succeeds. The state file is not among them: it is published to the same
+# prefix under its own name, by nextflow_progress.sh, and a stale copy uploaded
+# with the results would land on top of it. Best-effort - a pipeline that
+# publishes somewhere other than results/ keeps its records in the run directory.
 if [[ -d results ]]; then
-    cp nextflow_command.sh "$RUN_MANIFEST" results/ 2>/dev/null || true
+    cp nextflow_command.sh results/ 2>/dev/null || true
     cp ./*.yaml region_detection.txt results/ 2>/dev/null || true
 fi
 
 # 7. Post-process, e.g. uploading results to S3. Unquoted for the same reason as above.
 if [[ ${#POST_PROCESS_CMDS[@]} -gt 0 ]]; then
-    update_wrike_pipeline_progress "Post-Processing"
+    report_status "Post-Processing"
+    update_wrike_task_status "Post-Processing"
     report_stage "Packaging and publishing your results."
 
     # One last page, by hand: the watcher was stopped above because the upload
@@ -297,7 +311,9 @@ if [[ ${#POST_PROCESS_CMDS[@]} -gt 0 ]]; then
     done
 fi
 
-# The success signal wrike_followup.sh checks, reached only when every stage above
-# succeeded. Any earlier exit leaves status.txt on the stage that failed.
-echo "Completed" > status.txt
+# The success signal wrike_followup.sh checks, reached only when every stage
+# above succeeded. Any earlier exit leaves the state file's ".status" on the
+# stage that failed. The Wrike task is left to wrike_followup.sh, which moves it
+# once it has read this.
+report_status "Completed"
 exit 0

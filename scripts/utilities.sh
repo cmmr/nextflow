@@ -14,13 +14,14 @@
 # Only log writes to stdout, which keeps stdout free to carry a function's return
 # value - several helpers here hand their result back through $(...).
 #
-# fail also copies its message, unstamped, to ./message.out when that file
-# exists. That is how a compute node explains itself to the requester:
-# wrike_task_handler.sh creates message.out in the run directory, and
-# wrike_followup.sh posts whatever ends up there back to the Wrike task.
+# fail also copies its message, unstamped, into the run's state file as
+# ".message" when there is one. That is how a compute node explains itself to
+# the requester: wrike_task_handler.sh creates run_state.json in the run
+# directory, and wrike_followup.sh posts whatever ends up there back to the
+# Wrike task.
 #
 # Defines: log, warn, fail, run_results_url, escape_html, escape_url, human_size,
-#          human_count, report_stage, render_template, is_valid_uid, derive_uid
+#          human_count, group_count, render_template, is_valid_uid, derive_uid
 # Env:     RUN_ID_SALT from secrets/.env, for derive_uid only; AWS_S3_BUCKET and
 #          S3_RUN_PREFIX for run_results_url; NEXTFLOW_DIR for render_template
 
@@ -35,9 +36,10 @@ warn() {
 fail() {
     echo "[$(date)] ERROR: $*" >&2
 
-    # Truncate rather than append: the first failure explains the run
-    if [[ -f message.out ]]; then
-        echo "$*" > message.out
+    # Overwritten rather than appended: the first failure explains the run.
+    # Best effort and silent - this is the last thing the script does.
+    if state_present; then
+        state_set message "$*" > /dev/null 2>&1 || true
     fi
 
     exit 1
@@ -101,18 +103,6 @@ human_size() {
     }'
 }
 
-# What the run is doing right now, in one sentence a requester would recognise.
-# Written to ./stage.txt in the run directory, where nextflow_progress.sh reads
-# it for the line under the run's name - so the page can say something during
-# the stages nextflow knows nothing about, which is everything before and after
-# itself.
-#
-# Overwritten rather than appended: the page reports where the run is, not how
-# it got there. Best effort, since a run must not fail over a status line.
-report_stage() {
-    printf '%s\n' "$1" > stage.txt 2>/dev/null || true
-}
-
 # A count, in the units a sidebar has room for: 16600 -> 17k, 2400000 -> 2M.
 # Rounded to the unit rather than given a decimal, so a column of them lines
 # up. Anything under a thousand is written out in full.
@@ -125,6 +115,25 @@ human_count() {
         i = 0
         while (n >= 1000 && i < 3) { n /= 1000; i++ }
         printf "%d%s", n + 0.5, unit[i]
+    }'
+}
+
+# A count written out in full, grouped in threes: 2906 -> 2,906. For a reading
+# that means less rounded than it does exact - how many genera a run named is
+# not a figure to hand over as "3k".
+group_count() {
+    local count="$1"
+
+    LC_ALL=C awk -v n="$count" 'BEGIN {
+        digits = sprintf("%d", n)
+        out = ""
+
+        while (length(digits) > 3) {
+            out = "," substr(digits, length(digits) - 2) out
+            digits = substr(digits, 1, length(digits) - 3)
+        }
+
+        printf "%s%s", digits, out
     }'
 }
 
@@ -180,7 +189,7 @@ is_valid_uid() {
 # Turn a Wrike task ID into that uid. Derived rather than stored, so anything
 # holding a task ID can recompute it - which is what lets wrike_delete_handler.sh
 # find a run to tear down after its task is gone. The reverse direction is not
-# derivable; a run reads its task ID back from wrike_task_id.txt.
+# derivable; a run reads its task ID back out of its state file.
 #
 # HMAC rather than a plain digest, so knowing a task ID is not enough to compute
 # where someone else's results are published. Lowercase base32: no 0/O or 1/l

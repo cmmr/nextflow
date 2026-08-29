@@ -75,13 +75,13 @@ accepts values outside its list (`allowOtherValues`), and a custom field can be
 written by anything holding a token. Neither check is load-bearing alone.
 
 A malformed answer is refused without being quoted back on the task, so nothing
-unchecked is reflected into a Wrike comment; `request.json` in the run directory
-has it if you need to see it.
+unchecked is reflected into a Wrike comment; `.request` in the run's
+`run_state.json` has it if you need to see it.
 
 There is no free-text parameter field: what a requester can ask for is exactly
 what is listed above.
 
-Checked answers are written verbatim to `form_answers.tsv` in the run directory
+Checked answers are recorded verbatim under `.answers` in the run's state file
 and left there. Nothing in the handler interprets one — pipelines read them with
 `form_answer`, so which answers mean anything stays a
 [pipeline's business](../pipelines/index.md#the-forms-answers).
@@ -100,7 +100,7 @@ Adding a question is: create the custom field, point the form at it, and add a
 row to `WRIKE_FORM_ANSWERS`. A row with an empty ID reads as never answered, and
 the handler warns once per request naming it.
 
-`request.json` in the run directory records which field each question resolved
+`.request` in the run's state file records which field each question resolved
 through and what came back, so an answer that did not arrive can be told from one
 that was never given.
 
@@ -133,8 +133,7 @@ The one answer besides "Nextflow Pipeline" that the handler reads rather than
 leaving to a pipeline. `wrike_task_handler.sh` turns it into a date — today plus
 the number of months it names — and writes that to the task's **"Dashboard
 Expiration"** field (`WRIKE_EXPIRATION_CFID`); "Unlimited" leaves that blank,
-which means kept indefinitely. It is also recorded in the run's
-`pipeline_manifest.json`.
+which means kept indefinitely. It is also recorded in the run's manifest.
 
 `wrike_expiration.sh` reads that date off every task in "Dashboards" once a day:
 two weeks out it comments, mentioning the author and the task's followers; on the

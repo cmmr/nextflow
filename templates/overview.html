@@ -286,6 +286,16 @@ __STATS__
   var levels = (DATA && DATA.levels) || [];
   var count = samples.length;
 
+  // What one column of the diversity chart is a count of, which is not the same
+  // thing from one pipeline to the next: an amplicon run counts the ASVs it
+  // called, a shotgun run the species a classifier named. Named by whichever
+  // script worked the numbers out, since only it knows; an ASV when it says
+  // nothing, which is what the first pipeline published here counted.
+  var feature = (DATA && DATA.feature) || {};
+  var ONE = feature.one || "ASV";
+  var MANY = feature.many || "ASVs";
+  var DEPTH = feature.depth || ("reads assigned to " + MANY);
+
   if (!count) return;
 
   // The empty state and the controls are laid out by a display utility, which
@@ -592,14 +602,16 @@ __STATS__
 
   // One index is plotted at a time, and this is the order they are offered in:
   // Shannon first, because it is the one a reader asks for. Chao1 is not among
-  // them - it estimates richness from the ASVs seen once and twice, and DADA2
-  // has already dropped most of the singletons.
+  // them - it estimates richness from what was seen exactly once and twice, and
+  // neither pipeline leaves a tail those two counts mean anything in: DADA2 has
+  // already dropped most of the singletons, and a shotgun profile's rarest taxa
+  // are the classifier's error rate as much as they are biology.
   var METRICS = [
     { key: "shannon", title: "Shannon index", note: "richness and evenness together", places: 2 },
-    { key: "observed", title: "Observed ASVs", note: "distinct ASVs seen in the sample", integer: true },
-    { key: "reads", title: "Read depth", note: "reads assigned to ASVs", integer: true },
-    { key: "simpson", title: "Simpson index", note: "the chance two reads are different ASVs", places: 3 },
-    { key: "evenness", title: "Pielou's evenness", note: "0 = one ASV dominates, 1 = all equal", places: 3 }
+    { key: "observed", title: "Observed " + MANY, note: "distinct " + MANY + " seen in the sample", integer: true },
+    { key: "reads", title: "Read depth", note: DEPTH, integer: true },
+    { key: "simpson", title: "Simpson index", note: "the chance two reads are different " + MANY, places: 3 },
+    { key: "evenness", title: "Pielou's evenness", note: "0 = one " + ONE + " dominates, 1 = all equal", places: 3 }
   ];
 
   var metricSelect = document.getElementById("metric");

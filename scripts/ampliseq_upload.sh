@@ -31,8 +31,8 @@
 # Overview plots, which files its sidebar offers, what the run measured, and
 # which of the outputs named in templates/ampliseq/outputs.conf exist. The plots
 # and the numbers beside them are what ampliseq_composition.sh left in
-# composition_data.json and run_statistics.tsv, and the settings stated beside
-# them come off the manifest wrike_job.sh recorded.
+# composition_data.json and in the state file's "statistics", and the settings
+# stated beside them come off the manifest wrike_job.sh recorded.
 #
 # Usage:     ampliseq_upload.sh [results_dir]
 #            defaults to ./results, the outdir set in the ampliseq params file
@@ -40,17 +40,17 @@
 # Requires:  aws, zip, curl and jq (via the Wrike helpers)
 # Reads:     templates/dashboard.html, templates/overview.html,
 #            templates/files.html and templates/ampliseq/outputs.conf, via the
-#            dashboard helpers; ./composition_data.json, ./run_statistics.tsv
-#            and ./pipeline_manifest.json from the run directory
+#            dashboard helpers; ./composition_data.json, and the run's statistics
+#            and manifest out of ./run_state.json
 # Runs:      ampliseq_composition.sh and index_directories.sh, over the results
 #            folder
 # Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, WRIKE_DASHBOARD_URL_CFID,
 #            the Wrike and dashboard helper functions and the log/fail/is_valid_uid
 #            helpers, all sourced from .env
-# Outputs:   ./message.out on error
+# Outputs:   an explanation of a failure in ./run_state.json
 #
-# Does not write status.txt: wrike_job.sh marks the run Completed only after every
-# post-process step it runs has succeeded.
+# Does not record the run's status: wrike_job.sh marks the run Completed only
+# after every post-process step it runs has succeeded.
 
 set -euo pipefail
 
@@ -66,21 +66,17 @@ FASTQ_DIR="raw-sequences"
 FASTQ_ZIP_NAME="raw-sequences.zip"
 FASTQ_ZIP="$RESULTS_DIR/$FASTQ_ZIP_NAME"
 
-# Written by ampliseq_samplesheet.sh, in the run directory rather than in the
-# results: the number of samples after any merging
-SAMPLE_COUNT_FILE="sample_count.txt"
-
 # The headline numbers ampliseq_composition.sh counted out of the ASV and
 # abundance tables, as key and value, for the Overview's sidebar
-STATS_FILE="run_statistics.tsv"
+STATS_KEY="statistics"
 
 # What that script left for the Overview's two plots to draw, or nothing when
 # the run produced no tables to plot
 PLOT_DATA_FILE="composition_data.json"
 
-# Written by wrike_job.sh, and read here for the settings the page names: which
+# Recorded by wrike_job.sh, and read here for the settings the page names: which
 # pipeline version ran, which region it measured, and what it classified against
-RUN_MANIFEST="pipeline_manifest.json"
+RUN_MANIFEST_KEY="manifest"
 
 # What the page calls the analysis, under the task's own name
 SUBTITLE="16S rRNA amplicon sequencing analysis"
@@ -190,13 +186,13 @@ REGION=""
 REF_TAXONOMY=""
 SEQUENCING_TYPE=""
 
-if [[ -r "$RUN_MANIFEST" ]]; then
-    PIPELINE=$(jq -r '.pipeline // empty' "$RUN_MANIFEST") || true
-    REGION=$(jq -r '.region // empty' "$RUN_MANIFEST") || true
-    REF_TAXONOMY=$(jq -r '.params.dada_ref_taxonomy // empty' "$RUN_MANIFEST") || true
-    SEQUENCING_TYPE=$(jq -r '.params.sequencing_type // empty' "$RUN_MANIFEST") || true
+if state_has "$RUN_MANIFEST_KEY"; then
+    PIPELINE=$(state_get "$RUN_MANIFEST_KEY.pipeline")
+    REGION=$(state_get "$RUN_MANIFEST_KEY.region")
+    REF_TAXONOMY=$(state_get "$RUN_MANIFEST_KEY.params.dada_ref_taxonomy")
+    SEQUENCING_TYPE=$(state_get "$RUN_MANIFEST_KEY.params.sequencing_type")
 else
-    warn "No $RUN_MANIFEST in the run directory; the page will not say how the run was set up."
+    warn "This run recorded no manifest; the page will not say how the run was set up."
 fi
 
 case "$SEQUENCING_TYPE" in
@@ -237,13 +233,11 @@ fi
 #    how far each reading got.
 declare -A STATS=()
 
-if [[ -r "$STATS_FILE" ]]; then
-    while IFS=$'\t' read -r STAT_KEY STAT_VALUE; do
-        if [[ "$STAT_VALUE" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-            STATS["$STAT_KEY"]="$STAT_VALUE"
-        fi
-    done < "$STATS_FILE"
-fi
+while IFS=$'\t' read -r STAT_KEY STAT_VALUE; do
+    if [[ "$STAT_VALUE" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        STATS["$STAT_KEY"]="$STAT_VALUE"
+    fi
+done < <(state_get_tsv "$STATS_KEY")
 
 if [[ -n "${STATS[reads_retained]:-}" ]]; then
     RETAINED=${STATS[reads_retained]}
@@ -311,9 +305,9 @@ if TASK_JSON=$(call_wrike_api GET "tasks/$TASK_ID"); then
         || warn "Could not work out when this dashboard expires; the page will not say."
 fi
 
-if [[ -z "$TASK_NAME" && -r "$WRIKE_TASK_NAME_FILE" ]]; then
+if [[ -z "$TASK_NAME" ]]; then
     warn "Could not read the current task name; using the one recorded at submission."
-    read -r TASK_NAME < "$WRIKE_TASK_NAME_FILE" || true
+    TASK_NAME=$(state_get "$WRIKE_TASK_NAME_KEY")
 fi
 
 # One line: this is a page header, not a document
@@ -324,14 +318,11 @@ TASK_NAME=${TASK_NAME%%$'\n'*}
 #    recorded, or that is not a number, leaves that note off the header
 #    altogether. Validated because it is read from a file and written into the
 #    page.
-SAMPLE_COUNT=""
-if [[ -r "$SAMPLE_COUNT_FILE" ]]; then
-    read -r SAMPLE_COUNT < "$SAMPLE_COUNT_FILE" || true
+SAMPLE_COUNT=$(state_get samples.count)
 
-    if [[ ! "${SAMPLE_COUNT:-}" =~ ^[0-9]+$ ]]; then
-        warn "No usable sample count in $SAMPLE_COUNT_FILE; leaving it off the page."
-        SAMPLE_COUNT=""
-    fi
+if [[ -n "$SAMPLE_COUNT" && ! "$SAMPLE_COUNT" =~ ^[0-9]+$ ]]; then
+    warn "This run recorded no usable sample count; leaving it off the page."
+    SAMPLE_COUNT=""
 fi
 
 # 7. Land the pages last, once nothing they point at is still uploading. The

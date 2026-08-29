@@ -128,23 +128,28 @@ be found.
 
 ## Reproducing an earlier run
 
-Every run writes `pipeline_manifest.json` before nextflow starts and publishes it
-with its results, at `nxf/<uid>/pipeline_manifest.json`. It records the pipeline
-version, the nextflow command line, and every parameter as resolved — plus the
-sample count, which rides along because this file outlives the results it was
-published with: it is one of the few things
-[an expired dashboard](../operations/expiration.md) keeps.
+Every run records its manifest as `.manifest` in `run_state.json` before nextflow
+starts, and the whole state file is published at `nxf/<uid>/run_state.json`
+alongside the results. It records the pipeline version, the nextflow command
+line, and every parameter as resolved — plus the sample count, which rides along
+because the published copy outlives the results it was published with: it is one
+of the few things [an expired dashboard](../operations/expiration.md) keeps.
 
 A request that picks `prev_run_id` on the form and names a run in "Nextflow
 Previous Run ID" — or `run --rerun <run_id> samples.txt` — is handled by fetching
-that manifest from S3 and using it in place of everything the request would
+that state file from S3, reading `.manifest` out of it, and using that in place
+of everything the request would
 otherwise decide, the host reference included. The
 requester supplies new samples; nothing else about the analysis changes. For
 ampliseq that also means region detection is skipped, since the primers are
 already fixed.
 
-A run that never finished published no manifest, and so cannot be reproduced;
-the request is rejected saying so.
+Runs published before the run directory moved to one state file carry the
+manifest as `pipeline_manifest.json` instead, which is tried second, so they can
+still be reproduced.
+
+A run that never got as far as recording a manifest published none, and so cannot
+be reproduced; the request is rejected saying so.
 
 ## Adding a pipeline
 

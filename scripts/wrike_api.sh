@@ -8,14 +8,19 @@
 # is_valid_wrike_id and read_wrike_task_id acts on the task named by TASK_ID,
 # read from the environment rather than passed in.
 #
+# Nothing here writes the run's own state. update_wrike_task_status moves the
+# Wrike task; report_status, in run_state.sh, records the same name in the run
+# directory.
+#
 # Request bodies are built with jq rather than by splicing values into
 # hand-written JSON.
 #
 # The Wrike object IDs below are opaque references rather than secrets - useless
 # without a token - so they live here in git next to the code that uses them.
 #
-# Requires: curl, jq, Bash 4+ (associative arrays), and the warn helper from
-#           utilities.sh, which .env sources first
+# Requires: curl, jq, Bash 4+ (associative arrays), the warn helper from
+#           utilities.sh and the state helpers from run_state.sh, both of which
+#           .env sources first
 # Defines:  the WRIKE_* object IDs, WRIKE_FORM_ANSWERS and the helpers that read
 #           and check them, WRIKE_CUSTOM_STATUS_IDS, and WRIKE_LAST_RESPONSE (the
 #           reply to the most recent update_wrike_task)
@@ -109,12 +114,12 @@ declare -A WRIKE_CUSTOM_STATUS_IDS=(
     [Expired]="IEAAIKU5JMHRVOM3"
     [Cancelled]="IEAAIKU5JMHRVONH"
 )
-export WRIKE_TASK_ID_FILE="wrike_task_id.txt"
-export WRIKE_TASK_NAME_FILE="wrike_task_name.txt"
-
-# Where wrike_task_handler.sh leaves the checked answers, in the run directory,
-# as "key<tab>value" lines. Pipelines read it with form_answer.
-export WRIKE_FORM_ANSWERS_FILE="form_answers.tsv"
+# Where the run's state file keeps what this system records about its Wrike
+# task, and the checked answers to the request form. wrike_task_handler.sh
+# writes all three; pipelines read an answer back with form_answer.
+export WRIKE_TASK_ID_KEY="wrike.task_id"
+export WRIKE_TASK_NAME_KEY="wrike.task_name"
+export WRIKE_FORM_ANSWERS_KEY="answers"
 
 # True when the argument could be a Wrike API v4 ID: 1-256 characters over
 # Wrike's own [a-zA-Z0-9-_:.=], and neither "." nor "..". This rules out the
@@ -136,27 +141,25 @@ is_valid_wrike_id() {
 
 # Recover the task a run belongs to, for the helpers below to act on. Run
 # directories are named after the uid, which does not lead back to a task, so
-# wrike_task_handler.sh records the ID in this file when it creates the
-# directory.
+# wrike_task_handler.sh records the ID in the run's state file when it creates
+# the directory.
 #
 # Like derive_uid, this warns and returns rather than failing: callers read it
 # through $(...). stdout here is the task ID, which is why warn writes to stderr.
 read_wrike_task_id() {
-    local file="${1:-$WRIKE_TASK_ID_FILE}"
     local id
 
-    if [[ ! -r "$file" ]]; then
-        warn "Cannot read $file; the run's Wrike task is unknown."
+    if ! state_present; then
+        warn "No $RUN_STATE_FILE in $PWD; the run's Wrike task is unknown."
         return 1
     fi
 
-    # First line only, without surrounding whitespace
-    read -r id < "$file" || true
+    id=$(state_get "$WRIKE_TASK_ID_KEY")
 
     # Validated on the way out as well as in: this drives every URL the helpers
     # below build, and an empty value would address the whole tasks collection.
     if ! is_valid_wrike_id "$id"; then
-        warn "$file does not contain a usable Wrike task ID."
+        warn "$RUN_STATE_FILE does not hold a usable Wrike task ID."
         return 1
     fi
 
@@ -181,10 +184,10 @@ call_wrike_api() {
         # writes to stderr.
         warn "Request failed: $verb $endpoint (curl exit code $status)"
 
-        # Reports without stopping, so it writes message.out itself rather than
-        # leaving it to fail
-        if [[ -f message.out ]]; then
-            echo "Curl error code $status for $verb $endpoint." > message.out
+        # Reports without stopping, so it records the explanation itself rather
+        # than leaving it to fail
+        if state_present; then
+            state_set message "Curl error code $status for $verb $endpoint." || true
         fi
 
         return $status
@@ -243,6 +246,11 @@ update_wrike_custom_field() {
 
 # Wrike sets a status by ID; the names are mapped in WRIKE_CUSTOM_STATUS_IDS
 # above. An unmapped name is logged and skipped rather than reported.
+#
+# This reports to Wrike and nothing else. The run's own record of how far it got
+# is report_status, in run_state.sh, and a caller that wants both calls both -
+# which is what each stage of wrike_job.sh does. They are separate so the task
+# can be moved on without touching the run's record, and the other way round.
 update_wrike_task_status() {
     local new_value="$1"
     local status_id="${WRIKE_CUSTOM_STATUS_IDS[$new_value]:-}"
@@ -253,16 +261,6 @@ update_wrike_task_status() {
     fi
 
     update_wrike_task '{customStatus: $status}' --arg status "$status_id"
-}
-
-# The status, plus the run directory's own copy of it, which wrike_followup.sh
-# reads to find out how far the run got. Only for callers inside a run directory.
-update_wrike_pipeline_progress() {
-    local new_value="$1"
-
-    echo "$new_value" > status.txt
-
-    update_wrike_task_status "$new_value"
 }
 
 update_wrike_add_parent() {

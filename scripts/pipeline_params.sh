@@ -28,7 +28,8 @@
 # Defines: params_reset, params_set, params_get, params_has, params_unset,
 #          params_load, params_write, params_json, form_answer, PIPELINE_PARAMS,
 #          PIPELINE_PARAM_ORDER
-# Requires: jq, for params_json; the warn and fail helpers from utilities.sh
+# Requires: jq, for params_json; the warn and fail helpers from utilities.sh,
+#           and state_get from run_state.sh for form_answer
 
 declare -A PIPELINE_PARAMS=()
 declare -a PIPELINE_PARAM_ORDER=()
@@ -170,11 +171,9 @@ params_json() {
         | add // {}'
 }
 
-# One checked request form answer, from the file wrike_task_handler.sh leaves in
-# the run directory. Empty when the question was not answered, which is what a
-# pipeline reads as "use my own default".
+# One checked request form answer, from the run's state file, where
+# wrike_task_handler.sh records them under "answers". Empty when the question
+# was not answered, which is what a pipeline reads as "use my own default".
 form_answer() {
-    [[ -r "$WRIKE_FORM_ANSWERS_FILE" ]] || return 0
-
-    awk -F'\t' -v key="$1" '$1 == key { print $2; exit }' "$WRIKE_FORM_ANSWERS_FILE"
+    state_get "$WRIKE_FORM_ANSWERS_KEY.$1"
 }

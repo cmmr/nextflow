@@ -20,10 +20,10 @@
 # dashboard to lose. A task with no Expiration date is kept indefinitely, which
 # is what "Unlimited" leaves.
 #
-# What survives the tear-down is the run's own record - pipeline_manifest.json
-# above all, which is what a request naming this run as its "Previous Run ID" is
-# rebuilt from - so an expired run can still be repeated even though its results
-# are gone. KEEP_PATTERNS is that list, matched against the top level of the
+# What survives the tear-down is the run's own record - run_state.json above all,
+# which is what a request naming this run as its "Previous Run ID" is rebuilt
+# from - so an expired run can still be repeated even though its results are
+# gone. KEEP_PATTERNS is that list, matched against the top level of the
 # run's prefix only, so nothing in a subfolder survives.
 #
 # Nothing here is fatal to the pass. A task that cannot be read, torn down, or
@@ -68,16 +68,22 @@ readonly PAGE_SIZE=1000
 
 # What a torn-down run keeps, as globs matched against the key below the run's
 # prefix: enough to set the same run up again, and nothing carrying the results
-# themselves. pipeline_manifest.json is the one that matters - a "Previous Run
-# ID" request is rebuilt from it - and the rest are the record of what ran.
+# themselves. run_state.json is the one that matters - a "Previous Run ID"
+# request is rebuilt from its ".manifest" - and the rest are the record of what
+# ran.
+#
+# pipeline_manifest.json, rerun_manifest.json, form_answers.tsv and region.txt
+# are names runs published before the run directory moved to one state file; they
+# are listed so a prefix that still carries them keeps them.
 readonly KEEP_PATTERNS=(
-    "pipeline_manifest.json"
-    "rerun_manifest.json"
+    "run_state.json"
     "nextflow_command.sh"
-    "form_answers.tsv"
-    "region.txt"
     "region_detection.txt"
     "*.yaml"
+    "pipeline_manifest.json"
+    "rerun_manifest.json"
+    "form_answers.tsv"
+    "region.txt"
 )
 
 DRY_RUN=false
@@ -198,16 +204,20 @@ delete_keys() {
 }
 
 # The number of samples the run analysed, for the page that replaces its
-# dashboard. pipeline_manifest.json has carried it since August 2026; for a run
-# published before that, it is read back out of the landing page about to be
-# deleted, which is the only other place the figure was written down. Prints
-# nothing when neither has it.
+# dashboard. run_state.json carries it, and pipeline_manifest.json did before it;
+# for a run published before either, it is read back out of the landing page
+# about to be deleted, which is the only other place the figure was written down.
+# Prints nothing when none of them has it.
 recorded_sample_count() {
-    local prefix="$1" manifest count=""
+    local prefix="$1" record count="" name
 
-    if manifest=$(aws s3 cp "s3://$AWS_S3_BUCKET/$prefix/pipeline_manifest.json" - 2>/dev/null); then
-        count=$(echo "$manifest" | jq -r '.sample_count // empty') || count=""
-    fi
+    for name in "$RUN_STATE_KEY" "pipeline_manifest.json"; do
+        record=$(aws s3 cp "s3://$AWS_S3_BUCKET/$prefix/$name" - 2>/dev/null) || continue
+
+        count=$(echo "$record"             | jq -r '.manifest.sample_count // .samples.count // .sample_count // empty')             || count=""
+
+        [[ "$count" =~ ^[0-9]+$ ]] && break
+    done
 
     if [[ ! "$count" =~ ^[0-9]+$ ]]; then
         count=$(aws s3 cp "s3://$AWS_S3_BUCKET/$prefix/index.html" - 2>/dev/null \

@@ -17,10 +17,14 @@
 #
 # An upload script declares what its pipeline produced and then publishes:
 #
-#   dashboard_reset      <results_dir> <catalog>
+#   dashboard_reset      <results_dir> <catalog> [glob ...]
+#                                                 the globs being whatever the
+#                                                 upload left behind
 #   dashboard_view       <id> <label> <path>      once per report the bar offers
 #   dashboard_index_view [label]                  where the file index sits in it
-#   dashboard_button     <glob>                   once per file the sidebar offers
+#   dashboard_button     <glob> [label]           once per file the sidebar
+#                                                 offers, under its own name
+#                                                 unless the label says otherwise
 #   dashboard_link_button <href> <label> [icon]   a link to data held elsewhere,
 #                                                 hidden while <href> is empty
 #   dashboard_stat_group <heading> [note]         opens a block of the statistics
@@ -78,6 +82,11 @@ DASHBOARD_DOWNLOADS=""
 DASHBOARD_STATS=""
 DASHBOARD_STAT_GROUP_OPEN=""
 
+# Globs, relative to the results folder, naming what the upload was told to leave
+# behind - so the file index counts what a reader will actually find rather than
+# what is on the disk here
+DASHBOARD_SKIPPED=()
+
 dashboard_reset() {
     DASHBOARD_RESULTS_DIR="${1%/}"
     DASHBOARD_CATALOG="$2"
@@ -85,6 +94,32 @@ dashboard_reset() {
     DASHBOARD_DOWNLOADS=""
     DASHBOARD_STATS=""
     DASHBOARD_STAT_GROUP_OPEN=""
+
+    shift 2
+    DASHBOARD_SKIPPED=("$@")
+}
+
+# True when a path, named from the results folder, is one the upload was told to
+# leave behind. The glob is matched unquoted, so a "*" in it crosses folders the
+# way it does in the argument aws was given.
+dashboard_is_skipped() {
+    local name="$1" glob
+
+    for glob in ${DASHBOARD_SKIPPED[@]+"${DASHBOARD_SKIPPED[@]}"}; do
+        [[ "$name" == $glob ]] && return 0
+    done
+
+    return 1
+}
+
+# The find predicates that leave the unpublished files out of a count of a
+# folder, one argument to a line
+dashboard_skip_predicates() {
+    local glob
+
+    for glob in ${DASHBOARD_SKIPPED[@]+"${DASHBOARD_SKIPPED[@]}"}; do
+        printf '!\n-path\n%s\n' "$DASHBOARD_RESULTS_DIR/$glob"
+    done
 }
 
 # True when a path is one a browser should be told to save
@@ -129,7 +164,7 @@ dashboard_file_icon() {
 dashboard_view() {
     local id="$1" label="$2" path="$3"
 
-    [[ -r "$DASHBOARD_RESULTS_DIR/$path" ]] || return 0
+    [[ -n "$path" && -f "$DASHBOARD_RESULTS_DIR/$path" ]] || return 0
 
     DASHBOARD_VIEWS+=("$id|$label|$path")
 }
@@ -155,22 +190,31 @@ dashboard_sample_pill() {
         "$sample_count" "$noun"
 }
 
-# One quick download per file matching a glob, labelled with its own filename
+# One quick download per file matching a glob. A file whose name is the name of
+# the thing - raw-sequences.zip - is offered under it; anything a pipeline names
+# after the tool, the database and the format it came out of is offered under the
+# label instead, since that string is what the file index is for. A label given
+# for a glob matching several files is used for each of them, so a label belongs
+# to a glob that names one.
 dashboard_button() {
-    local pattern="$1"
-    local path name
+    local pattern="$1" label="${2:-}"
+    local path name text
 
     for path in "$DASHBOARD_RESULTS_DIR"/$pattern; do
         [[ -r "$path" ]] || continue
 
         name=${path#"$DASHBOARD_RESULTS_DIR/"}
+        text=${label:-${name##*/}}
+
+        dashboard_is_skipped "$name" && continue
 
         DASHBOARD_DOWNLOADS+="<a class=\"flex items-center justify-between gap-2 px-2 py-1.5 rounded hover:bg-surface-container transition-colors group\""
         DASHBOARD_DOWNLOADS+=" href=\"$(escape_url "$name")\"$(dashboard_link_attributes "$name")>"
         DASHBOARD_DOWNLOADS+="<span class=\"flex items-center gap-2 min-w-0\">"
         DASHBOARD_DOWNLOADS+="<span class=\"material-symbols-outlined text-[20px] text-on-surface-variant group-hover:text-primary transition-colors\">"
         DASHBOARD_DOWNLOADS+="$(dashboard_file_icon "$name")</span>"
-        DASHBOARD_DOWNLOADS+="<span class=\"text-[13px] leading-5 text-on-surface truncate\">$(escape_html "${name##*/}")</span></span>"
+        DASHBOARD_DOWNLOADS+="<span class=\"text-[13px] leading-5 text-on-surface truncate\""
+        DASHBOARD_DOWNLOADS+=" title=\"$(escape_html "$name")\">$(escape_html "$text")</span></span>"
         DASHBOARD_DOWNLOADS+="<span class=\"material-symbols-outlined text-[18px] shrink-0 text-on-surface-variant opacity-0 group-hover:opacity-100 transition-opacity\">"
         DASHBOARD_DOWNLOADS+="file_download</span></a>"
     done
@@ -466,6 +510,9 @@ dashboard_row() {
 dashboard_entry() {
     local path="$1" label="$2" description="$3"
     local full match name count size
+    local -a skip=()
+
+    mapfile -t skip < <(dashboard_skip_predicates)
 
     if [[ "$path" == */ ]]; then
         full="$DASHBOARD_RESULTS_DIR/${path%/}"
@@ -473,8 +520,10 @@ dashboard_entry() {
         [[ -d "$full" ]] || return 0
 
         # The listing pages index_directories.sh writes are how the folder is
-        # read, not something the run produced
-        count=$(find -L "$full" -type f ! -name directory_listing.html | wc -l)
+        # read, not something the run produced, and neither is anything the
+        # upload was told to leave behind
+        count=$(find -L "$full" -type f ! -name directory_listing.html \
+            ${skip[@]+"${skip[@]}"} | wc -l)
         (( count > 0 )) || return 0
 
         dashboard_row "${path}directory_listing.html" "${label:-$path}" "$description" \
@@ -488,6 +537,12 @@ dashboard_entry() {
         [[ -f "$full" ]] || continue
 
         name=${full#"$DASHBOARD_RESULTS_DIR/"}
+
+        # The listing pages are how a folder is read, not something the run
+        # produced, so a glob over a folder's web pages does not catch them
+        [[ "${name##*/}" == directory_listing.html ]] && continue
+
+        dashboard_is_skipped "$name" && continue
         match="$label"
         size=""
 
@@ -661,15 +716,31 @@ publish_dashboard() {
 # downloading. aws types an object from its name, and only recognises some of
 # these; the rest arrive as binary and are saved.
 #
+# Anything matching one of the globs after the destination is left behind. They
+# are for the files a pipeline writes for itself rather than for whoever asked
+# for the run - a re-run's cached alignments, a report's own machine-readable
+# copy - which on a shotgun run are most of what it produces by size. Each is
+# read relative to the results folder, and a "*" in one crosses folders. The
+# same globs go to index_directories.sh and dashboard_reset, so the listings and
+# the file index describe what was published rather than what was on the disk.
+#
 # Prints whatever aws had to say about a failure.
 upload_results_tree() {
     local src="${1%/}" dest="${2%/}"
-    local extension output
+    local extension glob output
     local -a other=() text=(--exclude "*")
 
     for extension in "${TEXT_EXTENSIONS[@]}"; do
         other+=(--exclude "*.$extension")
         text+=(--include "*.$extension")
+    done
+
+    # After the includes, which is what lets an exclude overrule one
+    shift 2
+
+    for glob in "$@"; do
+        other+=(--exclude "$glob")
+        text+=(--exclude "$glob")
     done
 
     if ! output=$(aws s3 cp "$src/" "$dest/" --recursive "${other[@]}" 2>&1); then

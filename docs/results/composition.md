@@ -1,16 +1,27 @@
 # Composition and diversity
 
-Two questions come back on nearly every 16S request: **what was in each sample**,
-and **how varied was each sample**. Neither is answered well by what
-nf-core/ampliseq publishes, so
-[`ampliseq_composition.sh`](../../scripts/ampliseq_composition.sh) works both out
-from tables the pipeline does produce and leaves them in
-`composition_data.json`, which
+Two questions come back on nearly every request, 16S or shotgun: **what was in
+each sample**, and **how varied was each sample**. Neither pipeline answers
+either well, so one script per pipeline works both out from what the pipeline
+does produce and leaves them in `composition_data.json`, which
 [`publish_dashboard.sh`](../../scripts/publish_dashboard.sh) writes into the
 Overview of [the results page](index.md) — the view a reader lands on, and the
 panel with a tab-link for each of those two questions.
 
-## Why the pipeline's own answers were not enough
+| Pipeline | Script | Reads |
+|---|---|---|
+| ampliseq | [`ampliseq_composition.sh`](../../scripts/ampliseq_composition.sh) | the QIIME 2 abundance tables |
+| taxprofiler | [`taxprofiler_composition.sh`](../../scripts/taxprofiler_composition.sh) | the per-sample Bracken and Kraken2 reports |
+
+Both write the same file in the same shape, so there is one Overview rather than
+one per pipeline. What the two differ on is what a column of the diversity chart
+counts — an ASV on a 16S run, a species on a shotgun one — and the plot data
+says which, so the page names it rather than the template assuming it.
+
+The rest of this page takes the 16S half first, then the shotgun half; the
+sections on the sidebar and on colour apply to both.
+
+## Why ampliseq's own answers were not enough
 
 **The barplot.** `qiime2/barplot/index.html` is a QIIME 2 visualisation: QIIME's
 own page furniture, and a stacked chart drawn as one SVG rectangle per sample per
@@ -46,6 +57,8 @@ template. No parameter adds figures to what a metadata-free run publishes.
 
 ## What is in the panel
 
+The panel is the same for both pipelines.
+
 **Taxonomic composition** — one column per sample, stacked to 100%, under a
 legend naming every taxon in it, with the panel's own control for the taxonomic
 rank and one for the order the samples are in (by name, by the share of the most
@@ -65,7 +78,7 @@ whether there are six or six thousand; nothing is added to the document, so
 there is no number of samples at which the page stops rendering. A 1,500-sample
 run comes out as a 300 KB page that draws instantly.
 
-## How the numbers are worked out
+## How the 16S numbers are worked out
 
 | From | Gives |
 |---|---|
@@ -96,39 +109,110 @@ reads is not evidence of low richness.
 All of it is written to `alpha_diversity.tsv` in the results root, which the file
 index lists under `Diversity` and the panel links to.
 
+## The shotgun half
+
+taxprofiler publishes its answer to the first question only as Krona sunbursts
+— one page per classifier, no way to read one sample against another — and no
+answer at all to the second. Both are worked out from the kraken2-style reports
+it does publish, one per sample:
+
+| From | Gives |
+|---|---|
+| `bracken/<db>/<sample>_<db>.bracken.kraken2.report_bracken.txt` | the composition of each sample at every rank, and the species counts the diversity indices are computed from |
+| `kraken2/<db>/<sample>_<db>.kraken2.kraken2.report.txt` | the reads no taxon was found for, and how far the classifier got |
+
+**Bracken's report is what is plotted.** Both carry a clade count at every rank,
+so a rank is read straight off one rather than rolled up from a species table.
+Bracken's is preferred because it redistributes the reads Kraken2 stranded at
+internal nodes down to the species they came from — which is what makes a
+stacked bar mean what it looks like it means. A run with no Bracken database
+falls back to Kraken2's own counts.
+
+**The Kraken2 report is read either way.** It is the only place the unclassified
+reads are counted, since Bracken drops that line and renormalises over what it
+placed, and the only honest account of how far the classifier got. So:
+
+- the stacks are shares of **every read that reached the classifier**, with the
+  unclassified reads entered as a taxon of their own and competing for a colour
+  like any other. On a shotgun run they are routinely the largest share of a
+  sample, and a chart that left them out would say the opposite of what it means;
+- the sidebar's rank bars are read off Kraken2 rather than Bracken, which would
+  otherwise report that ~100% of reads reached species level.
+
+**Ranks are matched by the report's own code**, `P` through `S`. A code carrying
+a digit — `S1`, `G2` — names a rank between two of those, and is skipped: its
+reads are already counted inside the clade above it. The lineage under each name
+in the legend comes from the report's indentation, which is the only record it
+carries of what sits above a taxon; a taxon is keyed by that lineage as well as
+by its name, so two genera of the same name in different families stay apart.
+
+Per sample, from the **unrarefied** species-level counts:
+
+| Index | |
+|---|---|
+| Read depth | every read that reached the classifier |
+| Observed species | distinct species with a non-zero count |
+| Shannon, Simpson, Pielou | as above |
+
+**No Chao1 here either**, for a different reason: a shotgun profile's rarest taxa
+are the classifier's error rate as much as they are biology, so an estimator
+built on what was seen once and twice reads that noise as richness.
+
+All of it is written to `alpha_diversity.tsv` in the results root, which the file
+index lists under `Start here` and the sidebar links to as *Per-sample
+diversity*.
+
+**Two passes, not two per rank.** A WGS report is megabytes per sample, so every
+rank is worked out in the same two passes over the files: the first sums each
+taxon across every sample, which is what decides the eleven of its rank that are
+drawn, and the second emits only those eleven. Only twelve rows of sample-wide
+data are held per rank, so the number of taxa a rank carries does not matter. Ten
+samples of PlusPF reports — 8.6 MB, 14,300 species — take about five seconds.
+
 ## The numbers in the sidebar beside them
 
-The tables the plots are drawn from also answer what the [Overview's
-sidebar](index.md#what-is-on-the-overview) reports, so the same pass counts
-them: how many samples and ASVs there were, how many reads went in and how many
-reached an ASV, the thinnest, middle and deepest sample, and what share of the
-reads the classifier could place at family, at genus and at species. Reads in
-come from `overall_summary.tsv` — cutadapt's own count of what it processed, or
-DADA2's input for a run that skipped primer trimming — and everything else from
-the ASV and relative abundance tables.
+What the plots are drawn from also answers what the [Overview's
+sidebar](index.md#what-is-on-the-overview) reports, so the same pass counts it.
+Each pipeline counts the funnel its own tools measure, but both put a total at
+the top and read every share against it, so two bars can be compared by eye.
+
+**ampliseq** reports how many samples and ASVs there were, how many reads went in
+and how many reached an ASV, the thinnest, middle and deepest sample, and what
+share of the reads the classifier could place at family, at genus and at species.
+Reads in come from `overall_summary.tsv` — cutadapt's own count of what it
+processed, or DADA2's input for a run that skipped primer trimming — and
+everything else from the ASV and relative abundance tables.
+
+**taxprofiler** reports the reads the run started with, how many of them were
+host, and how many the classifier placed; the thinnest, middle and deepest
+sample; the share of reads resolved to phylum, to genus and to species; and how
+many distinct phyla, genera and species the run named over all its samples. Reads
+in come from the bowtie2 host-removal log where host removal ran — the only
+count taken before anything was discarded — and the classifier's own total
+otherwise. Everything else comes off the reports.
+
+The taxa counts are written out in full rather than rounded: how many genera a
+run named is not a figure to hand over as "3k".
 
 The middle sample rather than the mean: one deeply sequenced sample drags an
-average away from what the run's samples actually look like. The classified
-shares are given to one decimal, since two neighbouring ranks are often within a
-point of each other and rounding them to the same whole number reads as a
-mistake.
+average away from what the run's samples actually look like.
 
-They are written as key and value to `run_statistics.tsv` in the **run**
-directory, beside `composition_data.json` and for the same reason: both are the
-page's own data rather than an output of the analysis, and every number in them
-is derivable from a table that is published. `ampliseq_upload.sh` reads them
-back when it renders the pages, and a run without the statistics gets a tile for
-its sample count and nothing else.
+Both record them as key and value under `.statistics` in the **run** directory's
+`run_state.json`, beside `composition_data.json` and for the same reason: both
+are the page's own data rather than an output of the analysis, and every number
+in them is derivable from something that is published. The upload script reads
+them back when it renders the pages, and a run without the statistics gets a tile
+for its sample count and nothing else.
 
 ## Colour
 
-Only the **ten most abundant taxa** of each rank are drawn in their own colour;
-everything rarer is summed into `Other`, which wears a neutral. A rank's ten are
-usually seven or eight named taxa plus the unclassified and unassigned shares.
-Past ten fills, a reader cannot reliably tell one from the next — least of all a
-colour-blind one — so an eleventh taxon is not given an eleventh hue.
+Only the **eleven most abundant taxa** of each rank are drawn in their own
+colour; everything rarer is summed into `Other`, which wears a neutral. A rank's
+eleven are usually eight or nine named taxa plus the unclassified and unassigned
+shares. Past that many fills, a reader cannot reliably tell one from the next —
+least of all a colour-blind one — so a twelfth taxon is not given a twelfth hue.
 
-The ten are a categorical set whose *order* keeps neighbouring fills apart under
+The eleven are a categorical set whose *order* keeps neighbouring fills apart under
 colour vision deficiency, so they are assigned in that order and never cycled.
 Several of the steps sit below 3:1 against a white page, which is why the legend
 above the chart **names** every taxon beside its swatch: identity is never
@@ -140,9 +224,8 @@ the next.
 
 ## When there is nothing to plot
 
-Each half is skipped if the table behind it is missing, and nothing is written at
-all if both are — which leaves the Overview's panel on its empty state, the same
-one a taxprofiler run gets. The step is called before `index_directories.sh` so
-that the table it leaves in the results is in the folder listings, and a failure
-in it is a warning rather than a failed run: results without these plots are
-still results.
+Each half is skipped if what it reads is missing, and nothing is written at all
+if both are — which leaves the Overview's panel on its empty state. The step is
+called before `index_directories.sh` so that the table it leaves in the results
+is in the folder listings, and a failure in it is a warning rather than a failed
+run: results without these plots are still results.

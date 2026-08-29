@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "run_id": "nextflow",
+  "params": {
+    "input": "taxprofiler_samplesheet.csv",
+    "perform_runmerging": "true"
+  },
+  "region": "16SV4",
+  "retention": "3 Months",
+  "sample_count": 10
+}

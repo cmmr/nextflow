@@ -40,8 +40,8 @@
 #
 # The same tables answer what the Overview's sidebar reports, so the run's
 # headline numbers - samples, ASVs, reads in and reads kept, and how deep the
-# classifier got - are counted here as well and left in ./run_statistics.tsv for
-# ampliseq_upload.sh to read.
+# classifier got - are counted here as well and recorded under "statistics" in
+# ./run_state.json for ampliseq_upload.sh to read.
 #
 # Usage:     ampliseq_composition.sh [results_dir]
 #            defaults to ./results, the outdir set in the ampliseq params file
@@ -49,8 +49,9 @@
 # Requires:  GNU awk
 # Outputs:   <results_dir>/alpha_diversity.tsv
 #            ./composition_data.json
-#            ./run_statistics.tsv
-# Env:       NEXTFLOW_DIR and the log/warn/fail helpers, sourced from .env
+#            the "statistics" of ./run_state.json
+# Env:       NEXTFLOW_DIR, the log/warn/fail helpers and the run state helpers,
+#            sourced from .env
 
 set -euo pipefail
 
@@ -86,9 +87,9 @@ readonly PLOT_DATA="composition_data.json"
 # only place the reads that went in are counted
 readonly OVERALL_SUMMARY="$RESULTS_DIR/overall_summary.tsv"
 
-# The run's headline numbers, in the run directory rather than in the results:
-# they are the dashboard's sidebar, not an output of the analysis
-readonly STATS_FILE="run_statistics.tsv"
+# Where the run's headline numbers go, in the run's state file rather than in
+# the results: they are the dashboard's sidebar, not an output of the analysis
+readonly STATS_KEY="statistics"
 
 # How many taxa of each rank are drawn in their own colour before the tail is
 # summed into "Other". Eleven is what the palette carries, and a rank's list is
@@ -556,8 +557,8 @@ read_depth_stats() {
     ' "$ALPHA_TABLE"
 }
 
-# The run's headline numbers, as key and value, for the dashboard's sidebar.
-# Each is left out rather than guessed at when the table behind it is missing.
+# The run's headline numbers, keyed for the dashboard's sidebar. Each is left
+# out rather than guessed at when the table behind it is missing.
 write_run_statistics() {
     local taxonomy=""
 
@@ -578,7 +579,7 @@ write_run_statistics() {
             printf 'genus_asvs\t%s\n' "$(rank_classified_asvs "$taxonomy" 6)"
             printf 'species_asvs\t%s\n' "$(rank_classified_asvs "$taxonomy" 7)"
         fi
-    } > "$STATS_FILE"
+    } | state_set_tsv "$STATS_KEY"
 }
 
 log "Summarising composition and diversity under $RESULTS_DIR..."
@@ -632,7 +633,7 @@ fi
 if [[ -n "$DATA" ]]; then
     if ! write_run_statistics; then
         warn "The run statistics could not be counted; the dashboard will show fewer numbers."
-        rm -f "$STATS_FILE"
+        state_unset "$STATS_KEY" || true
     fi
 fi
 

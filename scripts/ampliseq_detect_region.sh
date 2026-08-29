@@ -58,13 +58,14 @@
 # Requires:  pigz, awk, sort, apptainer
 # Reads:     db/16s/landmarks.fasta and db/16s/ecoli_positions.tsv, from
 #            build_16s_reference.sh
-# Env:       NEXTFLOW_DIR and the log/warn/fail helpers, sourced from .env;
-#            PIPELINE_RERUN_UID, set by wrike_job.sh for a rerun;
+# Env:       NEXTFLOW_DIR, the log/warn/fail helpers and the run state helpers,
+#            sourced from .env; PIPELINE_RERUN_UID, set by wrike_job.sh for a rerun;
 #            VSEARCH_CONTAINER, optionally, to override the pinned image
-# Outputs:   ./detected_params.yaml, ./region.txt, ./region_detection.txt, a line
-#            appended to ./notes.txt, and ./message.out on error. The working
-#            files it measured from - detect_sample.fasta, detect_reads.fasta,
-#            detect_lengths.txt and detect_hits.tsv - are left in place.
+# Outputs:   ./detected_params.yaml and ./region_detection.txt, plus the region
+#            it settled on, a line appended to ".notes", and any explanation of a
+#            failure, all in ./run_state.json. The working files it measured
+#            from - detect_sample.fasta, detect_reads.fasta, detect_lengths.txt
+#            and detect_hits.tsv - are left in place.
 
 set -euo pipefail
 
@@ -146,7 +147,6 @@ readonly LENGTHS_TXT="detect_lengths.txt"
 readonly HITS_TSV="detect_hits.tsv"
 readonly REPORT="region_detection.txt"
 readonly PARAMS_OUT="detected_params.yaml"
-readonly REGION_OUT="region.txt"
 
 if [[ -n "${PIPELINE_RERUN_UID:-}" ]]; then
     log "Reproducing run $PIPELINE_RERUN_UID; its recorded parameters replace anything measured here."
@@ -659,7 +659,7 @@ else
     warn "Only one of the two primers appears to have been trimmed from these reads."
 fi
 
-printf '%s\n' "$BEST_REGION" > "$REGION_OUT"
+state_set region "$BEST_REGION"
 
 {
     printf 'sequencing_type: "%s"\n' "$SEQUENCING_TYPE"
@@ -709,6 +709,6 @@ if [[ " $UNMERGEABLE_REGIONS " == *" $BEST_REGION "* && "$SEQUENCING_TYPE" == "i
     NOTE+=" will not be able to merge them."
 fi
 
-printf '%s\n' "$NOTE" >> notes.txt
+state_append notes "$NOTE"
 
 log "Detected $BEST_LABEL ($BEST_REGION) on $SEQUENCING_TYPE, $BEST_DISTANCE bases from its expected coordinates."

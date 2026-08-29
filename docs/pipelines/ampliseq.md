@@ -59,7 +59,8 @@ in `raw-sequences/` as `<sample>_seqs_{1,2}.fq.gz`; already-gzipped inputs are
 symlinked rather than copied, so the directory is nearly free in the common case.
 It also derives ampliseq's `run` column by hashing each sample's source
 directory, which groups samples that were sequenced together for error-model
-training, and records the post-merge sample count in `sample_count.txt`.
+training, and records the post-merge sample count as `.samples.count` in the
+run's state file.
 
 **A line with no `fastq_2` is single-end** — a MinION run, or single-end
 Illumina — and the `fastq_2` column is left off the generated sheet entirely
@@ -101,11 +102,11 @@ up. Entries whose files a given run did not produce are skipped, so an ONT run
 lists `savont/` and no `dada2/` without a catalogue of its own.
 
 Those are the links of the navigation bar, after the Overview every run opens
-on. `$SEQUENCED` and `$REFERENCE` are read off `pipeline_manifest.json` — the
-region and instrument, and the reference database — and each is stated over the
-numbers it explains rather than in a row of its own. The numbers themselves, and
-the Overview's plots, come from the `composition_data.json` and
-`run_statistics.tsv` that
+on. `$SEQUENCED` and `$REFERENCE` are read off the state file's `.manifest` —
+the region and instrument, and the reference database — and each is stated over
+the numbers it explains rather than in a row of its own. The numbers themselves,
+and the Overview's plots, come from the `composition_data.json` and the
+`.statistics` that
 [`ampliseq_composition.sh`](../results/composition.md) works out of the ASV and
 abundance tables.
 

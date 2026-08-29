@@ -36,6 +36,7 @@ it.
 |---|---|---|
 | `#overview` | `overview.html` | `overview.html` |
 | `#report` | `summary_report/summary_report.html` | — |
+| `#krona` | — | `krona/kraken2_<db>.html` — see [why that one](../pipelines/taxprofiler.md) |
 | `#quality` | `multiqc/multiqc_report.html` | `multiqc/multiqc_report.html` |
 | `#files` | `files.html` | `files.html` |
 
@@ -54,7 +55,7 @@ beneath it — *16S rRNA amplicon sequencing analysis*, *Shotgun metagenomic
 taxonomic profiling*.
 
 The task name is re-read from Wrike at upload time rather than taken from the
-`wrike_task_name.txt` copy recorded at submission, since the requester may have
+`.wrike.task_name` copy recorded at submission, since the requester may have
 renamed the task since filing it. That copy is the fallback, and a generic
 heading the one after that.
 
@@ -63,10 +64,12 @@ sample was, under the panel's two tab-links, with the taxonomic rank, the
 diversity index and the sample order beside them. One index is plotted at a
 time. This is the pair of questions most requesters open the link for, which is
 why it is the view they land on rather than one they have to find.
-[`ampliseq_composition.sh`](composition.md) works the numbers out and leaves
+One script per pipeline — [`ampliseq_composition.sh` and
+`taxprofiler_composition.sh`](composition.md) — works the numbers out and leaves
 them in `composition_data.json`, which is written into the page; a run that
-produced nothing to plot leaves the panel on its empty state, which is what a
-taxprofiler run gets.
+produced nothing to plot leaves the panel on its empty state. What a column of
+the diversity chart is a count of comes from the same file, so the 16S page says
+ASV where the shotgun page says species.
 
 **The panel takes whatever height is left.** On a screen wide enough for the
 sidebar, the Overview is exactly as tall as the frame it is read in: the chart
@@ -81,24 +84,29 @@ zip is packaged while the reader carries on reading, and closing the modal stops
 the watching rather than the build.
 
 **Run statistics**, under them, headed by how many samples the run covered —
-from `sample_count.txt`, the count *after* entries sharing a sample name were
+from `.samples.count`, the count *after* entries sharing a sample name were
 merged, and the count every number under it is a count over. Then what the run
-measured, in the units a sidebar has room for. An ampliseq run reports the reads that went in against the reads
-that reached an ASV, the thinnest, middle and deepest sample, how many ASVs it
-called, and how much of it the classifier could place at family, at genus and at
-species. The same pass that works out the plots counts all of it, into
-`run_statistics.tsv`. The bars carry three colours and mean them: a total is the
+measured, in the units a sidebar has room for. An ampliseq run reports the reads
+that went in against the reads that reached an ASV, the thinnest, middle and
+deepest sample, how many ASVs it called, and how much of it the classifier could
+place at family, at genus and at species. A taxprofiler run reports the reads it
+started with against what was host and what was classified, the same three
+sample depths, how much reached phylum, genus and species, and how many distinct
+phyla, genera and species it named. The same pass that works out the plots counts
+all of it, into `.statistics`. The bars carry three colours and mean them: a total is the
 institutional navy, what survived is the growth green, and a classified share is
 teal, lightening as the rank goes deeper.
 
 **How the run was set up is stated over the numbers it explains**, rather than
 in a row of its own: the region and the instrument sit above the read totals,
-and the reference database above the classification. Each is read off
-`pipeline_manifest.json`, the same record a rerun is rebuilt from, so the page
+and the reference database above the classification. Each is read off the run's
+`.manifest`, the same record a rerun is rebuilt from and published beside the
+page as `run_state.json`, so the page
 and the record cannot disagree — and a setting the manifest does not carry
-leaves its note off rather than naming an empty one. A taxprofiler run, which
-counts nothing of its own, gets those settings as a block of plain rows
-instead.
+leaves its note off rather than naming an empty one. On a taxprofiler run it is
+what was depleted that sits over the read totals and the classifier and database
+that sit over the classification, with the database sheet's full list left as a
+row of its own at the foot.
 
 **A footer** saying when the run finished, which pipeline version produced it,
 and the uid. That last is there so a reader asking us about these results has
@@ -215,7 +223,7 @@ pipeline work. The final upload overwrites it.
 ones a requester waits through with nothing to look at: recompressing and
 staging a few hundred FASTQ files, and measuring what was sequenced, take long
 enough to look like a stall. Each stage calls `report_stage` as it begins, which
-writes one sentence to `stage.txt` in the run directory, and the page says it
+writes one sentence to `.stage` in the run's state file, and the page says it
 under the run's name — *Preparing your sequencing files.* The watcher is stopped
 before the results are uploaded, since that upload lands the finished dashboard
 on the same key; the last thing it publishes by hand is the page that says the
@@ -279,14 +287,14 @@ counted up in the browser, so they step forward with each refresh.
 
 **A run that is over still says how long it took.** Its jobs are gone from
 `squeue` by then, so the counts read nought and nought — which is the true thing
-to say — and the clocks would read nothing at all. They are written to
-`clocks.txt` in the run directory each time there is something to write, and
+to say — and the clocks would read nothing at all. They are recorded under
+`.clocks` in the run's state file each time there is something to write, and
 read back from it once there is not. The two blocks are left off the page
 entirely only when `squeue` cannot be asked at all, and the cpu clock alone when
 `sacct` cannot be.
 
 **A run that failed carries its logs.** Under the card is a panel with the
-explanation the stage that failed left in `message.out`, then the tail of each
+explanation the stage that failed left in `.message`, then the tail of each
 of three files the run wrote: nextflow's console output, then `nextflow.log` —
 which is `nextflow.log` and not the `.nextflow.log` of a default invocation
 because the pipeline files run nextflow with `-log nextflow.log` — then the

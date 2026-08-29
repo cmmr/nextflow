@@ -42,8 +42,9 @@ set -euo pipefail
 source /data/prod/nextflow/.env
 
 # This is the only script that runs from wherever the caller was standing, and
-# the shared helpers write beside themselves - fail leaves message.out where it
-# finds one - so work somewhere of our own. The trap fires on every way out.
+# the shared helpers write beside themselves - fail records its message in a
+# run_state.json where it finds one - so work somewhere of our own. The trap
+# fires on every way out.
 ORIGINAL_DIR="$PWD"
 
 if ! WORK_DIR=$(mktemp -d); then

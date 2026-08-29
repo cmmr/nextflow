@@ -24,7 +24,7 @@
 # and a directory to look in, and the results link is on the task from the start.
 #
 # Every answer on the request form is checked against the list wrike_api.sh
-# allows and then written, unaltered, to form_answers.tsv in the run directory.
+# allows and then recorded, unaltered, under "answers" in the run's state file.
 # Nothing here interprets one: which answers mean anything is a pipeline's
 # business, and this script knows no pipeline from another. There is no free-text
 # parameter field, so a requester can only ask for what that list offers.
@@ -36,8 +36,8 @@
 # The other is "Nextflow Pipeline", whose options are "<name> :: <what it is for>"
 # and whose first word names a file in pipelines/ - except "prev_run_id", which
 # instead means the settings come from the run named in "Nextflow Previous Run
-# ID". That run's published pipeline_manifest.json is fetched into
-# rerun_manifest.json for wrike_job.sh to rebuild from.
+# ID". The manifest that run published is fetched into this run's state file,
+# under "rerun.manifest", for wrike_job.sh to rebuild from.
 #
 # Usage:     wrike_task_handler.sh <sqs_message_body_json>
 # Called by: wrike_sqs_listener.sh
@@ -79,23 +79,23 @@ if ! is_valid_wrike_id "$TASK_ID"; then
     fail "Malformed or missing taskId in request payload; ignoring."
 fi
 
-# Publish the run's results page, which reports whatever status.txt says. Called
-# at each point that answer changes. Cosmetic: nothing about the run depends on
-# it.
+# Publish the run's results page, which reports whatever the state file's
+# ".status" says. Called at each point that answer changes. Cosmetic: nothing
+# about the run depends on it.
 publish_progress_page() {
     "$NEXTFLOW_DIR/scripts/nextflow_progress.sh" \
         || warn "Could not publish the progress page for task $TASK_ID."
 }
 
 # Leave the task, and the page published for it, reading "Failed". Before the run
-# directory exists there is no status.txt to write and no page to publish, so
-# only the task's own status is set.
+# directory exists there is no state file to record it in and no page to publish,
+# so only the task's own status is set.
 mark_failed() {
+    update_wrike_task_status "Failed" || true
+
     if [[ "$PWD" == "${RUN_DIR:-}" ]]; then
-        update_wrike_pipeline_progress "Failed" || true
+        report_status "Failed" || true
         publish_progress_page
-    else
-        update_wrike_task_status "Failed" || true
     fi
 }
 
@@ -121,13 +121,12 @@ fail_with_apology() {
     mark_failed
 
     # Last, because it does not return. Inside a run directory, fail's copy of
-    # this message lands in message.out there.
+    # this message lands in that run's state file.
     fail "$* (task $TASK_ID); asked the user to resubmit."
 }
 
-# Show the requester their request was picked up, before anything slow.
-# update_wrike_task_status rather than the pipeline_progress helper: there is no
-# run directory yet for status.txt to live in.
+# Show the requester their request was picked up, before anything slow. The
+# task's status only: there is no run directory yet for a state file to live in.
 update_wrike_task_status "Validating" || true
 
 # Everything after this point reports back by commenting on the task, so this
@@ -184,23 +183,26 @@ fi
 
 cd "$RUN_DIR"
 
+# Everything this run records about itself goes in one file from here on.
+# Creating it also opens the channel back to the requester: fail records its
+# explanation as ".message" wherever there is a state file, so anything that goes
+# wrong from here on - here, in wrike_job.sh, or in a pipeline's pre/post-process
+# scripts - reaches the user when wrike_followup.sh posts it at the end of the
+# job. ".notes" is the same channel for a run that succeeds, which stages append
+# to rather than overwrite.
+if ! state_init "$RUN_ID"; then
+    fail_with_apology "Could not create $RUN_STATE_FILE in $RUN_DIR"
+fi
+
 # A uid does not lead back to a task, so record the one this run came from.
 # Everything on the compute node reads it back through read_wrike_task_id.
-echo "$TASK_ID" > "$WRIKE_TASK_ID_FILE"
+state_set "$WRIKE_TASK_ID_KEY" "$TASK_ID"
 
 # The title too, since both published pages are headed with it
-printf '%s\n' "$TASK_NAME" > "$WRIKE_TASK_NAME_FILE"
-
-# Open the channel back to the requester: fail writes to message.out wherever it
-# exists, so anything that goes wrong from here on - here, in wrike_job.sh, or in
-# a pipeline's pre/post-process scripts - reaches the user when wrike_followup.sh
-# posts it at the end of the job. notes.txt is the same channel for a run that
-# succeeds, which stages append to rather than overwrite.
-: > message.out
-: > notes.txt
+state_set "$WRIKE_TASK_NAME_KEY" "$TASK_NAME"
 
 # The run's own record of how far it has got, which the page below reads
-echo "Validating" > status.txt
+report_status "Validating"
 
 # What this request was and how it was read: the event that started it, every
 # question with the field it resolved through and the value that came back, and
@@ -208,20 +210,19 @@ echo "Validating" > status.txt
 # is what a rejection nobody expected is diagnosed from - and it is the only
 # place the difference between "the requester left it blank" and "the field is
 # titled something else" is visible. Best effort, and never fatal.
-jq -n \
-    --arg run_id "$RUN_ID" \
-    --arg wrike_task_id "$TASK_ID" \
-    --arg task_name "$TASK_NAME" \
-    --arg read_utc "$(date -u "+%Y-%m-%dT%H:%M:%SZ")" \
-    --argjson answers "$WRIKE_ANSWERS_READ" \
-    --argjson task_custom_fields "$(echo "$TASK_JSON" | jq -c '[.data[0].customFields[]?]')" \
-    --argjson sqs_message "$MESSAGE_BODY" \
-    '{run_id: $run_id, wrike_task_id: $wrike_task_id, task_name: $task_name,
-      read_utc: $read_utc, answers: $answers,
-      task_custom_fields: $task_custom_fields,
-      sqs_message: $sqs_message}' \
-    > request.json \
-    || warn "Could not record request.json for task $TASK_ID."
+if REQUEST_RECORD=$(jq -n \
+        --arg read_utc "$(date -u "+%Y-%m-%dT%H:%M:%SZ")" \
+        --argjson answers "$WRIKE_ANSWERS_READ" \
+        --argjson task_custom_fields "$(echo "$TASK_JSON" | jq -c '[.data[0].customFields[]?]')" \
+        --argjson sqs_message "$MESSAGE_BODY" \
+        '{read_utc: $read_utc, answers: $answers,
+          task_custom_fields: $task_custom_fields,
+          sqs_message: $sqs_message}'); then
+    state_set_json request "$REQUEST_RECORD" \
+        || warn "Could not record the request for task $TASK_ID."
+else
+    warn "Could not build the request record for task $TASK_ID."
+fi
 
 log "Task $TASK_ID answered: $(printf '%s' "$WRIKE_ANSWERS_READ" \
     | jq -r '[.[] | select(.value != "") | "\(.key)=\(.value)"] | join(" ") // "nothing"')"
@@ -325,22 +326,44 @@ if [[ "$PIPELINE_INPUT" == "$WRIKE_RERUN_ANSWER" ]]; then
         reject "$REPLY" "Malformed previous run ID ($RERUN_INPUT)."
     fi
 
-    #    A run's manifest is written before nextflow starts and published with
-    #    its results, so a run that never finished has none
-    if ! aws s3 cp "s3://$AWS_S3_BUCKET/$S3_RUN_PREFIX/$RERUN_UID/pipeline_manifest.json" \
-            "$RUN_DIR/rerun_manifest.json" > /dev/null 2>&1; then
+    #    A run's manifest is recorded before nextflow starts and published with
+    #    its state, so a run that never got that far has none. Runs published
+    #    before the run directory moved to one state file carry it as
+    #    pipeline_manifest.json instead, which is why that is tried second. What
+    #    comes back is kept under "rerun" in this run's own state file, which is
+    #    where wrike_job.sh reads it.
+    RERUN_PREFIX="s3://$AWS_S3_BUCKET/$S3_RUN_PREFIX/$RERUN_UID"
+    RERUN_MANIFEST=""
+
+    if RERUN_STATE=$(aws s3 cp "$RERUN_PREFIX/$RUN_STATE_KEY" - 2>/dev/null); then
+        RERUN_MANIFEST=$(printf '%s' "$RERUN_STATE" | jq -c '.manifest // empty') \
+            || RERUN_MANIFEST=""
+    fi
+
+    if [[ -z "$RERUN_MANIFEST" ]]; then
+        RERUN_MANIFEST=$(aws s3 cp "$RERUN_PREFIX/pipeline_manifest.json" - 2>/dev/null) \
+            || RERUN_MANIFEST=""
+    fi
+
+    if [[ -z "$RERUN_MANIFEST" ]]; then
         REPLY="I have no record of how run \"$RERUN_UID\" was set up, so I cannot repeat it."
         REPLY+=" That happens when the run never finished."
         REPLY+=" Please submit a new request naming a different run, or none at all."
-        reject "$REPLY" "No pipeline_manifest.json published for run $RERUN_UID."
+        reject "$REPLY" "No published record of how run $RERUN_UID was set up."
     fi
 
-    if ! PIPELINE_INPUT=$(jq -er '.pipeline' "$RUN_DIR/rerun_manifest.json"); then
+    if ! PIPELINE_INPUT=$(printf '%s' "$RERUN_MANIFEST" | jq -er '.pipeline'); then
         REPLY="The record of run \"$RERUN_UID\" does not say which pipeline it used,"
         REPLY+=" so I cannot repeat it. Please submit a new request naming a different run,"
         REPLY+=" or none at all."
-        reject "$REPLY" "rerun_manifest.json for run $RERUN_UID names no pipeline."
+        reject "$REPLY" "The manifest published for run $RERUN_UID names no pipeline."
     fi
+
+    if ! state_set_json rerun.manifest "$RERUN_MANIFEST"; then
+        fail_with_apology "Could not record run $RERUN_UID's manifest"
+    fi
+
+    state_set rerun.uid "$RERUN_UID"
 
     log "Task $TASK_ID reproduces run $RERUN_UID, which ran $PIPELINE_INPUT."
 fi
@@ -376,12 +399,13 @@ if [[ ! "$PIPELINE_UPPER" =~ ^[A-Z0-9_]+$ || ! -f "$PIPELINE_SCRIPT" ]]; then
     reject "$REPLY" "Invalid pipeline requested (${PIPELINE_SHOWN:-none})."
 fi
 
-# 7. Leave the checked answers in the run directory. Recorded rather than
+# 7. Record the checked answers in the run's state file. Recorded rather than
 #    interpreted: which answers mean anything is a pipeline's business, and
 #    nothing here knows one pipeline from another.
 for ANSWER_KEY in "${!WRIKE_ANSWERS[@]}"; do
     printf '%s\t%s\n' "$ANSWER_KEY" "${WRIKE_ANSWERS[$ANSWER_KEY]}"
-done | sort > "$RUN_DIR/$WRIKE_FORM_ANSWERS_FILE"
+done | sort | state_set_tsv "$WRIKE_FORM_ANSWERS_KEY" \
+    || warn "Could not record the request form's answers for task $TASK_ID."
 
 # 8. Require exactly one samplesheet on the task. AttachmentAdded is a separate
 #    webhook event from the TaskCreated that got us here, and Wrike promises no
@@ -429,8 +453,12 @@ if [[ ! "$ATTACHMENT_NAME" =~ \.(txt|tsv|out)$ ]]; then
     reject "$REPLY" "Invalid extension on file $ATTACHMENT_NAME."
 fi
 
-# 9. Move the task's status on, before submission: the job starts by overwriting it.
-if ! update_wrike_pipeline_progress "Queued"; then
+# 9. Move the run and its task on, before submission: the job starts by
+#    overwriting both. The run's own record goes first, so a task reading
+#    "Queued" is always backed by a run that says the same.
+report_status "Queued" || fail_with_apology "Could not record the run's status"
+
+if ! update_wrike_task_status "Queued"; then
     fail_with_apology "Could not set the task's status"
 fi
 
@@ -476,7 +504,7 @@ else
 
     mark_failed
 
-    # The run directory stays, with fail's explanation in its message.out. No
+    # The run directory stays, with fail's explanation in its state file. No
     # follow-up job was submitted, so nothing else will report this.
     fail "Slurm submission failed for task $TASK_ID."
 fi

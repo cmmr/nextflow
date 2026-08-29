@@ -25,8 +25,13 @@
 # rather than relying on that, so an unpacked copy of the download zip browses
 # the same way the published run does.
 #
-# Usage:     index_directories.sh [results_dir]
+# Usage:     index_directories.sh [results_dir] [glob ...]
 #            defaults to ./results, the outdir set in the ampliseq params file
+#
+#            A glob names something the upload was told to leave behind, read
+#            relative to the results folder, and is left out of the listings
+#            too - so a listing names what a reader will actually find. The
+#            upload script passes the same globs to upload_results_tree.
 # Called by: ampliseq_upload.sh and taxprofiler_upload.sh, before the upload
 # Requires:  GNU find and awk
 # Reads:     templates/listing.html, the listing template
@@ -39,6 +44,14 @@ source /data/prod/nextflow/.env
 
 RESULTS_DIR="${1:-results}"
 RESULTS_DIR="${RESULTS_DIR%/}"
+shift || true
+
+# What the upload leaves behind, as the find predicates that keep it out of a
+# listing
+SKIP=()
+for GLOB in "$@"; do
+    SKIP+=(! -path "$RESULTS_DIR/$GLOB")
+done
 
 readonly LISTING_NAME="directory_listing.html"
 
@@ -57,8 +70,10 @@ fi
 # One directory's entries as table rows. find reports type, size and name; the
 # sort puts folders ahead of files - d before f - and orders each group by name.
 #
-# Anything named in the second argument is left out, which is how a listing
-# omits itself and how the results folder's listing omits the landing page.
+# Anything named in the second argument is left out, which is how a listing omits
+# itself and how the results folder's listing omits the landing page. So is
+# anything matching a glob this script was given, which is what the upload was
+# told to leave behind.
 #
 # Symlinks are followed, because publishDir may link a published file rather
 # than copy it and because the upload follows them too: what the row reports is
@@ -66,7 +81,8 @@ fi
 render_rows() {
     local dir="$1" omit="${2:-}"
 
-    find -L "$dir" -mindepth 1 -maxdepth 1 -printf '%y\t%s\t%f\n' \
+    find -L "$dir" -mindepth 1 -maxdepth 1 ${SKIP[@]+"${SKIP[@]}"} \
+            -printf '%y\t%s\t%f\n' \
         | LC_ALL=C sort -t$'\t' -k1,1 -k3,3 \
         | LC_ALL=C awk -F'\t' -v omit="$omit" -v listing="$LISTING_NAME" '
             # HTML-escape, a character at a time

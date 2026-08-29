@@ -32,17 +32,17 @@
 # clients, and zip stores what a symlink points at, so the archive holds real data.
 #
 # Failures here are caused by the user's samplesheet, which is what fail is for:
-# it writes the explanation to ./message.out, and wrike_followup.sh posts that
-# back to the requester once the job ends.
+# it records the explanation as ".message" in the run's state file, and
+# wrike_followup.sh posts that back to the requester once the job ends.
 #
 # Usage:     ampliseq_samplesheet.sh [input_samplesheet]
 #            defaults to ./original_samplesheet.tsv, as downloaded by wrike_job.sh
 # Called by: wrike_job.sh, as a PRE_PROCESS_CMDS entry of the ampliseq pipeline
 # Requires:  pigz and md5sum from PATH; $NEXTFLOW_DIR/bin/lbzip2 additionally
 #            for .bz2 inputs
-# Env:       the log and fail helpers, sourced from .env
-# Outputs:   ./ampliseq_samplesheet.tsv, ./raw-sequences/, ./sample_count.txt, and
-#            ./message.out on error
+# Env:       the log and fail helpers and the run state helpers, sourced from .env
+# Outputs:   ./ampliseq_samplesheet.tsv, ./raw-sequences/, and the sample count
+#            and any explanation of a failure in ./run_state.json
 #
 # Because the samplesheet is whitespace-delimited, FASTQ paths cannot contain spaces.
 
@@ -52,10 +52,6 @@ source /data/prod/nextflow/.env
 
 INPUT_SAMPLESHEET="${1:-original_samplesheet.tsv}"
 OUT_TSV="ampliseq_samplesheet.tsv"
-
-# Written in the run directory, beside the other files a run leaves for the
-# scripts that come after it
-SAMPLE_COUNT_FILE="sample_count.txt"
 
 # Client-facing archive directory. ampliseq_upload.sh zips this by the same name.
 FASTQ_DIR="raw-sequences"
@@ -260,7 +256,7 @@ done
 
 # The count after merging, which is the number of samples the run actually
 # analyses. ampliseq_upload.sh puts it in the published page's header, and the
-# page simply omits the figure if this file is missing.
-printf '%s\n' "${#SAMPLE_ORDER[@]}" > "$SAMPLE_COUNT_FILE"
+# page simply omits the figure when it was never recorded.
+state_set_number samples.count "${#SAMPLE_ORDER[@]}"
 
 log "Successfully generated ampliseq samplesheet: $OUT_TSV (${#SAMPLE_ORDER[@]} $READ_LAYOUT-end samples)"

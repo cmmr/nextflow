@@ -6,7 +6,8 @@
 # Date:   August 12th, 2026
 #
 # Renders templates/progress.html and uploads it to the key the finished report will
-# later occupy, s3://$AWS_S3_BUCKET/$S3_RUN_PREFIX/<run_id>/index.html. A reader
+# later occupy, s3://$AWS_S3_BUCKET/$S3_RUN_PREFIX/<run_id>/index.html, and puts
+# the run's whole state beside it as run_state.json at the same prefix. A reader
 # who opens the results link before the run finishes therefore watches it work,
 # and is handed the report once ampliseq_upload.sh overwrites this file. The
 # progress page refreshes itself every ten seconds; the report does not, so a
@@ -32,7 +33,7 @@
 # interface, so every failure here is soft: a page that cannot be built is
 # skipped, never fatal.
 #
-# Usage:     nextflow_progress.sh                 # publish once, status from status.txt
+# Usage:     nextflow_progress.sh                 # publish once, status from run_state.json
 #            nextflow_progress.sh <status>        # publish once, status forced
 #            nextflow_progress.sh --watch [secs]  # publish repeatedly until killed
 # Called by: wrike_task_handler.sh, once per change of status while a request is
@@ -40,8 +41,8 @@
 #            - and wrike_job.sh, backgrounded for the length of the nextflow stage
 # Requires:  aws, awk; squeue and sacct for the cluster counts and the clocks,
 #            each optional
-# Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, and the log/warn helpers
-#            and is_valid_uid, all sourced from .env
+# Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, and the log/warn helpers,
+#            is_valid_uid and the run_state helpers, all sourced from .env
 #
 # Run from inside the run directory, whose name is the run ID.
 
@@ -60,14 +61,12 @@ readonly NEXTFLOW_OUT="nextflow.out"
 readonly NEXTFLOW_LOG="nextflow.log"
 readonly NEXTFLOW_CMD="nextflow_command.sh"
 
-# The clocks the last page that had jobs to read reported. Kept in the run
-# directory because a run that has ended has nothing left in squeue, and the
-# page it is left showing should still say how long it took.
-readonly CLOCKS_FILE="clocks.txt"
-
-# One line saying what the run is doing, written by report_stage as each stage
-# starts. Nextflow's own output only covers the middle of a run.
-readonly STAGE_FILE="stage.txt"
+# Everything below that is not a log comes out of the run's state file: the
+# status, the task name that heads the page, the sentence report_stage wrote for
+# the line under it, the message a failed stage left, and the clocks the last
+# page that had jobs to read recorded - kept there because a run that has ended
+# has nothing left in squeue, and the page it is left showing should still say
+# how long it took.
 
 readonly DEFAULT_INTERVAL=10
 
@@ -429,14 +428,14 @@ log_panel() {
 # What went wrong, for a run that did not finish - the panel that is the whole
 # reason a failed run's page is worth opening.
 #
-# message.out is the explanation whichever stage failed left behind, and the
-# three logs under it are the run's own record: what nextflow printed as it
-# died, its debug log, and the command it was given. A run that failed before
-# nextflow started has none of those, and the panel is left off.
+# The state file's ".message" is the explanation whichever stage failed left
+# behind, and the three logs under it are the run's own record: what nextflow
+# printed as it died, its debug log, and the command it was given. A run that
+# failed before nextflow started has none of those, and the panel is left off.
 failure_report() {
     local message="" error="" log="" command=""
 
-    [[ -s "message.out" ]] && message=$(<message.out)
+    message=$(state_get message)
 
     error=$(nextflow_error)               || error=""
     log=$(file_tail "$NEXTFLOW_LOG")      || log=""
@@ -537,27 +536,22 @@ publish_once() {
         return 1
     fi
 
-    # Status from the run's own message bus unless the caller named one
-    if [[ -z "$status" && -r "status.txt" ]]; then
-        read -r status < status.txt || true
+    # Status from the run's own record unless the caller named one
+    if [[ -z "$status" ]]; then
+        status=$(run_status)
     fi
     : "${status:=Running}"
 
-    task_name="Pipeline run"
-    if [[ -r "$WRIKE_TASK_NAME_FILE" ]]; then
-        read -r task_name < "$WRIKE_TASK_NAME_FILE" || true
-    fi
+    task_name=$(state_get "$WRIKE_TASK_NAME_KEY")
+    : "${task_name:=Pipeline run}"
 
     # What the run is doing right now, which wrike_job.sh writes as it moves
     # from one stage to the next. Nextflow is only one of them, and the ones
     # before it are why this page exists before there is a task to count.
     #
-    # The pages published before the job starts have no stage file to read, so
+    # The pages published before the job starts have no stage recorded yet, so
     # the status stands in for one.
-    stage=""
-    if [[ -r "$STAGE_FILE" ]]; then
-        read -r stage < "$STAGE_FILE" || true
-    fi
+    stage=$(state_get stage)
 
     if [[ -z "$stage" ]]; then
         case "${status,,}" in
@@ -615,9 +609,16 @@ publish_once() {
         cpu=""
         if (( elapsed > 0 )); then
             cpu=$(run_cpu_seconds "$elapsed") || cpu=""
-            printf '%s %s\n' "$elapsed" "$cpu" > "$CLOCKS_FILE" 2>/dev/null || true
-        elif [[ -r "$CLOCKS_FILE" ]]; then
-            read -r elapsed cpu < "$CLOCKS_FILE" || true
+
+            state_set_number clocks.elapsed_seconds "$elapsed" > /dev/null 2>&1 || true
+            if [[ -n "$cpu" ]]; then
+                state_set_number clocks.cpu_seconds "$cpu" > /dev/null 2>&1 || true
+            elif state_has clocks.cpu_seconds; then
+                state_unset clocks.cpu_seconds > /dev/null 2>&1 || true
+            fi
+        else
+            elapsed=$(state_get clocks.elapsed_seconds)
+            cpu=$(state_get clocks.cpu_seconds)
         fi
 
         timers=$(timers_widget "$elapsed" "$cpu")
@@ -652,7 +653,14 @@ publish_once() {
     # --content-type because reading the body from stdin leaves aws nothing to
     # guess from, and a page served as binary downloads instead of rendering.
     printf '%s\n' "$page" \
-        | aws s3 cp - "$S3_INDEX" --content-type "text/html" > /dev/null
+        | aws s3 cp - "$S3_INDEX" --content-type "text/html" > /dev/null \
+        || return 1
+
+    # The run's own record, refreshed with the page it explains, so a reader
+    # holding the results link also holds the account of how the run was set up
+    # and how it went. It is what a later rerun is rebuilt from.
+    publish_run_state "$RUN_ID" \
+        || warn "Could not publish $RUN_STATE_FILE for run $RUN_ID."
 }
 
 if [[ "${1:-}" == "--watch" ]]; then

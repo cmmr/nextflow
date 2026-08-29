@@ -72,9 +72,8 @@ defending to a reviewer.
 
 The cost is that **answering wrongly fails quietly**: a mouse study depleted
 against human is depleted against the wrong genome and nothing in the report says
-so. The answer is recorded on the Wrike task and in the run's
-`pipeline_manifest.json`, which is a better place for it than buried in a
-reference nobody reads.
+so. The answer is recorded on the Wrike task and in the run's manifest, which is
+a better place for it than buried in a reference nobody reads.
 
 Adding a host is one `case` arm plus one reference build. The resolved reference
 paths land in `taxprofiler_args.yaml` and in the manifest, so a
@@ -97,8 +96,8 @@ lab sheet into the six-column CSV taxprofiler wants — `sample`, `run_accession
   pipelines set `perform_runmerging`, so taxprofiler concatenates them itself
   *after* per-run QC and host removal. One profile per sample, with per-run fastp
   and Bowtie2 statistics still reaching MultiQC — so a bad lane is still visible.
-  Merging is what makes `sample_count.txt` (distinct samples, not rows) match the
-  number of columns in the profile tables.
+  Merging is what makes the recorded sample count (distinct samples, not rows)
+  match the number of columns in the profile tables.
 
   **`perform_runmerging` defaults to off**, and without it every run is profiled
   separately: a two-lane sample lands in the taxpasta tables as `<sample>_run_1`
@@ -124,11 +123,17 @@ lab sheet into the six-column CSV taxprofiler wants — `sample`, `run_accession
 - **Bracken's read length is measured**, not assumed — see
   [Databases](#databases).
 
-[`taxprofiler_upload.sh`](../../scripts/taxprofiler_upload.sh) indexes the results
-folders, copies them to `s3://$AWS_S3_BUCKET/nxf/<uid>/`, renders the shared
-[dashboard](../results/index.md) over `multiqc/multiqc_report.html`, and writes
-the report URL to the Wrike custom field. What its file index lists is
+[`taxprofiler_upload.sh`](../../scripts/taxprofiler_upload.sh) summarises the
+classifier reports, indexes the results folders, copies them to
+`s3://$AWS_S3_BUCKET/nxf/<uid>/`, renders the shared
+[dashboard](../results/index.md), and writes the report URL to the Wrike custom
+field. What its file index lists is
 [`templates/taxprofiler/outputs.conf`](../../templates/taxprofiler/outputs.conf).
+
+[`taxprofiler_composition.sh`](../results/composition.md) runs first and works
+out what the Overview plots and what its sidebar reports, from the same
+kraken2-style reports the run publishes. See [Composition and
+diversity](../results/composition.md).
 
 **The raw reads are not published.** Unlike ampliseq, the uploader leaves
 `raw-sequences/` in the run directory: a WGS run's inputs are large enough that
@@ -137,15 +142,64 @@ already holds them. The Overview keeps a hidden row for the link that will offer
 them from the cluster instead — a `dashboard_link_button` with an empty address,
 which renders the markup and hides it. Give it a URL to turn the link on.
 
-The page's remaining buttons are globbed, since those filenames carry the tool
-and database names from the database sheet:
+**Neither is most of what the pipeline wrote.** `SKIP_UPLOAD` in the uploader
+names what a run produces for itself rather than for whoever asked for it, as
+globs read from the results folder. The same list goes to
+[`index_directories.sh`](../results/browsable-folders.md), to the file index and
+to the upload, so the listings, the row counts and the
+[download zip](../results/downloads.md) all describe what is actually in the
+bucket.
 
-| Button | Files |
+| Left behind | Why |
 |---|---|
-| krona charts | `krona/*.html` — one per tool and database |
-| taxpasta tables | `taxpasta/*.tsv` — one merged profile per tool and database |
+| `metaphlan/*/*.bowtie2out.txt` | MetaPhlAn's record of which read hit which marker gene, kept only so MetaPhlAn can be re-run without aligning again. On run `vbnhm2tf` these were 1,209 MB — 88% of everything the run published. The profile, the BIOM table and the merged report all stay. |
+| `multiqc/multiqc_data/multiqc_data.json` | Every number in the MultiQC report again, as JSON. 28 MB. |
+| `multiqc/multiqc_data/multiqc.log` | MultiQC's own debug trace. |
+| `multiqc/multiqc_plots` and `multiqc/multiqc_plots/*` | Each of the report's interactive figures rendered again as PNG, SVG and PDF. The folder is named twice — once for what is in it, and once as itself, so `multiqc/` stops listing a folder there is nothing left in. |
+| `fastqc/*/*_fastqc.zip` | The same measurements as the `_fastqc.html` published beside it, which is also what MultiQC read. |
 
-Both open in a tab rather than downloading, which is what
+On run `vbnhm2tf` — ten samples, PlusPF and CHOCOPhlAn — that is 1,278 MB of
+1,381 MB, **92.5% of the bytes and 298 of the 533 files**, leaving 103 MB to
+publish. Drop a line from the list to publish it again; nothing else has to
+change.
+
+**The navigation bar carries the Krona chart.** It is the one report that reads a
+whole taxonomy rather than a summary of it, and the run writes one per classifier
+and database — for this pipeline, `krona/kraken2_<db>.html` and
+`krona/kraken2-bracken_<db>_bracken.html`.
+
+**They are the same chart.** Both are drawn from Kraken2's clade counts; the
+second is built over the Bracken branch of the workflow but does not render
+Bracken's re-estimated abundances. Parsing both files from run `vbnhm2tf` and
+comparing them node by node: 23,095 nodes each, the same node set, and the same
+magnitude for every taxon in every sample. *Segatella* in sample 4211 is
+4,720,453 reads on both — which is what Kraken2 placed in that clade
+(`kraken2/.../4211_*.report.txt`), not the 4,893,782 Bracken reassigned to it
+(`bracken/.../4211_*_bracken.txt`).
+
+So the choice is between two names for one chart, and
+[`taxprofiler_upload.sh`](../../scripts/taxprofiler_upload.sh) links the one that
+does not promise estimates it is not showing: the first `krona/*.html` whose name
+does not say `bracken`, with a `bracken`-named chart as the fallback for a run
+that has only that. Both stay in the file index either way.
+
+If a later taxprofiler release starts drawing the Bracken chart from Bracken's
+own numbers, the preference is one condition in that loop — and worth
+re-checking against the reports the way the above was, rather than trusting the
+filename.
+
+The sidebar's quick downloads are labelled rather than named after the file,
+since those filenames carry the tool, the database and the format from the
+database sheet:
+
+| Row | File |
+|---|---|
+| Species abundance table | `taxpasta/bracken_*.tsv`, or `taxpasta/kraken2_*.tsv` for a run without Bracken |
+| Per-sample diversity | `alpha_diversity.tsv` |
+| MetaPhlAn profiles | `metaphlan/metaphlan_*_combined_reports.txt` |
+| Raw sequencing data | hidden, as above |
+
+All three open in a tab rather than downloading, which is what
 [their content types](../results/index.md#what-a-link-does-when-you-click-it)
 are set at upload to allow.
 
@@ -227,8 +281,8 @@ taxprofiler does not run Bracken on long reads.
 
 **The generated sheet is the record of what ran**, carrying the exact database
 names, paths and parameters, so `taxprofiler_upload.sh` copies it into the
-results beside the `nextflow_command.sh`, `taxprofiler_args.yaml` and
-`pipeline_manifest.json` that `wrike_job.sh` puts there. The run directory is deleted once a run succeeds, so a
+results beside the `nextflow_command.sh` and `taxprofiler_args.yaml` that
+`wrike_job.sh` puts there, and the `run_state.json` published at the same prefix. The run directory is deleted once a run succeeds, so a
 sheet that is not copied is gone. The input samplesheet is deliberately left
 behind: it names the requester's own paths on the cluster, and says nothing about
 how the numbers were produced.

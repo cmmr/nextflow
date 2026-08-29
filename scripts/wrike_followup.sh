@@ -13,14 +13,18 @@
 #
 # Submitted with --dependency=afterany on the wrike_job.sh it follows, so it runs
 # whether that job succeeded, failed, or was killed by the scheduler. Both jobs
-# share --job-name and --chdir, so the run's state is read straight out of the
-# working directory:
+# share --job-name and --chdir, so the run's state is read straight out of
+# run_state.json in the working directory:
 #
-#   status.txt   the last stage wrike_job.sh reached; "Completed" only on success
-#   message.out  optional user-facing explanation, left by fail wherever the run
-#                went wrong
-#   notes.txt    anything a stage wanted reported whether or not the run failed,
-#                such as the 16S region ampliseq_detect_region.sh measured
+#   .status   the last stage wrike_job.sh reached; "Completed" only on success
+#   .message  optional user-facing explanation, left by fail wherever the run
+#             went wrong
+#   .notes    anything a stage wanted reported whether or not the run failed,
+#             such as the 16S region ampliseq_detect_region.sh measured
+#
+# A run that succeeded has that file published to its S3 prefix here, since it is
+# the last thing to read it before the run directory goes. A failed run's is
+# published by the progress page this republishes below.
 #
 # A failed run also gets its results page republished as the failure, since that
 # is the link the requester was given and the logs it carries are what they are
@@ -37,7 +41,8 @@
 # Called by: wrike_task_handler.sh
 # Runs:      scripts/nextflow_progress.sh, once, for a run that failed
 # Requires:  curl and jq (via the Wrike helpers)
-# Env:       NEXTFLOW_DIR and the Wrike helper functions, sourced from .env
+# Env:       NEXTFLOW_DIR, the Wrike helper functions and the run state helpers,
+#            sourced from .env
 #
 # Exits 1 on a failed pipeline so the Slurm accounting record matches the outcome
 # reported to the user.
@@ -62,23 +67,36 @@ fi
 
 RUN_DIR="$NEXTFLOW_DIR/tmp/$RUN_ID"
 
-# Missing status.txt means wrike_job.sh died before its first progress update
-if [[ -r "status.txt" ]]; then
-    STATUS=$(<status.txt)
-else
-    STATUS="Starting"
-fi
+# Everything a stage wanted said, and the explanation whichever stage failed
+# left behind, in the order the reply carries them
+run_report() {
+    local reply="" notes message
+
+    notes=$(state_get_json notes | jq -r '.[]?' 2>/dev/null) || notes=""
+    message=$(state_get message)
+
+    [[ -n "$notes" ]]   && reply+=$'\n'"$notes"
+    [[ -n "$message" ]] && reply+=$'\n'"$message"
+
+    printf '%s' "$reply"
+}
+
+# No recorded status means wrike_job.sh died before its first progress update
+STATUS=$(run_status)
+: "${STATUS:=Starting}"
 
 if [[ "$STATUS" == "Completed" ]]; then
-    update_wrike_pipeline_progress "Completed"
+    update_wrike_task_status "Completed"
 
     REPLY="The pipeline completed successfully."
-    if [[ -s "notes.txt" ]]; then
-        REPLY+=$'\n'"$(<notes.txt)"
-    fi
-    if [[ -s "message.out" ]]; then
-        REPLY+=$'\n'"$(<message.out)"
-    fi
+    REPLY+="$(run_report)"
+
+    # The last word on the run, published beside its results before the working
+    # copy goes with the directory. Every earlier state reached S3 through
+    # nextflow_progress.sh, but nothing publishes a page after a run succeeds -
+    # the dashboard has already replaced it.
+    publish_run_state "$RUN_ID" \
+        || warn "Could not publish the final $RUN_STATE_FILE for run $RUN_ID."
 
     # Results are already in S3; the working files are no longer needed
     cd /
@@ -88,7 +106,8 @@ if [[ "$STATUS" == "Completed" ]]; then
     exit 0
 fi
 
-update_wrike_pipeline_progress "Failed"
+report_status "Failed" || true
+update_wrike_task_status "Failed"
 
 # Leave the results page saying so, with the logs on it. wrike_job.sh publishes
 # one itself when nextflow is what failed, but every other way a run ends -
@@ -100,17 +119,12 @@ update_wrike_pipeline_progress "Failed"
 
 # ${STATUS,,} lowercases, e.g. "...while the pipeline was pre-processing."
 REPLY="An error occurred while the pipeline was ${STATUS,,}."
-if [[ -s "notes.txt" ]]; then
-    REPLY+=$'\n'"$(<notes.txt)"
-fi
-if [[ -s "message.out" ]]; then
-    REPLY+=$'\n'"$(<message.out)"
-fi
+REPLY+="$(run_report)"
 REPLY+=$'\n'"See $PWD for details."
 
 add_wrike_task_comment "$REPLY"
 
 # A bare exit rather than fail: the failure is the pipeline's, and fail would
-# overwrite message.out with its own text, destroying the explanation kept here
-# for inspection.
+# overwrite the state file's ".message" with its own text, destroying the
+# explanation kept here for inspection.
 exit 1

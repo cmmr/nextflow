@@ -36,9 +36,9 @@ The five it sources:
   three ways anything in this system says anything. All stamp the time.
   `log` goes to stdout while `warn` and `fail` go to stderr — which keeps stdout
   free to carry a function's return value, since several helpers hand their
-  result back through `$(…)`. `fail` also copies itself to `message.out` when
-  that file exists, and exits non-zero, so a caller stops on the spot rather than
-  having to check. Also `derive_uid`, which turns a Wrike task ID into the
+  result back through `$(…)`. `fail` also records itself as `.message` in the
+  run's state file when there is one, and exits non-zero, so a caller stops on
+  the spot rather than having to check. Also `derive_uid`, which turns a Wrike task ID into the
   8-character base32 uid that names the run everywhere outside Wrike — 40 bits,
   HMAC-SHA256, so it is stable, unguessable, and safe in a path and a URL, none
   of which a raw Wrike ID is — plus `is_valid_uid`, which every script that
@@ -48,6 +48,16 @@ The five it sources:
   [`templates/`](results/index.md#one-page-one-stylesheet) pages in and inlines
   `common.css` into it, and `run_results_url`, the one place the address written
   onto a Wrike task is spelled.
+- [`scripts/run_state.sh`](../scripts/run_state.sh) — `run_state.json`, the one
+  file a run keeps its state in, and the `state_*` helpers that read and write it
+  through `jq`. Values are addressed by a dotted path (`state_get wrike.task_id`,
+  `state_set_number samples.count 10`); writes are serialized on
+  `.run_state.lock` and land by rename, so a reader never sees half a document.
+  `report_status` and `report_stage` are the two named shortcuts, for the status
+  `wrike_followup.sh` reads and the sentence the progress page shows, and
+  `publish_run_state` puts the file at `nxf/<uid>/run_state.json` beside the
+  results. Nothing in it is secret - it is published in full; see
+  [Conventions](conventions.md).
 - [`scripts/pipeline_params.sh`](../scripts/pipeline_params.sh) — the layered
   parameter map a pipeline declares its defaults in and `wrike_job.sh` writes the
   params file from; see [Pipelines](pipelines/index.md).

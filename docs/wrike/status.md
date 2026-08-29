@@ -12,12 +12,19 @@ Submitted → Validating → Queued → Initializing → Pre-Processing → Runn
 handler's pre-Slurm sanity checks. Everything from `Queued` on is set from inside
 a run directory.
 
-Two helpers do this, and the difference matters. `update_wrike_task_status` sets
-the status alone; `update_wrike_pipeline_progress` also writes `status.txt`,
-which `wrike_followup.sh` reads to find out how far the run got. The first two
-stages happen before any run directory exists, so they use the former — a
-`status.txt` written from wherever the user happened to invoke `run` would be
-litter at best.
+**Reporting to Wrike and recording the run's own status are separate calls.**
+`update_wrike_task_status` sets the task's status and nothing else;
+`report_status`, in [`scripts/run_state.sh`](../../scripts/run_state.sh), writes
+`.status` in the run's `run_state.json`, which `wrike_followup.sh` reads to find
+out how far the run got. A stage inside a run directory calls both, the run's own
+record first, so a task reading `Queued` is always backed by a run that says the
+same.
+
+They are separate so either can happen on its own. `Submitted` and `Validating`
+happen before any run directory exists, so they only move the task — a status
+recorded from wherever the user happened to invoke `run` would be litter at best.
+`Completed` goes the other way: `wrike_job.sh` records it and stops, and
+`wrike_followup.sh` moves the task once it has read it.
 
 Wrike sets a status by ID, not by name, and those IDs are fixed properties of the
 "Nextflow Pipeline Workflow". Resolving them at runtime meant a `GET /workflows`
@@ -36,7 +43,7 @@ call_wrike_api GET "/spaces/$WRIKE_SPACE_ID/workflows"
 
 A stage name that isn't a key of the map is logged and skipped, deliberately:
 losing a progress update is not worth killing a twelve-hour pipeline over, and
-`status.txt` records the stage either way. So a rename in Wrike shows up only in
+`report_status` records the stage either way. So a rename in Wrike shows up only in
 the daemon log:
 
 ```

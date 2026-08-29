@@ -37,7 +37,8 @@
 # right one depends on the reads rather than on the pipeline.
 #
 # Failures here are caused by the user's samplesheet: fail writes the explanation
-# to ./message.out, and wrike_followup.sh posts it back to the requester.
+# as ".message" in the run's state file, and wrike_followup.sh posts it back to
+# the requester.
 #
 # Usage:     taxprofiler_samplesheet.sh [input_samplesheet]
 #            defaults to ./original_samplesheet.tsv, as downloaded by wrike_job.sh
@@ -45,11 +46,11 @@
 # Requires:  pigz, awk, sort and uniq from PATH; $NEXTFLOW_DIR/bin/lbzip2
 #            additionally for .bz2 inputs
 # Reads:     config/taxprofiler/database.csv, the database sheet it specializes
-# Env:       the log and fail helpers, sourced from .env; INSTRUMENT_PLATFORM,
-#            optionally set to override the measurement
+# Env:       the log and fail helpers and the run state helpers, sourced from
+#            .env; INSTRUMENT_PLATFORM, optionally set to override the measurement
 # Outputs:   ./taxprofiler_samplesheet.csv, ./taxprofiler_database.csv,
-#            ./raw-sequences/, ./sample_count.txt, ./read_length.txt, and
-#            ./message.out on error
+#            ./raw-sequences/, and the sample count, the measured read length
+#            and any explanation of a failure in ./run_state.json
 #
 # Because the samplesheet is whitespace-delimited, FASTQ paths cannot contain spaces.
 
@@ -60,16 +61,10 @@ source /data/prod/nextflow/.env
 INPUT_SAMPLESHEET="${1:-original_samplesheet.tsv}"
 OUT_CSV="taxprofiler_samplesheet.csv"
 
-# Read by taxprofiler_upload.sh for the published page's header
-SAMPLE_COUNT_FILE="sample_count.txt"
-
 # The database sheet the pipeline definition names, written per run, and the
 # static one it is derived from
 OUT_DB_SHEET="taxprofiler_database.csv"
 STATIC_DB_SHEET="$NEXTFLOW_DIR/config/taxprofiler/database.csv"
-
-# The measured read length, kept beside the other run metadata
-READ_LENGTH_FILE="read_length.txt"
 
 # Reads per file to sample when measuring read length
 READ_LENGTH_SAMPLE=10000
@@ -337,7 +332,7 @@ if [[ -z "${READ_MEDIAN:-}" ]]; then
     READ_MODE=""
     READ_MEDIAN=0
 else
-    printf '%s\n' "$READ_MODE" > "$READ_LENGTH_FILE"
+    state_set_number samples.read_length "$READ_MODE"
 fi
 
 if [[ -n "${INSTRUMENT_PLATFORM:-}" ]]; then
@@ -375,7 +370,7 @@ done
 
 # Distinct samples, not rows: a sample sequenced over several runs is one sample
 SAMPLE_COUNT=${#RUN_COUNT[@]}
-printf '%s\n' "$SAMPLE_COUNT" > "$SAMPLE_COUNT_FILE"
+state_set_number samples.count "$SAMPLE_COUNT"
 
 log "Successfully generated taxprofiler samplesheet: $OUT_CSV ($SAMPLE_COUNT samples, ${#ROW_SAMPLE[@]} runs)"
 

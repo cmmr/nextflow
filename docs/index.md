@@ -69,8 +69,8 @@ flowchart TD
 
    **It gives the run its two homes before it checks anything about the
    request.** As soon as the task ID yields a uid it creates
-   `$NEXTFLOW_DIR/tmp/<uid>/` — recording the task ID and title in
-   `wrike_task_id.txt` and `wrike_task_name.txt` there — confirms the matching S3
+   `$NEXTFLOW_DIR/tmp/<uid>/` — creating `run_state.json` there and recording the
+   task ID and title in it — confirms the matching S3
    prefix is unpublished, claims it by uploading a `Validating` progress page,
    and writes that page's address to the task's results custom field. From that
    point the requester has a live link and the handler has somewhere durable to
@@ -82,7 +82,7 @@ flowchart TD
    Then the checks: is every answer on the request form one the form actually
    offers? is exactly one samplesheet attached, with a plausible extension? and
    if the request names a previous run to reproduce, does that run's
-   `pipeline_manifest.json` still exist in S3?
+   `run_state.json` still exist in S3?
 
    **Answers are checked against a list, not passed through** — each ends up in a
    nextflow command line, and there is no free-text parameter field. The pipeline
@@ -91,8 +91,8 @@ flowchart TD
    first word is read, and it is validated as a *name* — `^[A-Z0-9_]+$`, then a
    file that exists — before it is ever used as a path, because `wrike_job.sh`
    sources what it resolves to. One option, `prev_run_id`, names no pipeline at
-   all: it says the settings come from an earlier run. The rest are written to
-   `form_answers.tsv` for the pipeline to make what it likes of.
+   all: it says the settings come from an earlier run. The rest are recorded
+   under `.answers` for the pipeline to make what it likes of.
 
    A rejected request keeps both homes, its page now reading `Failed`; they last
    as long as the Wrike task does. The one exception is the S3 prefix collision,
@@ -106,22 +106,23 @@ flowchart TD
 4. **The run.** [`wrike_job.sh`](../scripts/wrike_job.sh) downloads the samplesheet,
    sources the requested pipeline definition, and runs its three stages:
    pre-process → nextflow → post-process. It never comments on Wrike itself; it
-   records progress in `status.txt`, any user-facing explanation in
-   `message.out`, and anything a stage wants said on a successful run in
-   `notes.txt`.
+   records progress in the state file's `.status`, any user-facing explanation in
+   its `.message`, and anything a stage wants said on a successful run in its
+   `.notes`. Moving the Wrike task on is a separate call, `update_wrike_task_status`,
+   that each stage makes alongside `report_status`.
 
    **The params file is written between the first two stages**, not by the
    pipeline file, so that a pre-process step which measures the data can
    contribute parameters — which is how `AMPLISEQ` works out for itself
    [which 16S region](pipelines/ampliseq.md) was sequenced instead of being told.
-   Everything the run resolved is recorded in `pipeline_manifest.json` and
-   published with the results, and that is what a later request naming this run
-   is rebuilt from.
+   Everything the run resolved is recorded as `.manifest`, and the whole state
+   file is published beside the results as `run_state.json` - that is what a
+   later request naming this run is rebuilt from.
 
 5. **The report.** [`wrike_followup.sh`](../scripts/wrike_followup.sh) is submitted
    with `--dependency=afterany`, so it runs whether the job succeeded, failed, or
-   was killed by the scheduler. It reads `status.txt`, `notes.txt` and
-   `message.out` out of the run directory and posts the outcome. A successful
+   was killed by the scheduler. It reads `.status`, `.notes` and `.message` out
+   of the run's state file and posts the outcome. A successful
    run's directory is deleted (results are already in S3); a failed one is kept
    for inspection.
 
@@ -142,7 +143,7 @@ flowchart TD
    a day: two weeks out it comments on the task, mentioning whoever raised it and
    anyone following it; on the
    date it deletes the published results, leaves an expired page in their place,
-   and sets the Status to `Expired`. The run's own records — `pipeline_manifest.json`
+   and sets the Status to `Expired`. The run's own records — `run_state.json`
    above all — are kept, so an expired run can still be repeated. It is the one
    part of the system that no webhook drives; see
    [Expiring a dashboard](operations/expiration.md).

@@ -63,10 +63,11 @@ lets an expired run still be repeated:
 
 | Kept | |
 | --- | --- |
-| `pipeline_manifest.json` | What a `prev_run_id` request is rebuilt from |
+| `run_state.json` | The run's whole record; its `.manifest` is what a `prev_run_id` request is rebuilt from |
 | `nextflow_command.sh` | The command that ran, fully expanded |
 | `*.yaml` | The params file, as finally resolved |
-| `rerun_manifest.json`, `form_answers.tsv`, `region.txt`, `region_detection.txt` | The rest of the record, where a run has them |
+| `region_detection.txt` | What the 16S detector measured, for an ampliseq run |
+| `pipeline_manifest.json`, `rerun_manifest.json`, `form_answers.tsv`, `region.txt` | Names used before the run directory moved to one state file, kept for prefixes that still carry them |
 
 Only the top level of the prefix is offered a match, so every results folder —
 `summary_report/`, `qiime2/`, and the listing pages under them — goes, along with
@@ -93,9 +94,9 @@ configuration survives, but repeating an analysis needs the original sequencing
 files, which are not stored here and may not exist anywhere. The records above
 are kept for us, and are still at their own keys under the prefix.
 
-The sample count comes from `pipeline_manifest.json`, which has carried it since
-August 2026; for a run published before that it is read back out of the landing
-page just before that page is deleted.
+The sample count comes from `run_state.json`, or from the `pipeline_manifest.json`
+that carried it before; for a run published before either it is read back out of
+the landing page just before that page is deleted.
 
 ## Installing the timer
 

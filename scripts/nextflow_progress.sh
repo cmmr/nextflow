@@ -9,8 +9,12 @@
 # later occupy, s3://$AWS_S3_BUCKET/$S3_RUN_PREFIX/<run_id>/index.html. A reader
 # who opens the results link before the run finishes therefore watches it work,
 # and is handed the report once ampliseq_upload.sh overwrites this file. The
-# progress page refreshes itself every minute; the report does not, so a browser
-# stops polling on its own the moment the run lands.
+# progress page refreshes itself every ten seconds; the report does not, so a
+# browser stops polling on its own the moment the run lands.
+#
+# A run that has failed carries its logs on the page as well: nextflow's error
+# block, the debug log beside it, and the command that was run, so a requester
+# has something to quote without anyone reading the cluster for them.
 #
 # The dial and the table are built from nextflow's console output, which
 # wrike_job.sh tees to
@@ -34,7 +38,8 @@
 # Called by: wrike_task_handler.sh, once per change of status while a request is
 #            being handled - the first of those calls creates the run's S3 prefix
 #            - and wrike_job.sh, backgrounded for the length of the nextflow stage
-# Requires:  aws, awk
+# Requires:  aws, awk; squeue and sacct for the cluster counts and the clocks,
+#            each optional
 # Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, and the log/warn helpers
 #            and is_valid_uid, all sourced from .env
 #
@@ -46,14 +51,21 @@ source /data/prod/nextflow/.env
 
 readonly PROGRESS_TEMPLATE="$NEXTFLOW_DIR/templates/progress.html"
 
-# What wrike_job.sh tees nextflow's console output to
+# What wrike_job.sh tees nextflow's console output to, and the command it wrote
+# out and then ran - both read only when a run has failed
 readonly NEXTFLOW_OUT="nextflow.out"
+readonly NEXTFLOW_CMD="nextflow_command.sh"
 
 # One line saying what the run is doing, written by report_stage as each stage
 # starts. Nextflow's own output only covers the middle of a run.
 readonly STAGE_FILE="stage.txt"
 
-readonly DEFAULT_INTERVAL=60
+readonly DEFAULT_INTERVAL=10
+
+# How much of a log a failed run's page carries. Enough for nextflow's error
+# block, which runs to a few dozen lines, without pasting a whole run's output
+# into an object a browser reloads.
+readonly LOG_TAIL_LINES=200
 
 # Shown before nextflow has printed its first process line, which can take a
 # couple of minutes while it resolves the pipeline and its containers.
@@ -189,34 +201,89 @@ render_rows() {
     ' "$NEXTFLOW_OUT"
 }
 
-# How much of the cluster's running work is this run's, as "mine total basis".
+# The Slurm jobs this run has on the cluster, as "running pending elapsed".
 #
 # Nextflow submits every task as its own Slurm job from a work directory under
-# this one, so a running job belongs to this run when its work directory does.
-# A run whose executor is local has none of those, and falls back to every job
-# the submitting user has running.
+# this one, and the job driving the run is chdir'd here, so a job belongs to this
+# run when its work directory is this one or below it. The follow-up job that
+# reports the outcome is chdir'd here too, and is left out of both counts: it is
+# held on a dependency for the whole run, and by the time it is running the run
+# it reports is over.
 #
-# Prints nothing when squeue cannot answer, which is what leaves the dial off
-# the page rather than drawing a nought.
-cluster_share() {
+# elapsed is how long the longest-running of them has been going, which is the
+# job driving the run.
+#
+# Prints nothing when squeue cannot answer or this run has nothing on the
+# cluster, which is what leaves the widgets off the page rather than drawing
+# noughts.
+cluster_counts() {
     local me
 
     command -v squeue > /dev/null 2>&1 || return 0
     me=$(id -un 2>/dev/null) || return 0
 
-    squeue --states=RUNNING --noheader --format='%u|%Z' 2>/dev/null \
-        | LC_ALL=C awk -F'|' -v me="$me" -v here="$PWD" '
-            { total++ }
+    squeue --user="$me" --states=RUNNING,PENDING --noheader --format='%T|%r|%M|%Z|%o' 2>/dev/null \
+        | LC_ALL=C awk -F'|' -v here="$PWD" '
+            # Slurm elapsed times: "1-02:03:04", "02:03:04", "3:04" or "4"
+            function secs(t,   days, part, n, i, s) {
+                days = 0
+                if (match(t, /^[0-9]+-/)) {
+                    days = substr(t, 1, RLENGTH - 1) + 0
+                    t = substr(t, RLENGTH + 1)
+                }
 
-            index($2, here) == 1 { run++ }
-            $1 == me             { mine++ }
+                s = 0
+                n = split(t, part, ":")
+                for (i = 1; i <= n; i++) s = s * 60 + (part[i] + 0)
+
+                return days * 86400 + s
+            }
+
+            # squeue pads some of its columns, and every field here is compared
+            # or added up
+            {
+                for (i = 1; i <= NF; i++) gsub(/^[ \t]+|[ \t]+$/, "", $i)
+            }
+
+            # The follow-up, by the script it runs and by the dependency it
+            # waits on, either of which is enough on its own
+            /wrike_followup\.sh/                  { next }
+            $1 == "PENDING" && $2 ~ /^Dependency/ { next }
+
+            index($4, here) != 1 { next }
+
+            $1 == "RUNNING" {
+                running++
+                if (secs($3) > elapsed) elapsed = secs($3)
+                next
+            }
+
+            $1 == "PENDING" { pending++ }
 
             END {
-                if (total == 0) exit 1
-
-                if (run > 0) printf "%d %d run\n", run, total
-                else         printf "%d %d user\n", mine + 0, total
+                if (running + pending == 0) exit 1
+                printf "%d %d %d\n", running, pending, elapsed
             }
+        '
+}
+
+# Cpu-seconds every Slurm job of this run has held between them, read out of the
+# accounting database, which is the only place the tasks that have already
+# finished are still counted. The window is the run's own age, with a few
+# minutes' slack for the driver job that was submitted before it.
+#
+# Prints nothing when sacct cannot answer, which leaves the cpu clock off the
+# widget without taking the wall clock with it.
+run_cpu_seconds() {
+    local elapsed="$1"
+
+    command -v sacct > /dev/null 2>&1 || return 0
+
+    sacct --allocations --noheader --parsable2 --starttime="now-$(( elapsed + 300 ))seconds" \
+        --format=CPUTimeRAW,WorkDir 2>/dev/null \
+        | LC_ALL=C awk -F'|' -v here="$PWD" '
+            index($2, here) == 1 { total += $1 }
+            END { if (total == 0) exit 1; print total }
         '
 }
 
@@ -235,35 +302,150 @@ dial_arc() {
         'BEGIN { printf "stroke-dasharray: %.1f %s", c * p / 100, c }'
 }
 
-# That share as the second dial, or nothing at all when there was no answer
-cluster_dial() {
-    local mine="$1" total="$2" basis="$3"
-    local percent arc caption
+# Seconds as hours and minutes, with the hours left to run past 24
+clock() {
+    local t="$1"
 
-    [[ "$total" =~ ^[0-9]+$ ]] && (( total > 0 )) || return 0
+    printf '%dh %02dm' "$(( t / 3600 ))" "$(( t / 60 % 60 ))"
+}
 
-    percent=$(( 100 * mine / total ))
-    arc=$(dial_arc "$percent" 301.593)
+# What this run has on the cluster, as the two counts under the dial
+cluster_stats() {
+    local running="$1" pending="$2"
+    local caption="$running of this run's jobs are running, $pending waiting for a slot"
 
-    if [[ "$basis" == "run" ]]; then
-        caption="$mine of $total running jobs on the cluster are this run's"
-    else
-        caption="$mine of $total running jobs on the cluster are yours"
+    printf '<div class="flex items-center justify-center gap-7 pt-5 border-t border-outline-variant w-full"'
+    printf ' title="%s">' "$(escape_html "$caption")"
+
+    printf '<div class="flex flex-col items-center">'
+    printf '<span class="font-headline-lg text-headline-lg font-bold text-primary leading-none">%s</span>' "$running"
+    printf '<span class="font-label-caps text-label-caps text-on-surface-variant mt-1">Running</span>'
+    printf '</div>'
+
+    printf '<div class="flex flex-col items-center">'
+    printf '<span class="font-headline-lg text-headline-lg font-bold text-primary leading-none">%s</span>' "$pending"
+    printf '<span class="font-label-caps text-label-caps text-on-surface-variant mt-1">Queued</span>'
+    printf '</div>'
+
+    printf '</div>'
+}
+
+# The run's clocks, at the foot of the column: how long it has been going, and -
+# when the accounting database can be asked - how much cpu time it has held.
+#
+# Read at the moment the page is rendered rather than counted up in the browser,
+# so they step forward with each refresh; the minute they are given to is finer
+# than anything a reader waiting on a run needs.
+timers_widget() {
+    local elapsed="$1"
+    local cpu
+
+    (( elapsed > 0 )) || return 0
+
+    cpu=$(run_cpu_seconds "$elapsed") || cpu=""
+
+    printf '<div class="flex flex-col gap-1 pt-5 border-t border-outline-variant w-full">'
+
+    printf '<div class="flex items-baseline justify-between gap-2">'
+    printf '<span class="font-body-sm text-body-sm text-on-surface-variant">Elapsed</span>'
+    printf '<span class="font-body-sm text-body-sm text-on-surface">%s</span>' "$(clock "$elapsed")"
+    printf '</div>'
+
+    if [[ -n "$cpu" ]]; then
+        printf '<div class="flex items-baseline justify-between gap-2"'
+        printf ' title="Cpu time held across every job of this run, finished ones included">'
+        printf '<span class="font-body-sm text-body-sm text-on-surface-variant">CPU time</span>'
+        printf '<span class="font-body-sm text-body-sm text-on-surface">%s</span>' "$(clock "$cpu")"
+        printf '</div>'
     fi
 
-    printf '<div class="flex flex-col items-center gap-2 pt-5 border-t border-outline-variant w-full"'
-    printf ' title="%s">' "$(escape_html "$caption")"
-    printf '<div class="relative w-[104px] h-[104px]">'
-    printf '<svg class="dial cluster w-full h-full" viewBox="0 0 120 120">'
-    printf '<circle class="text-surface-variant" cx="60" cy="60" r="48" stroke="currentColor"></circle>'
-    printf '<circle class="text-secondary" cx="60" cy="60" r="48" stroke="currentColor"'
-    printf ' style="%s"></circle></svg>' "$arc"
-    printf '<div class="absolute inset-0 flex flex-col items-center justify-center">'
-    printf '<span class="text-body-md font-bold text-primary leading-none">%s%%</span>' "$percent"
-    printf '<span class="font-label-caps text-label-caps text-on-surface-variant mt-1">Cluster</span>'
-    printf '</div></div>'
-    printf '<p class="font-body-sm text-body-sm text-on-surface-variant text-center">%s of %s jobs</p>' \
-        "$mine" "$total"
+    printf '</div>'
+}
+
+# The last of a file, for a page to show. Nothing when it is not there or is
+# empty, which is what leaves its block off the report.
+file_tail() {
+    local file="$1"
+
+    [[ -s "$file" ]] || return 1
+
+    tail -n "$LOG_TAIL_LINES" "$file"
+}
+
+# Nextflow's account of what went wrong: everything from the last "ERROR ~" line
+# to the end of its output, which is the block naming the process that failed,
+# its exit status, what it printed, and the work directory it left behind.
+#
+# A run killed by the scheduler, or one that died before nextflow said anything,
+# has no such block; the tail of the output stands in for it.
+nextflow_error() {
+    [[ -s "$NEXTFLOW_OUT" ]] || return 1
+
+    LC_ALL=C awk -v tail="$LOG_TAIL_LINES" '
+        { line[NR] = $0 }
+        /^ERROR ~/ { start = NR }
+
+        END {
+            if (NR == 0) exit 1
+
+            first = start ? start : NR - tail + 1
+            if (NR - first + 1 > tail) first = NR - tail + 1
+            if (first < 1) first = 1
+
+            for (i = first; i <= NR; i++) print line[i]
+        }
+    ' "$NEXTFLOW_OUT"
+}
+
+# One log under a heading, as a block the page scrolls rather than grows with.
+# Given a third argument it starts open, which the one log a reader came for is.
+log_panel() {
+    local title="$1" body="$2"
+
+    printf '<details class="border border-outline-variant rounded-lg"%s>' \
+        "${3:+ open}"
+    printf '<summary class="font-label-caps text-label-caps text-on-surface-variant'
+    printf ' px-3 py-2 cursor-pointer">%s</summary>' "$(escape_html "$title")"
+    printf '<pre class="font-code-sm text-code-sm text-on-surface bg-surface-container'
+    printf ' px-3 py-2 max-h-96 overflow-auto">%s</pre>' "$(escape_html "$body")"
+    printf '</details>'
+}
+
+# What went wrong, for a run that did not finish - the panel that is the whole
+# reason a failed run's page is worth opening.
+#
+# message.out is the explanation whichever stage failed left behind, and the
+# three logs under it are the run's own record: what nextflow printed as it
+# died, its debug log, and the command it was given. A run that failed before
+# nextflow started has none of those, and the panel is left off.
+failure_report() {
+    local message="" error="" log="" command=""
+
+    [[ -s "message.out" ]] && message=$(<message.out)
+
+    error=$(nextflow_error)               || error=""
+    log=$(file_tail ".nextflow.log")      || log=""
+    command=$(file_tail "$NEXTFLOW_CMD")  || command=""
+
+    [[ -n "$message$error$log$command" ]] || return 0
+
+    printf '<div class="bg-surface-container-lowest border border-error-red/40 rounded-xl'
+    printf ' shadow-sm p-padding-card flex flex-col gap-3">'
+    printf '<h2 class="font-headline-lg text-headline-lg font-bold text-error-red">'
+    printf 'What went wrong</h2>'
+
+    if [[ -n "$message" ]]; then
+        printf '<p class="font-body-md text-body-md text-on-surface">%s</p>' \
+            "$(escape_html "$message")"
+    fi
+
+    [[ -n "$error" ]]   && log_panel "Nextflow output" "$error" open
+    [[ -n "$log" ]]     && log_panel "Nextflow log (.nextflow.log)" "$log"
+    [[ -n "$command" ]] && log_panel "The command that was run" "$command"
+
+    printf '<p class="font-body-sm text-body-sm text-on-surface-variant">'
+    printf 'Run %s, kept for inspection at %s.</p>' \
+        "$(escape_html "$RUN_ID")" "$(escape_html "$PWD")"
     printf '</div>'
 }
 
@@ -297,7 +479,7 @@ status_pill() {
 publish_once() {
     local status="${1:-}"
     local page rows task_name totals tasks_done tasks_total percent arc tasks
-    local stage share mine total basis cluster
+    local stage counts running pending elapsed clusters timers failure
 
     if [[ ! -r "$PROGRESS_TEMPLATE" ]]; then
         warn "No progress template at $PROGRESS_TEMPLATE; skipping."
@@ -368,12 +550,22 @@ publish_once() {
 
     arc=$(dial_arc "$percent" 339.292)
 
-    # How busy the cluster is with everyone else, which is the other thing a
-    # reader waiting on a queue wants to know
-    cluster=""
-    if share=$(cluster_share) && [[ -n "$share" ]]; then
-        read -r mine total basis <<< "$share"
-        cluster=$(cluster_dial "$mine" "$total" "$basis")
+    # What this run holds on the cluster, and how long it has been holding it,
+    # which is the other thing a reader waiting on a queue wants to know
+    clusters=""
+    timers=""
+    if counts=$(cluster_counts) && [[ -n "$counts" ]]; then
+        read -r running pending elapsed <<< "$counts"
+
+        clusters=$(cluster_stats "$running" "$pending")
+        timers=$(timers_widget "$elapsed")
+    fi
+
+    # A run that did not finish gets its logs on the page, since this page is
+    # where its requester is going to look for them
+    failure=""
+    if [[ "${status,,}" == "failed" ]]; then
+        failure=$(failure_report) || failure=""
     fi
 
     # Rows are never escaped - render_rows emits the markup itself, having
@@ -386,7 +578,9 @@ publish_once() {
         PERCENT     "$percent" \
         ARC         "$arc" \
         TASKS       "$(escape_html "$tasks")" \
-        CLUSTER     "$cluster" \
+        CLUSTER     "$clusters" \
+        TIMERS      "$timers" \
+        FAILURE     "$failure" \
         UPDATED     "$(date '+%B %-d, %Y at %-I:%M %p %Z')" \
         ROWS        "$rows") || return 1
 

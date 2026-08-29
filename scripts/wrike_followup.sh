@@ -22,6 +22,10 @@
 #   notes.txt    anything a stage wanted reported whether or not the run failed,
 #                such as the 16S region ampliseq_detect_region.sh measured
 #
+# A failed run also gets its results page republished as the failure, since that
+# is the link the requester was given and the logs it carries are what they are
+# going to be asked about.
+#
 # A successful run has already published to S3, so its run directory is removed.
 # A failed one is kept for inspection.
 #
@@ -31,6 +35,7 @@
 # Usage:     sbatch --chdir=<run_dir> --job-name=<uid> \
 #                --dependency=afterany:<job_id> wrike_followup.sh
 # Called by: wrike_task_handler.sh
+# Runs:      scripts/nextflow_progress.sh, once, for a run that failed
 # Requires:  curl and jq (via the Wrike helpers)
 # Env:       NEXTFLOW_DIR and the Wrike helper functions, sourced from .env
 #
@@ -84,6 +89,14 @@ if [[ "$STATUS" == "Completed" ]]; then
 fi
 
 update_wrike_pipeline_progress "Failed"
+
+# Leave the results page saying so, with the logs on it. wrike_job.sh publishes
+# one itself when nextflow is what failed, but every other way a run ends -
+# a stage before nextflow, a job the scheduler killed, a job that never started
+# - stops its progress watcher without a word, leaving the page frozen mid-run.
+# This is the one place that runs whatever happened. Best-effort, as ever: the
+# outcome still has to reach Wrike below.
+"$NEXTFLOW_DIR/scripts/nextflow_progress.sh" "Failed" || true
 
 # ${STATUS,,} lowercases, e.g. "...while the pipeline was pre-processing."
 REPLY="An error occurred while the pipeline was ${STATUS,,}."

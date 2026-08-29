@@ -2,8 +2,8 @@
 <!--
   progress.html - Live progress page for a running pipeline.
 
-  Rendered by scripts/nextflow_progress.sh every minute while a job runs, and
-  uploaded to the same key the finished dashboard later takes
+  Rendered by scripts/nextflow_progress.sh every ten seconds while a job runs,
+  and uploaded to the same key the finished dashboard later takes
   (s3://$AWS_S3_BUCKET/nxf/<run_id>/index.html) - so a reader who opens the
   results link early watches the run, and is handed the report when it lands.
 
@@ -16,37 +16,43 @@
   status API without Seqera Platform, so both are parsed out of its console
   output; see nextflow_progress.sh.
 
-  Under that dial is a second one, which is not about this run at all: it is how
-  much of the cluster's running work is this run's, so a reader waiting on a
-  queue can see whether the machine is busy with somebody else. It is left out
-  when squeue cannot be asked.
+  Under that dial are the run's Slurm jobs, running and queued, and under those
+  its clocks: how long the run has been going and how much cpu time it has held.
+  The clocks are read when the page is rendered rather than counted up in the
+  browser, so they step forward with each refresh. Both blocks are left out when
+  squeue cannot be asked.
+
+  A run that has failed carries a panel of its own under the card: the
+  explanation the stage that failed left behind, and the tail of each log the
+  run wrote. It is the last thing on the page because it is the last thing that
+  happened.
 
   The head is shared with the dashboard and is inlined from
   templates/tailwind.html.
 
   Placeholders are COMMON_HEAD, TASK_NAME, RUN_ID, STATUS_PILL, STAGE, PERCENT,
-  ARC, TASKS, CLUSTER, UPDATED and ROWS, each wrapped in doubled underscores. ARC
-  is the whole style of the dial's arc, since an arc of nothing has to lose the
-  round cap that would otherwise draw it as a dot. They are
+  ARC, TASKS, CLUSTER, TIMERS, FAILURE, UPDATED and ROWS, each wrapped in
+  doubled underscores. ARC is the whole style of the dial's arc, since an arc of
+  nothing has to lose the round cap that would otherwise draw it as a dot. They are
   deliberately not spelled that way in this comment - the renderer substitutes
   the whole file, comment included, and would paste the entire process table in
   here too. The task name is user-authored text and is HTML-escaped on the way
-  in; STATUS_PILL and ROWS are markup the renderer escaped itself.
+  in; STATUS_PILL, CLUSTER, TIMERS, FAILURE and ROWS are markup the renderer
+  escaped itself.
 -->
 <html class="light h-full" lang="en">
 <head>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
-<meta content="60" http-equiv="refresh">
+<meta content="10" http-equiv="refresh">
 <title>__TASK_NAME__ - Alkek Center for Metagenomics and Microbiome Research</title>
 __COMMON_HEAD__
 <style>
-/* The dials are drawn from twelve o'clock, and the arc the renderer sizes is
-   the share each of them reports */
+/* The dial is drawn from twelve o'clock, and the arc the renderer sizes is the
+   share it reports */
 .dial { transform: rotate(-90deg); }
 .dial circle { fill: none; stroke-linecap: round; }
 .dial.tasks circle { stroke-width: 10; }
-.dial.cluster circle { stroke-width: 9; }
 
 /* A process with tasks in flight, as a bar that is visibly working. The stripes
    run at 45 degrees, so one period along the bar is 12px * sqrt 2. */
@@ -98,6 +104,7 @@ follows the run, and becomes the results when it finishes.</p>
 <p class="font-body-sm text-body-sm text-on-surface-variant text-center">__TASKS__</p>
 </div>
 __CLUSTER__
+__TIMERS__
 </div>
 
 <!-- One bar per process nextflow has started -->
@@ -111,12 +118,14 @@ __CLUSTER__
 __ROWS__
 </div>
 </div>
+
+__FAILURE__
 </main>
 
 <footer class="shrink-0 bg-surface-container border-t border-outline-variant w-full">
 <div class="flex flex-col md:flex-row justify-between items-center gap-1 px-margin-page py-3 w-full max-w-5xl mx-auto">
 <div class="text-on-surface-variant font-body-sm text-body-sm text-center md:text-left">This page
-refreshes itself every minute, and is replaced by the results when the run finishes.</div>
+refreshes itself every few seconds, and is replaced by the results when the run finishes.</div>
 <div class="text-on-surface-variant font-body-sm text-body-sm">Updated __UPDATED__ &middot; __RUN_ID__</div>
 </div>
 </footer>

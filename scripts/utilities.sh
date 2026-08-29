@@ -54,13 +54,18 @@ run_results_url() {
 }
 
 # Make a string safe to drop into HTML text. Used on the Wrike task name, which
-# heads both published pages. Ampersand first, or it would go back over its own
-# replacements.
+# heads both published pages, and on the logs a failed run's page carries.
+# Ampersand first, or it would go back over its own replacements.
+#
+# Each ampersand in a replacement is backslashed because bash 5.2 made a bare
+# one mean "the text that matched" - which turned < into <lt; rather than &lt;,
+# leaving the markup unescaped on any host new enough to have it. The backslash
+# is removed either way, so this reads the same on 4.x.
 escape_html() {
     local s="$1"
-    s="${s//&/&amp;}"
-    s="${s//</&lt;}"
-    s="${s//>/&gt;}"
+    s="${s//&/\&amp;}"
+    s="${s//</\&lt;}"
+    s="${s//>/\&gt;}"
     printf '%s' "$s"
 }
 

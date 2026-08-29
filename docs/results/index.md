@@ -208,7 +208,7 @@ this page. The sidebar's **Download everything** button is that link. See
 [`nextflow_progress.sh`](../../scripts/nextflow_progress.sh), backgrounded by
 `wrike_job.sh` from the moment the job starts, renders
 [`templates/progress.html`](../../templates/progress.html) to the *same key*
-every minute — so a requester who opens the results link early watches the
+every ten seconds — so a requester who opens the results link early watches the
 pipeline work. The final upload overwrites it.
 
 **It starts before nextflow does**, because the stages before nextflow are the
@@ -250,25 +250,51 @@ requester asked for has passed, and republishes `index.html` from
 leads somewhere, and still says what the run was and how to repeat it. See
 [Expiring a dashboard](../operations/expiration.md).
 
-**The progress page is two dials and a list.** The first dial is every task of
-the run taken together, with the count it was worked out from under it — *17 of
-20 tasks*. A process nextflow has not yet given any tasks counts for nothing
-rather than for nought out of nought, so the dial only ever reports on work that
-exists.
+**The progress page is a dial, a list, and the run's own numbers.** The dial is
+every task of the run taken together, with the count it was worked out from
+under it — *17 of 20 tasks*. A process nextflow has not yet given any tasks
+counts for nothing rather than for nought out of nought, so the dial only ever
+reports on work that exists.
 
 Beside it, one bar per process: **navy once the process is done, green with its
 stripes running while its tasks are in flight**, and an empty track for one
 nextflow has not started. A process with tasks submitted but none finished still
 shows a sliver, so "started" and "not started" never look the same.
 
-**The second dial is not about this run.** It is how much of the cluster's
-running work belongs to it: `squeue` is asked for every running job, and a job
-is this run's when its work directory is under the run's own — which is what
-every task nextflow submits looks like. A run whose executor is local has none
-of those, so the count falls back to every job the submitting user is running.
-It answers the question a reader on a slow day actually has, which is whether
-the machine is busy with somebody else. The dial is left off the page entirely
-when `squeue` cannot be asked.
+**Under the dial are the run's Slurm jobs** — *3 Running*, *2 Queued*. `squeue`
+is asked for every running and pending job, and a job is this run's when its
+work directory is the run's own or under it, which covers both the job driving
+the run and every task nextflow submits. The follow-up job that reports the
+outcome is left out of the queued count: it is held on a dependency for the
+whole run, and a job that cannot start until the run ends is not work anyone is
+waiting on.
+
+**Under those are the run's clocks** — how long it has been going, and how much
+cpu time it has held, to the minute. The first is the elapsed time of the
+longest-running of those jobs, which is the one driving the run. The second is
+`CPUTimeRAW` summed over the run's jobs in the accounting database, which is the
+only place the tasks that have already finished are still counted, so it only
+ever goes up. Both are read at the moment the page is rendered rather than
+counted up in the browser, so they step forward with each refresh. The counts
+are left off the page when `squeue` cannot be asked, and the cpu clock alone
+when `sacct` cannot be.
+
+**A run that failed carries its logs.** Under the card is a panel with the
+explanation the stage that failed left in `message.out`, then the tail of each
+of three files the run wrote: nextflow's console output — from its last
+`ERROR ~` line, which is the block naming the process that died, its exit
+status, what it printed and the work directory it left behind — then
+`.nextflow.log`, then the command that was run. Only the first is open; the
+others are there to be unfolded. Two hundred lines of each, since the page is an
+object a browser reloads, and every one of them is HTML-escaped. A run that
+failed before nextflow started has none of those files and gets no panel.
+
+That panel is why [`wrike_followup.sh`](../../scripts/wrike_followup.sh)
+republishes the page for a failed run. `wrike_job.sh` publishes one itself when
+nextflow is what failed, but every other way a run ends — a stage before
+nextflow, a job the scheduler killed — stops the progress watcher without a
+word, and would otherwise leave the page frozen mid-run. The follow-up job runs
+whatever happened, so it is the one place that can say so.
 
 Those numbers come from parsing nextflow's console output, which `wrike_job.sh`
 tees to `nextflow.out`. Nextflow has no live status API outside Seqera Platform:
@@ -284,8 +310,8 @@ The status the bar carries is the run's own — `Validating`, `Queued`, `Running
 still, and `Completed` green, for the moment between the last stage and the
 report landing.
 
-The progress page refreshes itself every minute and the finished dashboard does
-not, which is what stops a reader's browser polling once the results land.
+The progress page refreshes itself every ten seconds and the finished dashboard
+does not, which is what stops a reader's browser polling once the results land.
 
 ## How the pages are styled
 

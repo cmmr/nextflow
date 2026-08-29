@@ -124,30 +124,29 @@ lab sheet into the six-column CSV taxprofiler wants — `sample`, `run_accession
 - **Bracken's read length is measured**, not assumed — see
   [Databases](#databases).
 
-[`taxprofiler_upload.sh`](../../scripts/taxprofiler_upload.sh) mirrors the ampliseq
-uploader: it zips `raw-sequences/` into the results folder (`zip -0` — the reads
-are already compressed), indexes the results folders, copies them to
-`s3://$AWS_S3_BUCKET/nxf/<uid>/`, renders the shared
+[`taxprofiler_upload.sh`](../../scripts/taxprofiler_upload.sh) indexes the results
+folders, copies them to `s3://$AWS_S3_BUCKET/nxf/<uid>/`, renders the shared
 [dashboard](../results/index.md) over `multiqc/multiqc_report.html`, and writes
 the report URL to the Wrike custom field. What its file index lists is
 [`templates/taxprofiler/outputs.conf`](../../templates/taxprofiler/outputs.conf).
 
-**The reads archive is the bulk of what a WGS run publishes.** Building it needs
-free space in the run directory equal to the input volume, and the upload is that
-volume again over the wire; both land inside `wrike_job.sh`'s 48-hour ceiling or
-the run fails with the profiling already done.
+**The raw reads are not published.** Unlike ampliseq, the uploader leaves
+`raw-sequences/` in the run directory: a WGS run's inputs are large enough that
+packaging and uploading them costs more than the analysis did, and the requester
+already holds them. The Overview keeps a hidden row for the link that will offer
+them from the cluster instead — a `dashboard_link_button` with an empty address,
+which renders the markup and hides it. Give it a URL to turn the link on.
 
-The page's buttons are globbed, since those filenames carry the tool and database
-names from the database sheet:
+The page's remaining buttons are globbed, since those filenames carry the tool
+and database names from the database sheet:
 
 | Button | Files |
 |---|---|
-| `raw-sequences.zip` | the staged reads, zipped at upload |
 | krona charts | `krona/*.html` — one per tool and database |
 | taxpasta tables | `taxpasta/*.tsv` — one merged profile per tool and database |
 
-Only the archive downloads; the charts and the tables open in a tab, which is
-what [their content types](../results/index.md#what-a-link-does-when-you-click-it)
+Both open in a tab rather than downloading, which is what
+[their content types](../results/index.md#what-a-link-does-when-you-click-it)
 are set at upload to allow.
 
 
@@ -197,12 +196,20 @@ Profiling databases come from
 | tool | db_name | notes |
 | --- | --- | --- |
 | kraken2 | `pluspf_20260626` | RefSeq archaea, bacteria, viral, plasmid, human, UniVec_Core, protozoa, fungi. `db_type` is `short;long` |
-| bracken | `pluspf_20260626` | same directory; `db_params` is `;-r 150` |
+| bracken | `pluspf_20260626_bracken` | same directory as the kraken2 row; `db_params` is `;-r 150` |
 | metaphlan | `mpa_vJun23_CHOCOPhlAnSGB_202403` | `db_type` is `short` |
 
 **Bracken's `db_params` must contain a semicolon**, which splits kraken2's
 parameters from bracken's. That is the only part of the field that is required —
 `db_params` is empty on the other two rows.
+
+**The bracken row's `db_name` must differ from the kraken2 row's**, even though
+both point at the same directory. Running both tools makes taxprofiler classify
+every sample twice, once per row, and it matches those kraken2 reports back to
+bracken databases on `db_name` alone. Two rows sharing a name means both reports
+match, bracken runs twice per sample writing the same `<sample>_<db_name>.bracken.tsv`
+both times, and `TAXPASTA_MERGE` fails on an input file name collision at the end
+of an otherwise complete run.
 
 **The `-r 150` there is only a fallback.** Bracken's read length is measured per
 run: `taxprofiler_samplesheet.sh` samples the staged R1 files, takes the modal

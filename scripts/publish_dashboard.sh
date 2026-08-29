@@ -21,6 +21,8 @@
 #   dashboard_view       <id> <label> <path>      once per report the bar offers
 #   dashboard_index_view [label]                  where the file index sits in it
 #   dashboard_button     <glob>                   once per file the sidebar offers
+#   dashboard_link_button <href> <label> [icon]   a link to data held elsewhere,
+#                                                 hidden while <href> is empty
 #   dashboard_stat_group <heading> [note]         opens a block of the statistics
 #   dashboard_stat_row   <label> <value>          a reading with no bar under it
 #   dashboard_stat_tiles <value|label|tone> ...   a row of counts
@@ -46,10 +48,10 @@
 # biotech, database, filter_alt, science, folder_zip, data_object and so on.
 #
 # Defines: dashboard_reset, dashboard_view, dashboard_index_view,
-#          dashboard_button, dashboard_stat_group, dashboard_stat_row,
-#          dashboard_stat_tiles, dashboard_stat_chips, dashboard_stat_bar,
-#          publish_dashboard, upload_results_tree, TEXT_EXTENSIONS,
-#          DOWNLOAD_EXTENSIONS
+#          dashboard_button, dashboard_link_button, dashboard_stat_group,
+#          dashboard_stat_row, dashboard_stat_tiles, dashboard_stat_chips,
+#          dashboard_stat_bar, publish_dashboard, upload_results_tree,
+#          TEXT_EXTENSIONS, DOWNLOAD_EXTENSIONS
 # Requires: aws, GNU find; the escape_html/escape_url/human_size/render_template
 #           helpers from utilities.sh
 # Env:      NEXTFLOW_DIR
@@ -172,6 +174,31 @@ dashboard_button() {
         DASHBOARD_DOWNLOADS+="<span class=\"material-symbols-outlined text-[18px] shrink-0 text-on-surface-variant opacity-0 group-hover:opacity-100 transition-opacity\">"
         DASHBOARD_DOWNLOADS+="file_download</span></a>"
     done
+}
+
+# One quick download pointing at a whole address of its own rather than at a file
+# in the results folder, for data published somewhere else. An empty address
+# leaves the row in the page but hidden, so filling the address in is the whole
+# of turning the link on. Hidden inline rather than by class, since the row's
+# own "flex" would win over a utility class.
+dashboard_link_button() {
+    local href="$1" label="$2" icon="${3:-folder_zip}"
+    local attributes
+
+    if [[ -n "$href" ]]; then
+        attributes=" href=\"$(escape_html "$href")\" target=\"_blank\" rel=\"noopener\""
+    else
+        attributes=' hidden style="display: none;"'
+    fi
+
+    DASHBOARD_DOWNLOADS+="<a class=\"flex items-center justify-between gap-2 px-2 py-1.5 rounded hover:bg-surface-container transition-colors group\""
+    DASHBOARD_DOWNLOADS+="$attributes>"
+    DASHBOARD_DOWNLOADS+="<span class=\"flex items-center gap-2 min-w-0\">"
+    DASHBOARD_DOWNLOADS+="<span class=\"material-symbols-outlined text-[20px] text-on-surface-variant group-hover:text-primary transition-colors\">"
+    DASHBOARD_DOWNLOADS+="$(escape_html "$icon")</span>"
+    DASHBOARD_DOWNLOADS+="<span class=\"text-[13px] leading-5 text-on-surface truncate\">$(escape_html "$label")</span></span>"
+    DASHBOARD_DOWNLOADS+="<span class=\"material-symbols-outlined text-[18px] shrink-0 text-on-surface-variant opacity-0 group-hover:opacity-100 transition-opacity\">"
+    DASHBOARD_DOWNLOADS+="open_in_new</span></a>"
 }
 
 # The button for the whole run as one zip, which every run has. Its address is

@@ -5,17 +5,15 @@
 # Author: Daniel Smith
 # Date:   August 19th, 2026
 #
-# Archives the input FASTQ directory that taxprofiler_samplesheet.sh built, drops
-# the archive into the results folder, gives every folder below the results root
-# a listing page, copies the folder to s3://$AWS_S3_BUCKET/$S3_RUN_PREFIX/<uid>/
-# from the inside out - so multiqc/multiqc_report.html lands directly under the
-# uid - and lands the page that frames it last. Nextflow's work/ directory is
-# left behind.
+# Gives every folder below the results root a listing page, copies the folder to
+# s3://$AWS_S3_BUCKET/$S3_RUN_PREFIX/<uid>/ from the inside out - so
+# multiqc/multiqc_report.html lands directly under the uid - and lands the page
+# that frames it last. Nextflow's work/ directory is left behind.
 #
-# The archive is stored, not compressed (zip -0): the reads are already gzipped.
-# zip stores what a symlink points at, so linked samples are archived as real
-# data. A WGS run's reads are large, so this needs free space in the run
-# directory equal to the input volume.
+# The raw reads are not published with the results: a WGS run's inputs are large
+# enough that packaging and uploading them costs more than the analysis did, and
+# the requester already holds them. The page keeps a hidden row for the link
+# that will offer them from the cluster instead - see dashboard_link_button.
 #
 # The pages a reader sees are publish_dashboard.sh's, filled in from what this
 # run actually produced: which reports the navigation bar offers, which files
@@ -25,7 +23,7 @@
 # Usage:     taxprofiler_upload.sh [results_dir]
 #            defaults to ./results, the outdir set in the taxprofiler params file
 # Called by: wrike_job.sh, as the POST_PROCESS_CMDS entry of the taxprofiler pipelines
-# Requires:  aws, zip, curl and jq (via the Wrike helpers)
+# Requires:  aws, curl and jq (via the Wrike helpers)
 # Reads:     templates/dashboard.html, templates/overview.html,
 #            templates/files.html and templates/taxprofiler/outputs.conf, via
 #            the dashboard helpers; ./pipeline_manifest.json from the run
@@ -45,12 +43,6 @@ source /data/prod/nextflow/.env
 
 RESULTS_DIR="${1:-results}"
 RESULTS_DIR="${RESULTS_DIR%/}"
-
-# Input FASTQ directory, named to match what taxprofiler_samplesheet.sh creates.
-# The archive it becomes is named for the reader downloading it.
-FASTQ_DIR="raw-sequences"
-FASTQ_ZIP_NAME="raw-sequences.zip"
-FASTQ_ZIP="$RESULTS_DIR/$FASTQ_ZIP_NAME"
 
 # Written by taxprofiler_samplesheet.sh, in the run directory rather than in the
 # results: the number of distinct samples
@@ -91,25 +83,7 @@ if [[ ! -d "$RESULTS_DIR" ]]; then
     fail "The pipeline finished but produced no results directory ('$RESULTS_DIR') to upload."
 fi
 
-# 1. Archive the reads into the results folder so they upload with everything
-#    else. Skipped for any pipeline that does not stage its inputs this way.
-if [[ -d "$FASTQ_DIR" ]]; then
-    command -v zip > /dev/null \
-        || fail "The results could not be packaged for download: zip is not installed."
-
-    log "Archiving $FASTQ_DIR for task $TASK_ID..."
-    rm -f "$FASTQ_ZIP"
-
-    # zip's output goes into the failure message, so the requester is told why
-    # their data could not be packaged
-    if ! ZIP_OUTPUT=$(zip -0 -r "$FASTQ_ZIP" "$FASTQ_DIR" 2>&1); then
-        fail "The sequencing data could not be packaged for download:"$'\n'"$ZIP_OUTPUT"
-    fi
-else
-    log "No $FASTQ_DIR directory; skipping raw sequence archive."
-fi
-
-# 2. Ship the database sheet with the results. wrike_job.sh copies the command
+# 1. Ship the database sheet with the results. wrike_job.sh copies the command
 #    record and the params files; this one is generated per run by
 #    taxprofiler_samplesheet.sh, and it carries the Bracken read length the run
 #    actually used. The input samplesheet is left behind: it names the
@@ -118,32 +92,32 @@ if [[ -r "$DB_SHEET" ]]; then
     cp "$DB_SHEET" "$RESULTS_DIR/" || warn "Could not publish $DB_SHEET with the results."
 fi
 
-# 3. Give every folder below the results root a listing page, so that the folder
+# 2. Give every folder below the results root a listing page, so that the folder
 #    links the report and the landing page carry still resolve once the results
 #    are objects in a bucket rather than directories on disk.
 if ! "$NEXTFLOW_DIR/scripts/index_directories.sh" "$RESULTS_DIR"; then
     warn "The results folders could not be indexed; their listings will be missing."
 fi
 
-# 4. Publish everything below the landing page
+# 3. Publish everything below the landing page
 log "Initiating S3 upload for Task $TASK_ID..."
 
 if ! UPLOAD_OUTPUT=$(upload_results_tree "$RESULTS_DIR" "$S3_RESULTS_DIR"); then
     fail "The results could not be uploaded to S3:"$'\n'"$UPLOAD_OUTPUT"
 fi
 
-# 5. Build the page that frames all of it, from what the run produced.
+# 4. Build the page that frames all of it, from what the run produced.
 dashboard_reset "$RESULTS_DIR" "$OUTPUT_CATALOG"
 
 dashboard_view quality "Quality Control" "multiqc/multiqc_report.html"
 dashboard_index_view   "File Explorer"
 
-#    The reads are the bulky download most people came for; then the interactive
-#    classification charts, one per tool and database, and taxpasta's merged
-#    profiles
-dashboard_button "$FASTQ_ZIP_NAME"
+#    The interactive classification charts, one per tool and database, and
+#    taxpasta's merged profiles. The raw reads follow them as a row that stays
+#    hidden until it is given the address they are served from.
 dashboard_button "krona/*.html"
 dashboard_button "taxpasta/*.tsv"
+dashboard_link_button "" "Raw sequencing data"
 
 #    How the run was set up, as the sidebar states it: what was depleted before
 #    classification, and what was classified against. The databases are named by
@@ -206,7 +180,7 @@ if [[ -r "$SAMPLE_COUNT_FILE" ]]; then
     fi
 fi
 
-# 6. Land the pages last, once nothing they point at is still uploading. The
+# 5. Land the pages last, once nothing they point at is still uploading. The
 #    landing page overwrites the progress page published to this key.
 if ! UPLOAD_OUTPUT=$(publish_dashboard "$S3_RESULTS_DIR" "$RUN_ID" "$TASK_NAME" \
         "$SUBTITLE" "$PIPELINE" "$(date '+%b %-d, %Y')" "$SAMPLE_COUNT" \

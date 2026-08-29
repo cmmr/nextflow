@@ -275,19 +275,39 @@ longest-running of those jobs, which is the one driving the run. The second is
 `CPUTimeRAW` summed over the run's jobs in the accounting database, which is the
 only place the tasks that have already finished are still counted, so it only
 ever goes up. Both are read at the moment the page is rendered rather than
-counted up in the browser, so they step forward with each refresh. The counts
-are left off the page when `squeue` cannot be asked, and the cpu clock alone
-when `sacct` cannot be.
+counted up in the browser, so they step forward with each refresh.
+
+**A run that is over still says how long it took.** Its jobs are gone from
+`squeue` by then, so the counts read nought and nought — which is the true thing
+to say — and the clocks would read nothing at all. They are written to
+`clocks.txt` in the run directory each time there is something to write, and
+read back from it once there is not. The two blocks are left off the page
+entirely only when `squeue` cannot be asked at all, and the cpu clock alone when
+`sacct` cannot be.
 
 **A run that failed carries its logs.** Under the card is a panel with the
 explanation the stage that failed left in `message.out`, then the tail of each
-of three files the run wrote: nextflow's console output — from its last
-`ERROR ~` line, which is the block naming the process that died, its exit
-status, what it printed and the work directory it left behind — then
-`.nextflow.log`, then the command that was run. Only the first is open; the
-others are there to be unfolded. Two hundred lines of each, since the page is an
-object a browser reloads, and every one of them is HTML-escaped. A run that
-failed before nextflow started has none of those files and gets no panel.
+of three files the run wrote: nextflow's console output, then `nextflow.log` —
+which is `nextflow.log` and not the `.nextflow.log` of a default invocation
+because the pipeline files run nextflow with `-log nextflow.log` — then the
+command that was run. Only the first is open; the others are there to be
+unfolded. Two hundred lines of each, since the page is an object a browser
+reloads, and every one of them is HTML-escaped. A run that failed before
+nextflow started has none of those files and gets no panel.
+
+The console output is cut at the last `ERROR ~ Error executing process` line,
+which heads the block naming the process that died, its exit status, what it
+printed and the work directory it left behind. That block is asked for by name
+rather than taken as the last error of any kind, because nextflow closes a
+failed run with a second one — *ERROR ~ Pipeline failed. Please refer to
+troubleshooting docs* — that says nothing and would otherwise be the whole
+report. A run that failed some other way has neither, and the tail of the output
+stands in.
+
+**And it stops refreshing.** The meta refresh is written by the renderer rather
+than sat in the template, and a failed run's page is published without one, so
+the reader's browser stops asking for a page that is never going to change —
+the same way the finished dashboard does.
 
 That panel is why [`wrike_followup.sh`](../../scripts/wrike_followup.sh)
 republishes the page for a failed run. `wrike_job.sh` publishes one itself when
@@ -310,8 +330,9 @@ The status the bar carries is the run's own — `Validating`, `Queued`, `Running
 still, and `Completed` green, for the moment between the last stage and the
 report landing.
 
-The progress page refreshes itself every ten seconds and the finished dashboard
-does not, which is what stops a reader's browser polling once the results land.
+The progress page refreshes itself every ten seconds; the finished dashboard and
+a failed run's page do not, which is what stops a reader's browser polling once
+a run is over either way.
 
 ## How the pages are styled
 

@@ -51,16 +51,29 @@ source /data/prod/nextflow/.env
 
 readonly PROGRESS_TEMPLATE="$NEXTFLOW_DIR/templates/progress.html"
 
-# What wrike_job.sh tees nextflow's console output to, and the command it wrote
-# out and then ran - both read only when a run has failed
+# What wrike_job.sh tees nextflow's console output to, the log nextflow itself
+# writes - named in the pipeline files, which run it with -log nextflow.log, so
+# it is here and not the .nextflow.log of a default invocation - and the command
+# that was written out and then run. The last two are read only when a run has
+# failed.
 readonly NEXTFLOW_OUT="nextflow.out"
+readonly NEXTFLOW_LOG="nextflow.log"
 readonly NEXTFLOW_CMD="nextflow_command.sh"
+
+# The clocks the last page that had jobs to read reported. Kept in the run
+# directory because a run that has ended has nothing left in squeue, and the
+# page it is left showing should still say how long it took.
+readonly CLOCKS_FILE="clocks.txt"
 
 # One line saying what the run is doing, written by report_stage as each stage
 # starts. Nextflow's own output only covers the middle of a run.
 readonly STAGE_FILE="stage.txt"
 
 readonly DEFAULT_INTERVAL=10
+
+# How long a reader's browser waits before asking for the page again, which
+# matches the interval above so that what it gets back has changed.
+readonly REFRESH_SECONDS=10
 
 # How much of a log a failed run's page carries. Enough for nextflow's error
 # block, which runs to a few dozen lines, without pasting a whole run's output
@@ -213,9 +226,9 @@ render_rows() {
 # elapsed is how long the longest-running of them has been going, which is the
 # job driving the run.
 #
-# Prints nothing when squeue cannot answer or this run has nothing on the
-# cluster, which is what leaves the widgets off the page rather than drawing
-# noughts.
+# Prints nothing only when squeue cannot be asked at all, which is what leaves
+# the counts off the page. A run whose jobs are over answers nought and nought,
+# which is the true and useful thing to say on the page it is left showing.
 cluster_counts() {
     local me
 
@@ -260,10 +273,7 @@ cluster_counts() {
 
             $1 == "PENDING" { pending++ }
 
-            END {
-                if (running + pending == 0) exit 1
-                printf "%d %d %d\n", running, pending, elapsed
-            }
+            END { printf "%d %d %d\n", running, pending, elapsed }
         '
 }
 
@@ -337,12 +347,10 @@ cluster_stats() {
 # so they step forward with each refresh; the minute they are given to is finer
 # than anything a reader waiting on a run needs.
 timers_widget() {
-    local elapsed="$1"
-    local cpu
+    local elapsed="$1" cpu="$2"
 
-    (( elapsed > 0 )) || return 0
-
-    cpu=$(run_cpu_seconds "$elapsed") || cpu=""
+    [[ "$elapsed" =~ ^[0-9]+$ ]] && (( elapsed > 0 )) || return 0
+    [[ "$cpu" =~ ^[0-9]+$ ]] || cpu=""
 
     printf '<div class="flex flex-col gap-1 pt-5 border-t border-outline-variant w-full">'
 
@@ -372,23 +380,30 @@ file_tail() {
     tail -n "$LOG_TAIL_LINES" "$file"
 }
 
-# Nextflow's account of what went wrong: everything from the last "ERROR ~" line
-# to the end of its output, which is the block naming the process that failed,
-# its exit status, what it printed, and the work directory it left behind.
+# Nextflow's account of what went wrong: everything from the last "ERROR ~ Error
+# executing process" line to the end of its output, which is the block naming the
+# process that failed, its exit status, what it printed, and the work directory
+# it left behind.
 #
-# A run killed by the scheduler, or one that died before nextflow said anything,
-# has no such block; the tail of the output stands in for it.
+# That block is asked for by name rather than taken as the last error of any
+# kind, because nextflow closes a failed run with a second one - "ERROR ~
+# Pipeline failed. Please refer to troubleshooting docs" - which says nothing
+# and would otherwise be the whole report. A run that failed some other way, or
+# was killed before nextflow said anything, has neither, and the tail of the
+# output stands in.
 nextflow_error() {
     [[ -s "$NEXTFLOW_OUT" ]] || return 1
 
     LC_ALL=C awk -v tail="$LOG_TAIL_LINES" '
         { line[NR] = $0 }
-        /^ERROR ~/ { start = NR }
+
+        /^ERROR ~ Error executing process/ { task = NR }
+        /^ERROR ~/                         { any = NR }
 
         END {
             if (NR == 0) exit 1
 
-            first = start ? start : NR - tail + 1
+            first = task ? task : (any ? any : NR - tail + 1)
             if (NR - first + 1 > tail) first = NR - tail + 1
             if (first < 1) first = 1
 
@@ -424,7 +439,7 @@ failure_report() {
     [[ -s "message.out" ]] && message=$(<message.out)
 
     error=$(nextflow_error)               || error=""
-    log=$(file_tail ".nextflow.log")      || log=""
+    log=$(file_tail "$NEXTFLOW_LOG")      || log=""
     command=$(file_tail "$NEXTFLOW_CMD")  || command=""
 
     [[ -n "$message$error$log$command" ]] || return 0
@@ -440,13 +455,49 @@ failure_report() {
     fi
 
     [[ -n "$error" ]]   && log_panel "Nextflow output" "$error" open
-    [[ -n "$log" ]]     && log_panel "Nextflow log (.nextflow.log)" "$log"
+    [[ -n "$log" ]]     && log_panel "Nextflow log ($NEXTFLOW_LOG)" "$log"
     [[ -n "$command" ]] && log_panel "The command that was run" "$command"
 
     printf '<p class="font-body-sm text-body-sm text-on-surface-variant">'
     printf 'Run %s, kept for inspection at %s.</p>' \
         "$(escape_html "$RUN_ID")" "$(escape_html "$PWD")"
     printf '</div>'
+}
+
+# The refresh that makes the page live, for as long as it is. A failed run is
+# over and has nothing more to say, so its page is published without one and the
+# reader's browser stops asking - the same way the finished dashboard does.
+page_refresh() {
+    if [[ "${1,,}" == "failed" ]]; then
+        return 0
+    fi
+
+    printf '<meta content="%s" http-equiv="refresh">' "$REFRESH_SECONDS"
+}
+
+# What this page is going to become, said after the stage under the run's name.
+# A failed run is not going to become anything, and the panel below it says so
+# at length, so there the sentence is left off rather than contradicted.
+page_note() {
+    if [[ "${1,,}" == "failed" ]]; then
+        return 0
+    fi
+
+    printf 'This page follows the run, and becomes the results when it finishes.'
+}
+
+# The line in the corner of the footer, which says what the page is going to do
+# next - and for a failed run, that it is not going to do anything.
+page_footnote() {
+    if [[ "${1,,}" == "failed" ]]; then
+        printf 'This run did not finish, and this page has stopped refreshing.'
+        printf ' What the pipeline reported is above.'
+        return 0
+    fi
+
+    printf 'This page refreshes itself every %s seconds, and is replaced by the' \
+        "$REFRESH_SECONDS"
+    printf ' results when the run finishes.'
 }
 
 # The note in the corner of the bar. A run that has failed says so in red; every
@@ -479,7 +530,7 @@ status_pill() {
 publish_once() {
     local status="${1:-}"
     local page rows task_name totals tasks_done tasks_total percent arc tasks
-    local stage counts running pending elapsed clusters timers failure
+    local stage counts running pending elapsed cpu clusters timers failure
 
     if [[ ! -r "$PROGRESS_TEMPLATE" ]]; then
         warn "No progress template at $PROGRESS_TEMPLATE; skipping."
@@ -556,9 +607,20 @@ publish_once() {
     timers=""
     if counts=$(cluster_counts) && [[ -n "$counts" ]]; then
         read -r running pending elapsed <<< "$counts"
-
         clusters=$(cluster_stats "$running" "$pending")
-        timers=$(timers_widget "$elapsed")
+
+        # Recorded while there is something to record, and read back once there
+        # is not, so the page a run ends on keeps the last clocks it had rather
+        # than losing them with the jobs they were read from
+        cpu=""
+        if (( elapsed > 0 )); then
+            cpu=$(run_cpu_seconds "$elapsed") || cpu=""
+            printf '%s %s\n' "$elapsed" "$cpu" > "$CLOCKS_FILE" 2>/dev/null || true
+        elif [[ -r "$CLOCKS_FILE" ]]; then
+            read -r elapsed cpu < "$CLOCKS_FILE" || true
+        fi
+
+        timers=$(timers_widget "$elapsed" "$cpu")
     fi
 
     # A run that did not finish gets its logs on the page, since this page is
@@ -574,7 +636,10 @@ publish_once() {
         TASK_NAME   "$(escape_html "$task_name")" \
         RUN_ID      "$RUN_ID" \
         STATUS_PILL "$(status_pill "$status")" \
+        REFRESH     "$(page_refresh "$status")" \
+        FOOTNOTE    "$(page_footnote "$status")" \
         STAGE       "$(escape_html "$stage")" \
+        PAGE_NOTE   "$(page_note "$status")" \
         PERCENT     "$percent" \
         ARC         "$arc" \
         TASKS       "$(escape_html "$tasks")" \

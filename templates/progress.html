@@ -7,8 +7,10 @@
   (s3://$AWS_S3_BUCKET/nxf/<run_id>/index.html) - so a reader who opens the
   results link early watches the run, and is handed the report when it lands.
 
-  The meta refresh is what makes this live. The finished dashboard carries none,
-  so the last refresh a reader's browser makes is the one that stops it polling.
+  The meta refresh is what makes this live, and the renderer leaves it out of a
+  page there is no point asking for again: the finished dashboard carries none,
+  and neither does a failed run's page, so in both cases the last refresh a
+  reader's browser makes is the one that stops it polling.
 
   The dial on the left is every task of the run taken together, and the bars
   beside it are one process each: navy once a process has finished, and green
@@ -19,8 +21,9 @@
   Under that dial are the run's Slurm jobs, running and queued, and under those
   its clocks: how long the run has been going and how much cpu time it has held.
   The clocks are read when the page is rendered rather than counted up in the
-  browser, so they step forward with each refresh. Both blocks are left out when
-  squeue cannot be asked.
+  browser, so they step forward with each refresh. A run that is over says none
+  and none, and keeps the last clocks it had; both blocks are left out only when
+  squeue cannot be asked at all.
 
   A run that has failed carries a panel of its own under the card: the
   explanation the stage that failed left behind, and the tail of each log the
@@ -30,21 +33,23 @@
   The head is shared with the dashboard and is inlined from
   templates/tailwind.html.
 
-  Placeholders are COMMON_HEAD, TASK_NAME, RUN_ID, STATUS_PILL, STAGE, PERCENT,
-  ARC, TASKS, CLUSTER, TIMERS, FAILURE, UPDATED and ROWS, each wrapped in
-  doubled underscores. ARC is the whole style of the dial's arc, since an arc of
-  nothing has to lose the round cap that would otherwise draw it as a dot. They are
-  deliberately not spelled that way in this comment - the renderer substitutes
-  the whole file, comment included, and would paste the entire process table in
-  here too. The task name is user-authored text and is HTML-escaped on the way
-  in; STATUS_PILL, CLUSTER, TIMERS, FAILURE and ROWS are markup the renderer
-  escaped itself.
+  Placeholders are COMMON_HEAD, REFRESH, TASK_NAME, RUN_ID, STATUS_PILL, STAGE,
+  PAGE_NOTE, PERCENT, ARC, TASKS, CLUSTER, TIMERS, FAILURE, FOOTNOTE, UPDATED
+  and ROWS, each wrapped in doubled underscores. ARC is the whole style of the
+  dial's arc, since an arc of nothing has to lose the round cap that would
+  otherwise draw it as a dot. REFRESH is the whole meta tag, since a page there
+  is no point asking for again carries no such tag at all rather than one set to
+  nothing. They are deliberately not spelled that way in this comment - the
+  renderer substitutes the whole file, comment included, and would paste the
+  entire process table in here too. The task name is user-authored text and is HTML-escaped on the way
+  in; REFRESH, STATUS_PILL, CLUSTER, TIMERS, FAILURE and ROWS are markup the
+  renderer escaped itself.
 -->
 <html class="light h-full" lang="en">
 <head>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
-<meta content="10" http-equiv="refresh">
+__REFRESH__
 <title>__TASK_NAME__ - Alkek Center for Metagenomics and Microbiome Research</title>
 __COMMON_HEAD__
 <style>
@@ -83,8 +88,7 @@ __STATUS_PILL__
 <main class="flex-1 w-full max-w-5xl mx-auto p-margin-page flex flex-col gap-4">
 <div class="shrink-0 min-w-0">
 <h1 class="font-headline-lg text-headline-lg font-bold tracking-tight text-primary">__TASK_NAME__</h1>
-<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">__STAGE__ This page
-follows the run, and becomes the results when it finishes.</p>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">__STAGE__ __PAGE_NOTE__</p>
 </div>
 
 <div class="bg-surface-container-lowest border border-outline-variant rounded-xl shadow-sm p-padding-card flex flex-col md:flex-row gap-6 items-center md:items-start">
@@ -124,8 +128,7 @@ __FAILURE__
 
 <footer class="shrink-0 bg-surface-container border-t border-outline-variant w-full">
 <div class="flex flex-col md:flex-row justify-between items-center gap-1 px-margin-page py-3 w-full max-w-5xl mx-auto">
-<div class="text-on-surface-variant font-body-sm text-body-sm text-center md:text-left">This page
-refreshes itself every few seconds, and is replaced by the results when the run finishes.</div>
+<div class="text-on-surface-variant font-body-sm text-body-sm text-center md:text-left">__FOOTNOTE__</div>
 <div class="text-on-surface-variant font-body-sm text-body-sm">Updated __UPDATED__ &middot; __RUN_ID__</div>
 </div>
 </footer>

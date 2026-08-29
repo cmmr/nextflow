@@ -239,6 +239,32 @@ separately downloaded taxdump: the PlusPF archive carries `nodes.dmp` and
 by construction. `merged.dmp` is absent and optional; unknown taxon IDs — which
 MetaPhlAn's unnamed SGBs produce — come back as blank names rather than an error.
 
+**MetaPhlAn's taxpasta merge is expected to fail, and is ignored.** mpa_vJun23
+splits some species into clades that share one NCBI taxon id — *Prevotella copri*
+clades A, B, C and F are all taxon 165179 — and taxpasta indexes a profile by
+taxon id, so any sample carrying two of them ends the merge with `ValueError:
+Index has duplicate keys`. It is
+[taxpasta#140](https://github.com/taxprofiler/taxpasta/issues/140), open, with
+0.7.0 still the current release, and `taxpasta_ignore_errors` does not reach it:
+that flag skips profiles raising taxpasta's own `StandardisationError`, and this
+is a pandas `ValueError` raised straight through. So
+[`slurm.config`](../../config/taxprofiler/slurm.config) gives `TAXPASTA_MERGE` an
+`errorStrategy` that ignores a failure tagged `metaphlan` and terminates on any
+other, and a run that hits it publishes three merged tables rather than four.
+
+Nothing is actually lost: `METAPHLAN_MERGEMETAPHLANTABLES` merges the same
+profiles itself into `metaphlan/metaphlan_<db_name>_combined_reports.txt`, keyed
+by MetaPhlAn's clade names rather than by taxon id, which is what keeps those
+clades apart in the first place.
+
+Nothing in the pipeline reads taxpasta's tables either. The subworkflow emits
+them, and the workflow takes only its MultiQC channel, which is built from the
+native mergers — so an ignored merge costs one published file and has no other
+effect. Switching `run_profile_standardisation` off to avoid taxpasta would be
+the worse trade: it gates the whole subworkflow, and would take
+`METAPHLAN_MERGEMETAPHLANTABLES` and `KRAKENTOOLS_COMBINEKREPORTS_KRAKEN` with
+it, along with their MultiQC sections.
+
 
 ## Resource limits
 

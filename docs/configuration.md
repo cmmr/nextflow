@@ -32,6 +32,9 @@ The five it sources:
     every published result and every in-flight run**, since teardown recomputes
     the uid rather than looking it up.
   - `WRIKE_WEBHOOK_SECRET`, `AWS_WEBHOOK_BRIDGE` (used when registering webhooks)
+  - `GLOBUS_CLI_CLIENT_ID`, `GLOBUS_CLI_CLIENT_SECRET` — the pipeline's own
+    Globus service identity, so `globus-cli` can create and manage
+    [shares](operations/globus.md) without an interactive `globus login`
 - [`scripts/utilities.sh`](../scripts/utilities.sh) — `log`, `warn`, and `fail`, the
   three ways anything in this system says anything. All stamp the time.
   `log` goes to stdout while `warn` and `fail` go to stderr — which keeps stdout

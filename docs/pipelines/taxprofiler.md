@@ -378,9 +378,29 @@ construction. Its profiles are published and merged like any other classifier's;
 what the diversity chart takes from them is one number per sample, the count of
 clusters with a non-zero read count.
 
-Three things about where taxprofiler 2.0.1 wires nonpareil are worth knowing
-before quoting its numbers, none of which we can change without patching the
-pipeline:
+**Nonpareil sets the QC floor.** Its k-mer mode counts 24-mers and refuses to
+run — *"Reads are required to have a minimum length of kmer size"* — the moment
+one of the 10,000 reads it samples is shorter than 24 bp. taxprofiler's
+`shortread_qc_minlength` defaults to **15**, which is below that, so with the
+default fastp keeps reads nonpareil cannot read and the task dies on whichever
+samples happen to catch one. It landed on five of ten on the first run.
+
+`TAXPROFILER_01.sh` sets `shortread_qc_minlength` to **35** instead. That is
+kraken2's `k`: a read shorter than 35 bp contains no 35-mer, so the classifier
+cannot place it however good it is, and keeping it only pads the total every
+share on the dashboard is read against. It clears nonpareil's 24 with room.
+
+**A curve that will not fit is one sample's diversity, not a failed run.**
+`NONPAREIL_NONPAREIL` carries `errorStrategy = 'ignore'` in
+[`config/taxprofiler/slurm.config`](../../config/taxprofiler/slurm.config).
+Nothing downstream consumes its output — it is a reading *about* the reads
+rather than a step that produces them — so the alternative is losing an hour of
+profiling over a curve. The samples it did measure are plotted; the rest are
+written `NA` in the table and left as gaps in the chart.
+
+Three more things about where taxprofiler 2.0.1 wires nonpareil are worth
+knowing before quoting its numbers, none of which we can change without patching
+the pipeline:
 
 - **It runs before host removal.** Nonpareil sees the reads fastp left, so on a
   `Human + PhiX` run the host reads are still in what it measures. Coverage and

@@ -27,6 +27,20 @@ params_set databases                        "taxprofiler_database.csv"
 params_set outdir                           "results"
 params_set perform_shortread_qc             true
 params_set shortread_qc_tool                "fastp"
+
+# The shortest read worth keeping, against taxprofiler's own default of 15.
+#
+# 35 is kraken2's k: a read shorter than that contains no 35-mer, so the
+# classifier cannot place it however good it is, and bracken inherits that.
+# Keeping them only pads the total every share on the dashboard is taken
+# against.
+#
+# It is also what nonpareil needs. Its k-mer mode counts 24-mers and dies -
+# "Reads are required to have a minimum length of kmer size" - the moment one of
+# the 10,000 reads it samples is shorter than that, which is a failure that
+# lands on some samples and not others depending on what the sample caught. 35
+# clears it with room.
+params_set shortread_qc_minlength           35
 params_set perform_longread_qc              true
 params_set perform_runmerging               true
 params_set run_kraken2                      true

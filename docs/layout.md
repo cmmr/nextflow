@@ -108,6 +108,7 @@ docs/                 Source of the documentation site; one page per file.
     expiration.md     The daily pass that retires dashboards past their date.
     running-by-hand.md  The `run` CLI, and why it files a task rather than running one.
     cluster-requirements.md  What has to be installed on the cluster.
+    globus.md         Installing globus-cli, and sharing a dataset by link only.
 
 mkdocs.yml            Documentation site config; docs_hooks.py rewrites the
 docs_hooks.py         links in docs/ that point at files in this repository.

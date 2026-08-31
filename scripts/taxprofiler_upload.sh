@@ -26,9 +26,9 @@
 # Overview plots, which files its sidebar offers, what the run measured, and
 # which of the outputs named in templates/taxprofiler/outputs.conf exist. The
 # plots and the numbers beside them are what taxprofiler_composition.sh left in
-# composition_data.json and in the state file's "statistics", and the settings
-# stated beside them come off the database sheet and the manifest wrike_job.sh
-# recorded.
+# composition_data.json and in the state file's "statistics" - the platform the
+# read totals are headed with among them - and the rest of what the page states
+# about the run comes off the request and the manifest wrike_job.sh recorded.
 #
 # Usage:     taxprofiler_upload.sh [results_dir]
 #            defaults to ./results, the outdir set in the taxprofiler params file
@@ -87,6 +87,11 @@ readonly OUTPUT_CATALOG="$NEXTFLOW_DIR/templates/taxprofiler/outputs.conf"
 # Nobody who asked us for a profile re-runs MetaPhlAn from them; the profile
 # itself, the BIOM table and the merged report are all published.
 #
+# Nonpareil's .npa and .npc are the same kind of thing: the per-read redundancy
+# values and the mating vector it works its curve out from, both of which grow
+# with the reads rather than with the answer. The .npo the curve is read from,
+# the plots, and the summary table are all published.
+#
 # The rest are second copies. MultiQC's data.json is every number in its own
 # report as machine-readable JSON, its log is its debug trace, and multiqc_plots
 # is each of the report's interactive figures rendered again as PNG, SVG and PDF.
@@ -97,6 +102,8 @@ readonly OUTPUT_CATALOG="$NEXTFLOW_DIR/templates/taxprofiler/outputs.conf"
 # there is nothing left in.
 readonly SKIP_UPLOAD=(
     "metaphlan/*/*.bowtie2out.txt"
+    "nonpareil/*.npa"
+    "nonpareil/*.npc"
     "multiqc/multiqc_data/multiqc_data.json"
     "multiqc/multiqc_data/multiqc.log"
     "multiqc/multiqc_plots"
@@ -196,23 +203,27 @@ dashboard_view krona   "Taxonomy Explorer" "$KRONA_CHART"
 dashboard_view quality "Quality Control"   "multiqc/multiqc_report.html"
 dashboard_index_view   "File Explorer"
 
-#    The three tables a requester opens first, named for what they hold rather
-#    than for the tool, the database and the format that named the file.
-#    taxpasta's merged bracken profile is the one to load into R or Python; the
-#    diversity table is what the Overview's second plot is drawn from; MetaPhlAn
-#    is the second opinion. The raw reads follow them as a row that stays hidden
+#    The tables a requester opens first, named for what they hold rather than
+#    for the tool, the database and the format that named the file. taxpasta's
+#    merged bracken profile is the one to load into R or Python; MetaPhlAn and
+#    mOTUs are the second opinions, the last of them naming species no reference
+#    genome exists for. The raw reads follow them as a row that stays hidden
 #    until it is given the address they are served from.
+#
+#    The diversity table is not among them: it is the numbers behind a plot the
+#    reader is already looking at, and the file index lists it under Start here
+#    for anyone who wants them.
 if ! dashboard_button "taxpasta/bracken_*.tsv" "Species abundance table"; then
     dashboard_button "taxpasta/kraken2_*.tsv" "Taxonomic profile table"
 fi
 
-dashboard_button "alpha_diversity.tsv" "Per-sample diversity"
 dashboard_button "metaphlan/metaphlan_*_combined_reports.txt" "MetaPhlAn profiles"
+dashboard_button "motus/motus_*_combined_reports.txt" "mOTUs profiles"
 dashboard_link_button "" "Raw sequencing data"
 
 #    How the run was set up. The pipeline version comes off the manifest
-#    wrike_job.sh recorded, so the page and the record cannot disagree; the host
-#    and the databases come off the request and the sheet the run was given.
+#    wrike_job.sh recorded, so the page and the record cannot disagree; what was
+#    depleted comes off the request.
 PIPELINE=""
 
 if state_has "$RUN_MANIFEST_KEY"; then
@@ -224,19 +235,13 @@ fi
 HOST_REMOVAL=$(form_answer hostremoval_reference)
 : "${HOST_REMOVAL:=PhiX}"
 
-#    Read as a note over the read totals rather than as a row of its own, so the
-#    reads that were taken out are read beside what took them out
-if [[ "${HOST_REMOVAL,,}" == "none" ]]; then
-    DEPLETED="No host depletion"
-else
-    DEPLETED="$HOST_REMOVAL depleted"
-fi
+#    Read as the label on the reads that came through depletion rather than as a
+#    line of its own, so what survived is named by what it survived. A run that
+#    depleted nothing has no such reading to report, and no bar for it.
+HOST_LABEL=""
 
-DATABASES=""
-if [[ -r "$DB_SHEET" ]]; then
-    DATABASES=$(awk -F, 'NR > 1 && $2 != "" && !seen[$2]++ {
-        printf "%s%s", (n++ ? ", " : ""), $2
-    }' "$DB_SHEET")
+if [[ "${HOST_REMOVAL,,}" != "none" ]]; then
+    HOST_LABEL="Excluding $HOST_REMOVAL"
 fi
 
 #    What the run measured, as the sidebar reports it. The counts are whole
@@ -249,32 +254,56 @@ while IFS=$'\t' read -r STAT_KEY STAT_VALUE; do
 done < <(state_get_tsv "$STATS_KEY")
 
 # One reading as a bar: what it is, how many reads it was, and what share of the
-# reads the run started with. Every bar in the sidebar is a share of that one
-# number, so two of them can be read against each other. Green is for the reads
-# that came through; what was taken out is left in the navy every total wears.
+# total it was taken against. Green is for the reads that came through; what was
+# taken out is left in the navy every total wears.
+#
+# The share is written whole, except where rounding it whole would read 100% for
+# a step that did drop reads: quality filtering keeps 99.5% of a good run, and a
+# sidebar calling that 100% tells the reader nothing happened.
 stat_share() {
     local label="$1" count="$2" total="$3" tone="${4:-growth}"
-    local percent
+    local percent reading
 
     [[ "$count" =~ ^[0-9]+$ && "$total" =~ ^[0-9]+$ ]] || return 0
     (( total > 0 )) || return 0
 
-    percent=$(( (count * 100 + total / 2) / total ))
+    read -r percent reading < <(LC_ALL=C awk -v c="$count" -v t="$total" 'BEGIN {
+        share = c * 100 / t
+        text = sprintf("%.0f", share)
 
-    dashboard_stat_bar "$label" "$percent% · $(human_count "$count")" "$percent" "$tone"
+        if (text == "100" && c < t) {
+            text = sprintf("%.1f", share)
+            if (text == "100.0") text = "99.9"
+        }
+
+        printf "%.4f %s\n", share, text
+    }')
+
+    dashboard_stat_bar "$label" "$reading% · $(human_count "$count")" "$percent" "$tone"
 }
 
-#    Reads as they reached the pipeline, and what became of them. Where host
-#    removal ran it counted them first, so its total is the one every share is
-#    taken against; without it the classifier's own total is.
-TOTAL_READS=${STATS[host_total]:-${STATS[reads_total]:-}}
+#    Reads as they reached the pipeline, and what was still in hand at each step
+#    after it. Quality filtering counted them first, so its total is the one the
+#    read totals are taken against; without it host removal's count is, and
+#    without that the classifier's own.
+TOTAL_READS=${STATS[qc_total]:-${STATS[host_total]:-${STATS[reads_total]:-}}}
+
+#    What reached the classifier, which is what a classification share is a
+#    share of: by then quality filtering and depletion have taken their cut, and
+#    reading those bars against the reads the run started with would report the
+#    classifier as having missed what it was never given.
+RETAINED_READS=${STATS[reads_total]:-$TOTAL_READS}
 
 if [[ "$TOTAL_READS" =~ ^[0-9]+$ ]] && (( TOTAL_READS > 0 )); then
-    dashboard_stat_group "READ TOTALS" "$DEPLETED"
+    dashboard_stat_group "READ TOTALS" "${STATS[platform]:-}"
     dashboard_stat_bar "Total reads" "$(human_count "$TOTAL_READS")" 100
 
-    stat_share "Host removed" "${STATS[host_removed]:-}" "$TOTAL_READS" total
-    stat_share "Classified"   "${STATS[reads_classified]:-}" "$TOTAL_READS"
+    stat_share "High quality reads" "${STATS[qc_passed]:-}" "$TOTAL_READS"
+
+    if [[ -n "$HOST_LABEL" && "${STATS[host_total]:-}" =~ ^[0-9]+$ ]]; then
+        stat_share "$HOST_LABEL" \
+            "$(( ${STATS[host_total]} - ${STATS[host_removed]:-0} ))" "$TOTAL_READS"
+    fi
 
     dashboard_stat_group "READS PER SAMPLE"
     dashboard_stat_chips "$(human_count "${STATS[reads_min]:-0}")|Min" \
@@ -283,27 +312,15 @@ if [[ "$TOTAL_READS" =~ ^[0-9]+$ ]] && (( TOTAL_READS > 0 )); then
 
     #    How far down the taxonomy the classifier could place a read. Each rank
     #    counts the reads that landed inside some clade of it, which is the same
-    #    reading kraken2's own report gives, and each is a share of the total
-    #    above - so the three bars are one funnel rather than three readings.
+    #    reading kraken2's own report gives, and each is a share of the reads it
+    #    was given - so the three bars are one funnel rather than three readings.
     dashboard_stat_group "CLASSIFICATION" \
         "${STATS[profiler]:+${STATS[profiler]} · }${STATS[database]:-}"
 
-    stat_share "Phylum level"  "${STATS[phylum_reads]:-}"  "$TOTAL_READS"
-    stat_share "Genus level"   "${STATS[genus_reads]:-}"   "$TOTAL_READS"
-    stat_share "Species level" "${STATS[species_reads]:-}" "$TOTAL_READS"
+    stat_share "Phylum level"  "${STATS[phylum_reads]:-}"  "$RETAINED_READS"
+    stat_share "Genus level"   "${STATS[genus_reads]:-}"   "$RETAINED_READS"
+    stat_share "Species level" "${STATS[species_reads]:-}" "$RETAINED_READS"
 fi
-
-#    How many distinct taxa the run named, over every sample rather than in any
-#    one of them
-if [[ -n "${STATS[phyla]:-}${STATS[genera]:-}${STATS[species]:-}" ]]; then
-    dashboard_stat_group "TAXA DETECTED"
-    dashboard_stat_chips "$(human_count "${STATS[phyla]:-0}")|Phyla" \
-                         "$(human_count "${STATS[genera]:-0}")|Genera" \
-                         "$(human_count "${STATS[species]:-0}")|Species"
-fi
-
-dashboard_stat_group "RUN CONFIGURATION"
-dashboard_stat_row   "Databases" "$DATABASES"
 
 #    The title is read from Wrike rather than taken from the copy recorded at
 #    submission, since the requester may have renamed the task since. That copy

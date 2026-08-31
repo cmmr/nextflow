@@ -116,8 +116,9 @@ Currently defined:
   the platform and the variable region are both measured from the reads rather
   than requested, and a samplesheet with no `fastq_2` column is single-end. See
   [the ampliseq pipeline](ampliseq.md).
-- **TAXPROFILER** — nf-core/taxprofiler 2.0.1 running kraken2, bracken and
-  metaphlan over shotgun reads. Which host genome is depleted first is the form's
+- **TAXPROFILER** — nf-core/taxprofiler 2.0.1 running kraken2, bracken, metaphlan
+  and mOTUs over shotgun reads, with nonpareil measuring how much of each
+  community was sequenced. Which host genome is depleted first is the form's
   "Taxprofiler --hostremoval_reference" answer rather than a separate pipeline. See
   [the taxprofiler pipeline](taxprofiler.md).
 

@@ -13,19 +13,20 @@
 # already exists elsewhere on the cluster, so that every database a run touches
 # has a recorded origin.
 #
-# Databases are pinned as constants below rather than resolved to "latest". Both
-# pins are the newest release compatible with the tool versions nf-core/taxprofiler
+# Databases are pinned as constants below rather than resolved to "latest". Every
+# pin is the newest release compatible with the tool versions nf-core/taxprofiler
 # 2.0.1 uses - notably MetaPhlAn, which is pinned there at 4.1.1 and cannot read
-# the database its own mpa_latest marker now points at.
+# the database its own mpa_latest marker now points at, and mOTUs, which is
+# pinned there at 3.1.0 and rejects the v4 catalogues outright.
 #
 # Writes into db/<tool>/:
 #
 #   <release>/                the database, as the pipeline reads it
 #   <release>.manifest.json   source URLs, checksums, sizes, and when it was fetched
 #
-# Usage:     fetch_taxprofiler_db.sh <kraken2|metaphlan>
+# Usage:     fetch_taxprofiler_db.sh <kraken2|metaphlan|motus>
 #
-#            Submit it rather than running it on the login node; both downloads
+#            Submit it rather than running it on the login node; the downloads
 #            are large and slow:
 #            sbatch --cpus-per-task=4 --mem=8G --time=24:00:00 \
 #                scripts/fetch_taxprofiler_db.sh kraken2
@@ -53,8 +54,27 @@ readonly KRAKEN2_BASE="https://genome-idx.s3.amazonaws.com/kraken"
 readonly METAPHLAN_INDEX="mpa_vJun23_CHOCOPhlAnSGB_202403"
 readonly METAPHLAN_BASE="https://cmprod1.cibio.unitn.it/biobakery4/metaphlan_databases"
 
+# mOTUs. The database is version-locked to the tool: taxprofiler 2.0.1 runs
+# MOTUS_PROFILE in the motus 3.1.0 container, and mOTUs checks the version file
+# inside the database against its own before it profiles anything. The URL and
+# the checksum below are the ones "motus downloadDB" itself uses for 3.1.0, so
+# what lands here is what that command would have installed.
+#
+# The v4 catalogues published at sunagawalab.ethz.ch are not an upgrade path
+# from here: they are raw gene catalogues for mOTUs 4, which is a different tool
+# with a different database layout, and taxprofiler 2.0.1 cannot run it.
+readonly MOTUS_VERSION="3.1.0"
+readonly MOTUS_RELEASE="db_mOTU_v$MOTUS_VERSION"
+readonly MOTUS_URL="https://zenodo.org/record/7778108/files/db_mOTU_v3.1.0.tar.gz"
+readonly MOTUS_MD5="f841c36150025af837f7a9a358c9a3c3"
+
+# The archive unpacks to a directory of this name, and it keeps it: mOTUs
+# resolves its own files relative to a folder called db_mOTU, so the release
+# directory holds it rather than being it.
+readonly MOTUS_DB_DIR="db_mOTU"
+
 if [[ $# -ne 1 ]]; then
-    fail "Usage: $0 <kraken2|metaphlan>"
+    fail "Usage: $0 <kraken2|metaphlan|motus>"
 fi
 
 TOOL="$1"
@@ -85,8 +105,11 @@ download_verified() {
     local dest="$2"
     local expected_md5="$3"
 
+    # Redirects are followed: Zenodo answers a record URL with a redirect to
+    # wherever the file is actually stored, and a checksum is what makes that
+    # safe to accept
     log "Downloading ${url##*/}..."
-    if ! curl -sS --fail --retry 3 -o "$dest" "$url"; then
+    if ! curl -sSL --fail --retry 3 -o "$dest" "$url"; then
         fail "Could not download $url"
     fi
 
@@ -252,8 +275,72 @@ fetch_metaphlan() {
     log "  manifest: $manifest"
 }
 
+fetch_motus() {
+    local release_dir="$NEXTFLOW_DIR/db/motus/$MOTUS_RELEASE"
+    local out_dir="$release_dir/$MOTUS_DB_DIR"
+    local manifest="$NEXTFLOW_DIR/db/motus/$MOTUS_RELEASE.manifest.json"
+
+    [[ -e "$release_dir" ]] && fail "$release_dir already exists; remove it to re-fetch."
+
+    mkdir -p "$NEXTFLOW_DIR/db/motus"
+    require_free_space "$NEXTFLOW_DIR/db/motus" 20
+
+    local archive="$WORK_DIR/$MOTUS_RELEASE.tar.gz"
+
+    download_verified "$MOTUS_URL" "$archive" "$MOTUS_MD5"
+    record_source "$MOTUS_URL" "$MOTUS_MD5" "$(stat -c%s "$archive")"
+
+    log "Extracting $MOTUS_RELEASE.tar.gz..."
+    mkdir -p "$release_dir"
+    if ! tar -xzf "$archive" -C "$release_dir"; then
+        rm -rf "$release_dir"
+        fail "Could not extract $MOTUS_RELEASE.tar.gz."
+    fi
+
+    rm -f "$archive"
+
+    [[ -d "$out_dir" ]] \
+        || fail "The archive did not unpack to a '$MOTUS_DB_DIR' directory; mOTUs will not read it."
+
+    # The version file mOTUs checks itself against. The archive does not carry a
+    # usable one - "motus downloadDB" writes it after unpacking, and this is the
+    # same file it writes - so without this every profiling call refuses to run.
+    log "Writing the version file for mOTUs $MOTUS_VERSION..."
+    {
+        printf 'motus\t%s\n' "$MOTUS_VERSION"
+        printf '#\tdatabase\n'
+        printf 'nr\t%s\ncen\t%s\n' "$MOTUS_VERSION" "$MOTUS_VERSION"
+        printf '#\tscripts\n'
+        printf 'append\t%s\n' "$MOTUS_VERSION"
+        printf 'map_genes_to_mOTUs\t%s\n' "$MOTUS_VERSION"
+        printf 'map_mOTUs_to_LGs\t%s\n' "$MOTUS_VERSION"
+        printf 'runBWA\t%s\n' "$MOTUS_VERSION"
+        printf '#\ttaxonomy\n'
+        printf 'specI_tax\t%s\n' "$MOTUS_VERSION"
+        printf 'mOTULG_tax\t%s\n' "$MOTUS_VERSION"
+    } > "$out_dir/db_mOTU_versions" || fail "Could not write the mOTUs version file."
+
+    # Every file mOTUs opens on the profiling path: the marker gene catalogue it
+    # maps against, the header it writes its BAM with, and the two tables that
+    # turn a mapped gene into a named cluster
+    local required
+    for required in db_mOTU_DB_NR.fasta db_mOTU_bam_header_NR \
+                    db_mOTU_MAP_MGCs_to_mOTUs.tsv db_mOTU_taxonomy_ref-mOTUs.tsv; do
+        [[ -r "$out_dir/$required" ]] \
+            || fail "The mOTUs database is missing $required; the download is incomplete."
+    done
+
+    write_manifest "$MOTUS_RELEASE" "$out_dir" "$manifest" \
+        "The database motus downloadDB installs for mOTUs $MOTUS_VERSION, which is the version nf-core/taxprofiler 2.0.1 pins. db_mOTU_versions is written here rather than shipped in the archive, exactly as that command writes it. The v4 catalogues are for a different tool and cannot be read by this one."
+
+    log "Fetched $MOTUS_RELEASE:"
+    log "  db_path:  $out_dir"
+    log "  manifest: $manifest"
+}
+
 case "$TOOL" in
     kraken2)   fetch_kraken2 ;;
     metaphlan) fetch_metaphlan ;;
-    *)         fail "Unknown database '$TOOL'. Use kraken2 or metaphlan." ;;
+    motus)     fetch_motus ;;
+    *)         fail "Unknown database '$TOOL'. Use kraken2, metaphlan or motus." ;;
 esac

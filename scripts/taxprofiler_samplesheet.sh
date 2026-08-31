@@ -49,8 +49,8 @@
 # Env:       the log and fail helpers and the run state helpers, sourced from
 #            .env; INSTRUMENT_PLATFORM, optionally set to override the measurement
 # Outputs:   ./taxprofiler_samplesheet.csv, ./taxprofiler_database.csv,
-#            ./raw-sequences/, and the sample count, the measured read length
-#            and any explanation of a failure in ./run_state.json
+#            ./raw-sequences/, and the sample count, the measured read length,
+#            the platform and any explanation of a failure in ./run_state.json
 #
 # Because the samplesheet is whitespace-delimited, FASTQ paths cannot contain spaces.
 
@@ -344,6 +344,11 @@ else
     INSTRUMENT_PLATFORM="ILLUMINA"
     log "Median read length is ${READ_MEDIAN}bp; treating this run as $INSTRUMENT_PLATFORM."
 fi
+
+# Recorded as well as written into the CSV: the dashboard heads the read totals
+# with what the reads were, and the samplesheet is not published with the
+# results
+state_set samples.platform "$INSTRUMENT_PLATFORM"
 
 # taxprofiler rejects a long-read row that names a second FASTQ, and paired
 # long reads do not exist, so this is a mislabelled or mis-built samplesheet

@@ -67,9 +67,11 @@ why it is the view they land on rather than one they have to find.
 One script per pipeline — [`ampliseq_composition.sh` and
 `taxprofiler_composition.sh`](composition.md) — works the numbers out and leaves
 them in `composition_data.json`, which is written into the page; a run that
-produced nothing to plot leaves the panel on its empty state. What a column of
-the diversity chart is a count of comes from the same file, so the 16S page says
-ASV where the shotgun page says species.
+produced nothing to plot leaves the panel on its empty state. Which indices the
+diversity chart offers comes from the same file, since the two pipelines share
+none: a 16S run plots Shannon, Simpson and Pielou over its ASV table, and a
+shotgun run plots what nonpareil and mOTUs measured without a classification
+database in the way.
 
 **The panel takes whatever height is left.** On a screen wide enough for the
 sidebar, the Overview is exactly as tall as the frame it is read in: the chart
@@ -90,12 +92,18 @@ measured, in the units a sidebar has room for. An ampliseq run reports the reads
 that went in against the reads that reached an ASV, the thinnest, middle and
 deepest sample, how many ASVs it called, and how much of it the classifier could
 place at family, at genus and at species. A taxprofiler run reports the reads it
-started with against what was host and what was classified, the same three
-sample depths, how much reached phylum, genus and species, and how many distinct
-phyla, genera and species it named. The same pass that works out the plots counts
-all of it, into `.statistics`. The bars carry three colours and mean them: a total is the
-institutional navy, what survived is the growth green, and a classified share is
-teal, lightening as the rank goes deeper.
+started with, how many of them came through quality filtering, and how many were
+left once the host was taken out; then the same three sample depths, and how much
+of what reached the classifier it could place at phylum, at genus and at species.
+The same pass that works out the plots counts all of it, into `.statistics`.
+
+A share is written whole. On a shotgun run there is one exception, for the step
+that needs it: where rounding whole would read 100% for a step that did drop
+reads, it is written to a decimal instead — quality filtering keeps 99.5% of a
+good run, and a sidebar calling that 100% would say nothing happened. The bars
+carry two colours and mean them: a total is the institutional navy, and every
+share read against it — what came through a step, what a rank could be placed at
+— is the growth green.
 
 **How the run was set up is stated over the numbers it explains**, rather than
 in a row of its own: the region and the instrument sit above the read totals,
@@ -103,10 +111,13 @@ and the reference database above the classification. Each is read off the run's
 `.manifest`, the same record a rerun is rebuilt from and published beside the
 page as `run_state.json`, so the page
 and the record cannot disagree — and a setting the manifest does not carry
-leaves its note off rather than naming an empty one. On a taxprofiler run it is
-what was depleted that sits over the read totals and the classifier and database
-that sit over the classification, with the database sheet's full list left as a
-row of its own at the foot.
+leaves its note off rather than naming an empty one. On a taxprofiler run the
+note over the read totals is what the reads were — *"Illumina, 2 x 151 bp"*,
+*"Nanopore"* — which is measured off the reads rather than declared, so it comes
+off `.statistics` with the numbers under it; the classifier and database sit over
+the classification. What the run was depleted
+against is named on the bar it explains, as *"Excluding PhiX"* or *"Excluding
+Human + PhiX"*; a run that depleted nothing has no such bar.
 
 **A footer** saying when the run finished, which pipeline version produced it,
 and the uid. That last is there so a reader asking us about these results has

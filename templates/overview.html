@@ -16,8 +16,11 @@
   draw to a canvas rather than to elements - a run of a few thousand samples is
   one column per sample either way, and a few thousand SVG rectangles per taxon
   is what makes QIIME 2's own barplot unusable at that size.
-  ampliseq_composition.sh works the numbers out; a run with none leaves the
-  panel on its empty state.
+  ampliseq_composition.sh and taxprofiler_composition.sh work the numbers out;
+  a run with none leaves the panel on its empty state. Which indices the second
+  half offers is the run's own - the two pipelines share none of them - so the
+  data names them and this page draws whatever it is handed, falling back to the
+  amplicon set for data that names nothing.
 
   The eleven colours are a categorical set whose ordering is what keeps
   neighbouring fills apart under colour vision deficiency, so they are assigned
@@ -26,6 +29,10 @@
   samples never reassigns them either. Several of the steps sit under 3:1
   against a white page, which is why the legend above the chart names every
   taxon beside its swatch, and carries its share and prevalence in a tooltip.
+  The columns are stacked in the order the legend reads - most abundant at the
+  top, "Other" at the bottom - so a taxon is in the same place in the legend,
+  in the column and in the tooltip. Under the chart, the caption names the
+  tools and the database the numbers came from, for the data that carries it.
 
   "Download everything" is handed up to the framing page, which packages the run
   behind a modal of its own.
@@ -187,8 +194,10 @@ canvas { display: block; width: 100%; }
 <div class="flex-1 min-h-0 overflow-hidden" id="bars-box"><canvas id="bars"></canvas></div>
 <div class="shrink-0 max-w-3xl mt-4 space-y-1">
 <p class="font-body-sm text-body-sm text-on-surface">One column per sample, stacked to
-100% of that sample&rsquo;s reads. The eleven most abundant taxa at this rank are drawn in
-their own colour; everything rarer is grouped as &ldquo;Other&rdquo;.</p>
+100% of that sample&rsquo;s reads, most abundant taxon at the top. The eleven most abundant
+taxa at this rank are drawn in their own colour; everything rarer is grouped as
+&ldquo;Other&rdquo;.</p>
+<p class="font-body-sm text-body-sm text-on-surface-variant" id="composition-method" style="display: none"></p>
 <p class="font-body-sm text-body-sm text-outline" id="axis-note"></p>
 </div>
 </section>
@@ -308,6 +317,17 @@ __STATS__
   display(document.getElementById("plot-empty"), false);
   display(document.getElementById("plot-scroll"), true);
   display(document.getElementById("plot-controls"), true);
+
+  // Which tools and which database produced the composition below, in the words
+  // of the script that read their reports - only it knows what this run was
+  // classified against. A run whose data predates the sentence leaves the line
+  // off rather than describing the wrong pipeline.
+  var method = document.getElementById("composition-method");
+
+  if (DATA && DATA.method) {
+    method.textContent = DATA.method;
+    display(method, true);
+  }
 
   // Room above every plot for the label on its topmost gridline
   var TOP = 9;
@@ -510,7 +530,11 @@ __STATS__
     for (var slot = 0; slot < count; slot++) {
       var sample = order[slot];
       var x = geometry.left + slot * geometry.step + geometry.inset;
-      var bottom = floor;
+
+      // Stacked downwards from the top of the column, so a taxon sits in the
+      // same place in the column as it does in the legend above it and in the
+      // tooltip beside it: the most abundant first, "Other" last
+      var stacked = TOP;
 
       // A column narrow enough to be a hairline gets no rounding to lose
       var clipped = geometry.bar >= 6;
@@ -530,8 +554,8 @@ __STATS__
         var gap = high >= 6 ? 2 : 0;
 
         ctx.fillStyle = colors[t];
-        ctx.fillRect(x, bottom - high, geometry.bar, high - gap);
-        bottom -= high;
+        ctx.fillRect(x, stacked, geometry.bar, high - gap);
+        stacked += high;
       }
 
       if (clipped) ctx.restore();
@@ -600,19 +624,28 @@ __STATS__
 
   // -- Alpha diversity ------------------------------------------------------
 
-  // One index is plotted at a time, and this is the order they are offered in:
-  // Shannon first, because it is the one a reader asks for. Chao1 is not among
-  // them - it estimates richness from what was seen exactly once and twice, and
-  // neither pipeline leaves a tail those two counts mean anything in: DADA2 has
-  // already dropped most of the singletons, and a shotgun profile's rarest taxa
-  // are the classifier's error rate as much as they are biology.
-  var METRICS = [
+  // One index is plotted at a time. What they are is the run's own, since the
+  // two pipelines share none of them: an amplicon run reports indices computed
+  // over its ASV table, and a shotgun run reports what nonpareil and mOTUs
+  // measured without a database in the way. Whichever script worked the numbers
+  // out names them, in the order they are offered in, with the first the one
+  // the chart opens on.
+  //
+  // The set below is the fallback, for data that names none - which is what the
+  // first pipeline published here. Shannon leads it because it is the one a
+  // reader asks for. Chao1 is not among them: it estimates richness from what
+  // was seen exactly once and twice, and neither pipeline leaves a tail those
+  // two counts mean anything in.
+  var DEFAULT_METRICS = [
     { key: "shannon", title: "Shannon index", note: "richness and evenness together", places: 2 },
     { key: "observed", title: "Observed " + MANY, note: "distinct " + MANY + " seen in the sample", integer: true },
     { key: "reads", title: "Read depth", note: DEPTH, integer: true },
     { key: "simpson", title: "Simpson index", note: "the chance two reads are different " + MANY, places: 3 },
     { key: "evenness", title: "Pielou's evenness", note: "0 = one " + ONE + " dominates, 1 = all equal", places: 3 }
   ];
+
+  var METRICS = (DATA && DATA.metrics && DATA.metrics.length) ? DATA.metrics
+                                                             : DEFAULT_METRICS;
 
   var metricSelect = document.getElementById("metric");
   var metricBox = document.getElementById("metric-box-plot");
@@ -625,9 +658,28 @@ __STATS__
     return key === "reads" ? reads : alpha[key];
   }
 
+  // Whether there is a diversity half to show at all. Read depth on its own is
+  // not one: it is the effort the other readings were measured at rather than a
+  // reading of what was in the sample.
+  function measured() {
+    for (var i = 0; i < METRICS.length; i++) {
+      if (METRICS[i].key === "reads") continue;
+
+      var series = values(METRICS[i].key);
+      if (series && series.length) return true;
+    }
+
+    return false;
+  }
+
+  // A unit belongs to the reading rather than to the axis, since the axis is
+  // labelled with the name of the index and its gridlines are readings
   function format(spec, value) {
     if (value === undefined || value === null) return "—";
-    return spec.integer ? thousands(value) : value.toFixed(spec.places);
+
+    var written = spec.integer ? thousands(value) : value.toFixed(spec.places);
+
+    return spec.unit ? written + spec.unit : written;
   }
 
   function drawMetric() {
@@ -700,7 +752,11 @@ __STATS__
     var html = "";
 
     METRICS.forEach(function (spec) {
-      var series = (values(spec.key) || []).slice().sort(function (a, b) { return a - b; });
+      // A sample the tool could not measure is left out of the three numbers
+      // rather than counted as a zero in them
+      var series = (values(spec.key) || []).filter(function (value) {
+        return value !== null && value !== undefined;
+      }).sort(function (a, b) { return a - b; });
 
       if (!series.length) return;
 
@@ -758,12 +814,19 @@ __STATS__
 
   // -- Wiring ---------------------------------------------------------------
 
+  // The samples can be sorted by the run's headline index as well as by name,
+  // by depth and by what dominates them. Which index that is comes from the
+  // same list the chart is drawn from - the first of them - rather than being
+  // named here, since the two pipelines share none.
+  var HEADLINE = METRICS.filter(function (spec) { return spec.key !== "reads"; })[0];
+
   var ORDERS = [
     { id: "name", label: "Sample name" },
     { id: "composition", label: "Most abundant taxon" },
-    { id: "reads", label: "Read depth" },
-    { id: "shannon", label: "Shannon index" }
+    { id: "reads", label: "Read depth" }
   ];
+
+  if (HEADLINE) ORDERS.push({ id: HEADLINE.key, label: HEADLINE.title });
 
   function reorder() {
     var choice = orderSelect.value;
@@ -847,7 +910,7 @@ __STATS__
     drawLegend();
   }
 
-  if (alpha.shannon) {
+  if (measured()) {
     METRICS.forEach(function (spec, index) {
       if (!values(spec.key)) return;
 
@@ -896,7 +959,7 @@ __STATS__
 
   buttons.forEach(function (button) {
     var which = button.getAttribute("data-plot");
-    var empty = which === "composition" ? !levels.length : !alpha.shannon;
+    var empty = which === "composition" ? !levels.length : !measured();
 
     if (empty) {
       display(button, false);

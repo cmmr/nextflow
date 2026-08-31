@@ -11,12 +11,17 @@ panel with a tab-link for each of those two questions.
 | Pipeline | Script | Reads |
 |---|---|---|
 | ampliseq | [`ampliseq_composition.sh`](../../scripts/ampliseq_composition.sh) | the QIIME 2 abundance tables |
-| taxprofiler | [`taxprofiler_composition.sh`](../../scripts/taxprofiler_composition.sh) | the per-sample Bracken and Kraken2 reports |
+| taxprofiler | [`taxprofiler_composition.sh`](../../scripts/taxprofiler_composition.sh) | the per-sample Bracken and Kraken2 reports for composition, nonpareil and mOTUs for diversity |
 
 Both write the same file in the same shape, so there is one Overview rather than
-one per pipeline. What the two differ on is what a column of the diversity chart
-counts — an ASV on a 16S run, a species on a shotgun one — and the plot data
-says which, so the page names it rather than the template assuming it.
+one per pipeline. What the two differ on, the plot data says rather than the
+template assuming: what a column of the diversity chart counts — an ASV on a 16S
+run, a species on a shotgun one — *which indices there are at all*, since the two
+pipelines share none, and the caption naming the tools and the database the
+composition was worked out from. Only the script that read the reports knows any
+of it, so it writes them and the page renders what it is handed. Plot data naming
+no indices falls back to the amplicon set; plot data with no caption leaves that
+line off rather than describing the wrong pipeline.
 
 The rest of this page takes the 16S half first, then the shotgun half; the
 sections on the sidebar and on colour apply to both.
@@ -62,16 +67,24 @@ The panel is the same for both pipelines.
 **Taxonomic composition** — one column per sample, stacked to 100%, under a
 legend naming every taxon in it, with the panel's own control for the taxonomic
 rank and one for the order the samples are in (by name, by the share of the most
-abundant taxon, by read depth, or by Shannon index). The axis is labelled, and
-what the chart is and how it is ordered is written under it. Hovering a column
-names the sample and gives its full breakdown; hovering a legend entry gives
-that taxon's mean share, how many samples it was found in, and its lineage.
+abundant taxon, by read depth, or by whichever index the run leads with). The axis is labelled, and
+what the chart is, how the numbers in it were made, and how it is ordered are
+written under it. Hovering a column names the sample and gives its full
+breakdown; hovering a legend entry gives that taxon's mean share, how many
+samples it was found in, and its lineage.
+
+**One order, in all three.** The columns are stacked in the order the legend
+reads — most abundant at the top, `Other` at the bottom — which is also the order
+the tooltip lists them in. A reader who finds a taxon in one finds it in the same
+place in the other two.
 
 **Alpha diversity** — one index at a time, chosen from the panel's own `Index`
-select and drawn in the same sample order as the composition above it: the
-Shannon index to begin with, then observed ASVs, read depth, the Simpson index
-and Pielou's evenness. Under it, a table of the lowest, median and highest value
-of every one of them.
+select and drawn in the same sample order as the composition above it. Which
+indices those are is the run's own: an amplicon run offers the Shannon index
+first, then observed ASVs, read depth, the Simpson index and Pielou's evenness; a
+shotgun run offers what nonpareil and mOTUs measured, none of which needs a
+classification database. Under it, a table of the lowest, median and highest
+value of every one of them.
 
 Both are drawn to a `<canvas>`. A column per sample stays a column per sample
 whether there are six or six thousand; nothing is added to the document, so
@@ -113,13 +126,18 @@ index lists under `Diversity` and the panel links to.
 
 taxprofiler publishes its answer to the first question only as Krona sunbursts
 — one page per classifier, no way to read one sample against another — and no
-answer at all to the second. Both are worked out from the kraken2-style reports
-it does publish, one per sample:
+answer at all to the second. Composition is worked out from the kraken2-style
+reports it does publish, one per sample:
 
 | From | Gives |
 |---|---|
-| `bracken/<db>/<sample>_<db>.bracken.kraken2.report_bracken.txt` | the composition of each sample at every rank, and the species counts the diversity indices are computed from |
+| `bracken/<db>/<sample>_<db>.bracken.kraken2.report_bracken.txt` | the composition of each sample at every rank |
 | `kraken2/<db>/<sample>_<db>.kraken2.kraken2.report.txt` | the reads no taxon was found for, and how far the classifier got |
+| `fastp/<sample>_<run>.fastp.json` | the reads quality filtering was given and the reads it kept, and the chemistry it read off them |
+| `bowtie2/align/<sample>.bowtie2.log` | the reads host depletion was given and the reads it took |
+
+The last two are read for the sidebar rather than for the plots; a run that
+skipped either step leaves its bar off the sidebar rather than reporting a zero.
 
 **Bracken's report is what is plotted.** Both carry a clade count at every rank,
 so a rank is read straight off one rather than rolled up from a species table.
@@ -146,21 +164,56 @@ in the legend comes from the report's indentation, which is the only record it
 carries of what sits above a taxon; a taxon is keyed by that lineage as well as
 by its name, so two genera of the same name in different families stay apart.
 
-Per sample, from the **unrarefied** species-level counts:
+### Diversity comes from somewhere else entirely
 
-| Index | |
+**Not from these reports.** Shannon, Simpson and Pielou over the classified
+reads were what this page reported at first, and they were misleading: around
+half the reads of a WGS sample reach no taxon at all, so an index computed over
+the half PlusPF happens to name describes the database as much as the sample —
+and two samples can differ in "diversity" because one is better represented in
+RefSeq than the other. The unclassified share is the largest single wedge of most
+of these charts; an index that silently drops it is not measuring the community.
+
+Two tools that consult no classification database answer it instead:
+
+| From | Gives |
 |---|---|
-| Read depth | every read that reached the classifier |
-| Observed species | distinct species with a non-zero count |
-| Shannon, Simpson, Pielou | as above |
+| `nonpareil/nonpareil_all_samples.tsv` | the Nonpareil diversity index Nd, the share of the community the reads covered, the effort spent and the effort 95% coverage would take |
+| `motus/<db>/<sample>_<db>.out` | how many species-level marker gene clusters the sample carried |
 
-**No Chao1 here either**, for a different reason: a shotgun profile's rarest taxa
-are the classifier's error rate as much as they are biology, so an estimator
-built on what was seen once and twice reads that noise as richness.
+**Nonpareil measures redundancy, not taxonomy** — how often a read has already
+been seen in the same dataset. Reads that keep repeating mean a community
+sequenced deeply relative to its diversity; reads that are all new mean one that
+was not. Every read counts towards that, named or not.
+
+**mOTUs counts what is there rather than what has a name.** It profiles ten
+universal single-copy marker genes, so it resolves species with no assembled
+reference genome, which is where a Kraken2 database is blind by construction.
+Richness is the count of its clusters with a non-zero read count; its
+`unassigned` row is not a cluster and is left out.
+
+**Nothing is rarefied.** Rarefaction exists to make counts comparable between
+groups and there are no groups here — and nonpareil's readings are estimates of a
+whole community rather than counts to be levelled.
+
+Three details of where nonpareil sits in taxprofiler 2.0.1 shape what its numbers
+mean, and are documented at length in [the pipeline
+page](../pipelines/taxprofiler.md#diversity-and-coverage): it runs **before host
+removal**, it reads **R1 only**, and its curves are fitted **per run**, so a
+sample sequenced twice keeps its deepest run rather than an average of the two.
 
 All of it is written to `alpha_diversity.tsv` in the results root, which the file
-index lists under `Start here` and the sidebar links to as *Per-sample
-diversity*.
+index lists under `Start here`, with the model fit nonpareil reported beside each
+estimate — a low `model_fit` is how a reader knows not to trust the Nd next to
+it. A reading nonpareil could not fit is written `NA` there and left as a gap in
+the chart rather than drawn as a zero.
+
+**The page is told what it is plotting.** The two pipelines share no index at
+all, so the plot data carries the list of them — each with its name, its units
+and how many decimals it is written to — and the Overview draws whatever it is
+handed. Data naming none falls back to the amplicon set, which is what the first
+pipeline published here. A run that measured no diversity drops that half of the
+panel rather than plotting read depth and calling it diversity.
 
 **Two passes, not two per rank.** A WGS report is megabytes per sample, so every
 rank is worked out in the same two passes over the files: the first sums each
@@ -183,16 +236,26 @@ Reads in come from `overall_summary.tsv` — cutadapt's own count of what it
 processed, or DADA2's input for a run that skipped primer trimming — and
 everything else from the ASV and relative abundance tables.
 
-**taxprofiler** reports the reads the run started with, how many of them were
-host, and how many the classifier placed; the thinnest, middle and deepest
-sample; the share of reads resolved to phylum, to genus and to species; and how
-many distinct phyla, genera and species the run named over all its samples. Reads
-in come from the bowtie2 host-removal log where host removal ran — the only
-count taken before anything was discarded — and the classifier's own total
-otherwise. Everything else comes off the reports.
+**taxprofiler** reports the reads the run started with, how many of them came
+through quality filtering, and how many were left once the host was taken out;
+the thinnest, middle and deepest sample; and the share of what reached the
+classifier that it resolved to phylum, to genus and to species. It also names
+what the reads were — the platform the samplesheet measured them into, and the
+chemistry fastp read off them, as *"Illumina, 2 x 151 bp"* — which is the note
+the read totals are headed with.
 
-The taxa counts are written out in full rather than rounded: how many genera a
-run named is not a figure to hand over as "3k".
+**Every bar is what was still in hand at that step**, never what was taken out.
+Reads in come from fastp's own reports, which count what quality filtering was
+given before anything downstream saw it; without them the bowtie2 log's count is
+used, and without that the classifier's own total. fastp counts each mate of a
+pair as a read of its own, so its counts are halved for a paired run: everything
+below it counts pairs, and a funnel whose first bars count halves of what the
+bars under them count is not a funnel.
+
+**The rank bars are a share of what reached the classifier**, not of the reads
+the run started with. By then quality filtering and depletion have taken their
+cut, and reading those bars against the total would report the classifier as
+having missed what it was never given.
 
 The middle sample rather than the mean: one deeply sequenced sample drags an
 average away from what the run's samples actually look like.

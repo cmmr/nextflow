@@ -1,5 +1,6 @@
 
-# Shotgun metagenomics: fastp trimming, then kraken2, bracken and metaphlan.
+# Shotgun metagenomics: fastp trimming, then kraken2, bracken, metaphlan and
+# mOTUs, with nonpareil measuring how much of each community was sequenced.
 # Which host is depleted first is the request form's follow-up answer, recorded
 # by wrike_task_handler.sh; PhiX alone when the form never asked.
 PIPELINE_NAME="taxprofiler_01"
@@ -31,12 +32,26 @@ params_set perform_runmerging               true
 params_set run_kraken2                      true
 params_set run_bracken                      true
 params_set run_metaphlan                    true
+params_set run_motus                        true
 params_set run_krona                        true
 params_set run_profile_standardisation      true
 params_set standardisation_taxpasta_format  "tsv"
 params_set taxpasta_taxonomy_dir            "$NEXTFLOW_DIR/db/kraken2/pluspf_20260626"
 params_set taxpasta_add_name                true
 params_set taxpasta_add_rank                true
+
+# How varied each sample was, which no classifier here answers honestly: half a
+# WGS sample's reads reach no taxon, so an index computed over the half a
+# database names describes the database as much as the sample. Nonpareil reads
+# redundancy off the reads themselves and needs no database at all; mOTUs counts
+# the species-level clusters it finds in universal marker genes, which reaches
+# species no reference genome has been assembled for.
+#
+# Nonpareil sees the reads fastp left, before host removal and before a sample's
+# runs are merged - that is where taxprofiler 2.0.1 wires it - so it measures
+# what was sequenced rather than what was classified.
+params_set perform_shortread_redundancyestimation true
+params_set shortread_redundancyestimation_mode    "kmer"
 
 # "Taxprofiler --hostremoval_reference" answers "None", "PhiX", "Human + PhiX"
 # and "Mouse + PhiX", so the first word names the host and the rest is the PhiX

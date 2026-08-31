@@ -12,7 +12,7 @@
 # only as Krona sunbursts - one page per classifier, with no way to read one
 # sample against another - and the second not at all.
 #
-# Both are worked out from the kraken2-style reports the run publishes:
+# Composition is worked out from the kraken2-style reports the run publishes:
 #
 #   bracken/<db>/<sample>_<db>.bracken.kraken2.report_bracken.txt   preferred
 #   kraken2/<db>/<sample>_<db>.kraken2.kraken2.report.txt           fallback
@@ -28,23 +28,44 @@
 # far the classifier got, since bracken renormalises over what it placed. So the
 # plots stack over every read that reached the classifier - unclassified
 # included, as a taxon of its own, because on a shotgun run it is often the
-# largest share of the sample - and the sidebar reports the classified share
-# alongside the share resolved to phylum, genus and species.
+# largest share of the sample - and the sidebar reports the share of them
+# resolved to phylum, genus and species.
+#
+# The rest of the sidebar's read funnel is counted in the same pass, out of the
+# reports each step of the run wrote about itself: fastp's say how many reads
+# quality filtering was given and how many came through, bowtie2's say what the
+# host took, and the kraken2 reports say what reached the classifier. fastp also
+# names the chemistry it read off the files, which is what the funnel is headed
+# with.
 #
 # Only the eleven most abundant taxa of each rank are kept, the rest summed into
 # "Other": past that fill no reader can tell one colour from the next, and the
 # merged taxpasta tables are published for anyone who needs every row.
 #
-# Diversity is reported per sample as observed species, Shannon, Simpson and
-# Pielou's evenness, computed on the species-level clade counts. Nothing is
-# rarefied because nothing is being compared between groups - these runs have no
-# metadata to group by - and the depth each index was computed at is published in
+# Diversity is not computed from those reports at all. Half the reads of a WGS
+# sample routinely reach no taxon, and Shannon, Simpson and Pielou over the half
+# a database happens to name describe the database as much as they describe the
+# sample. Two tools that do not depend on one answer instead:
+#
+#   nonpareil/nonpareil_all_samples.tsv   how much of the community was covered
+#   motus/<db>/<sample>_<db>.out          how many species-level clusters there were
+#
+# Nonpareil reads redundancy straight off the reads - how often the same sequence
+# turns up - so the unclassified half counts too, and reports the diversity index
+# Nd, the share of the community the reads cover, and the sequencing it would
+# take to cover 95% of it. mOTUs counts the species-level clusters it finds in
+# universal marker genes, which is a count of what was there rather than of what
+# a taxonomy carries a name for. The depth each was measured at is published in
 # the same table for the reader to judge them against.
+#
+# Nonpareil's curves are fitted per run rather than per sample, on the reads
+# fastp left and before the host was taken out - that is where taxprofiler wires
+# it - so a sample sequenced twice keeps its deepest run rather than an average.
 #
 # Usage:     taxprofiler_composition.sh [results_dir]
 #            defaults to ./results, the outdir set in the taxprofiler params file
 # Called by: taxprofiler_upload.sh, before it indexes and uploads the results
-# Requires:  GNU awk
+# Requires:  GNU awk; jq, for the fastp reports
 # Outputs:   <results_dir>/alpha_diversity.tsv
 #            ./composition_data.json
 #            the "statistics" of ./run_state.json
@@ -65,6 +86,18 @@ readonly KRAKEN2_DIR="$RESULTS_DIR/kraken2"
 # Host removal's own accounting, one log per sample, for a run that depleted
 # anything at all
 readonly BOWTIE2_DIR="$RESULTS_DIR/bowtie2/align"
+
+# Quality filtering's own accounting, one report per run of every sample, for a
+# run that took the short-read path
+readonly FASTP_DIR="$RESULTS_DIR/fastp"
+
+# What the diversity half is read from. Nonpareil writes one summary over every
+# curve in the run; mOTUs writes one profile per sample, under a folder named
+# for the database, like every other profiler here.
+readonly NONPAREIL_DIR="$RESULTS_DIR/nonpareil"
+readonly NONPAREIL_SUMMARY="nonpareil_all_samples.tsv"
+readonly MOTUS_DIR="$RESULTS_DIR/motus"
+readonly MOTUS_SUFFIX=".out"
 
 readonly ALPHA_TABLE="$RESULTS_DIR/alpha_diversity.tsv"
 
@@ -111,9 +144,18 @@ READ_TOTALS="$WORK/reads.tsv"
 # Reads a sample lost to the host, or empty for a run that depleted nothing
 HOST_TABLE="$WORK/host.tsv"
 
-# Both are opened by name inside awk, by passes that are already reading the
-# reports themselves
-export PROFILE_SET READ_TOTALS
+# What nonpareil measured and how many clusters mOTUs found, one line per
+# sample, or empty for a run that produced neither
+NONPAREIL_TABLE="$WORK/nonpareil.tsv"
+MOTUS_TABLE="$WORK/motus.tsv"
+
+# mOTUs profiles as "sample <TAB> path", the same shape the classifier reports
+# are collected in
+MOTUS_SET="$WORK/motus_reports.tsv"
+
+# All four are opened by name inside awk, by passes that are already reading
+# other files
+export PROFILE_SET READ_TOTALS NONPAREIL_TABLE MOTUS_TABLE
 
 # Which tool and database the plots are drawn from, as the sidebar names them
 PROFILE_TOOL=""
@@ -235,74 +277,323 @@ host_removal() {
     done
 }
 
-# Per-sample diversity, as the table published with the results. Read depth is
-# part of it: an index computed on 50,000 reads is not the same measurement as
-# one computed on 5,000,000, and a reader can only see that if the depth is
-# there.
+# Every fastp report the run wrote, or nothing for a run that filtered no short
+# reads
+fastp_reports() {
+    local path
+
+    for path in "$FASTP_DIR"/*.fastp.json; do
+        [[ -r "$path" ]] || continue
+
+        printf '%s\n' "$path"
+    done
+}
+
+# Reads that reached quality filtering and reads that came through it, summed
+# over every report.
 #
-# The indices are computed on the species-level clade counts, the finest rank
-# every one of these reports names. No Chao1: a shotgun profile's rare tail is
-# the classifier's error rate as much as it is biology, and an estimator built on
-# the taxa seen once and twice reads that noise as richness.
+# Counted in pairs where the reads are paired, because that is what host removal
+# and the classifier count: fastp counts each mate of a pair as a read of its
+# own, and a funnel whose first two bars count halves of what the bars under
+# them count is not a funnel.
+fastp_totals() {
+    jq -s -r '
+        map({
+            mates:  (if (.summary.sequencing // "") | startswith("paired end")
+                     then 2 else 1 end),
+            before: (.summary.before_filtering.total_reads // 0),
+            passed: (.filtering_result.passed_filter_reads // 0)
+        })
+        | "qc_total\t\(map(.before / .mates) | add | floor)\n"
+          + "qc_passed\t\(map(.passed / .mates) | add | floor)"
+    ' "$@"
+}
+
+# The chemistry fastp read off the files, as a reader says it: "2 x 151 bp" for
+# a paired run, "151 bp" for a single-ended one. fastp states it as "paired end
+# (151 cycles + 151 cycles)", so the cycle counts are what is read out of it.
 #
-# Two passes over the reports, which is why they are given twice. The first
-# totals each sample, which the second needs to turn counts into the proportions
-# Shannon and Simpson are computed from.
-write_alpha_table() {
+# The commonest reading across the run's files, since one file sequenced
+# differently does not rename the run. Ties go to the reading that sorts first,
+# or the page would come out differently on two runs of the same data.
+read_chemistry() {
+    jq -r '.summary.sequencing // empty' "$@" | LC_ALL=C awk '
+        { seen[$0]++ }
+
+        END {
+            for (line in seen) {
+                if (seen[line] < best || (seen[line] == best && line >= text)) continue
+
+                best = seen[line]
+                text = line
+            }
+
+            while (match(text, /[0-9]+/)) {
+                cycles[++n] = substr(text, RSTART, RLENGTH) + 0
+                text = substr(text, RSTART + RLENGTH)
+            }
+
+            if (n == 1)                                printf "%d bp", cycles[1]
+            else if (n >= 2 && cycles[1] == cycles[2]) printf "2 x %d bp", cycles[1]
+            else if (n >= 2)                           printf "%d + %d bp", cycles[1], cycles[2]
+        }'
+}
+
+# What the reads were, as the note the read totals are headed with: the platform
+# the samplesheet measured them into, and the chemistry fastp read off them.
+#
+# A run from before the platform was recorded is read off its own reports
+# instead - fastp writes for the short-read path only - which is right for every
+# such run, since the long-read path has only ever been taken by nanopore.
+sequencing_summary() {
+    local platform chemistry=""
+
+    platform=$(state_get samples.platform)
+
+    if [[ -z "$platform" ]]; then
+        if (( ${#FASTP_REPORTS[@]} > 0 )); then
+            platform="ILLUMINA"
+        else
+            platform="OXFORD_NANOPORE"
+        fi
+    fi
+
+    case "$platform" in
+        ILLUMINA)        platform="Illumina" ;;
+        OXFORD_NANOPORE) platform="Nanopore" ;;
+        PACBIO_SMRT)     platform="PacBio" ;;
+    esac
+
+    if (( ${#FASTP_REPORTS[@]} > 0 )); then
+        chemistry=$(read_chemistry "${FASTP_REPORTS[@]}")
+    fi
+
+    printf '%s%s' "$platform" "${chemistry:+, $chemistry}"
+}
+
+# What nonpareil measured, one line per sample, or nothing for a run without it.
+#
+# NonpareilCurves.R writes one row per curve, labelled as the run it was fitted
+# to, and R leaves that table's header one field short - the row names have no
+# column of their own - so the header is matched to the data rather than
+# assumed. A label is matched back to the sample whose name it starts with,
+# since a sample name is free to hold an underscore of its own.
+#
+# A sample sequenced over several runs keeps its deepest run rather than an
+# average of them: every one of these readings saturates with sequencing effort,
+# so the run that saw the most reads is the best supported estimate of the same
+# community.
+#
+# Coverage and redundancy are written as percentages and the two efforts in Gbp,
+# which is how they are read; nonpareil reports the first two as fractions and
+# the second two in base pairs. A reading nonpareil could not fit is written NA
+# rather than zero.
+nonpareil_table() {
+    local summary="" path
+
+    for path in "$NONPAREIL_DIR/$NONPAREIL_SUMMARY" "$NONPAREIL_DIR"/*.tsv; do
+        [[ -r "$path" ]] || continue
+
+        summary="$path"
+        break
+    done
+
+    [[ -n "$summary" ]] || return 0
+
+    LC_ALL=C awk -F'\t' '
+        function numeric(v) {
+            return v ~ /^[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?$/
+        }
+
+        function reading(v, scale) {
+            return numeric(v) ? sprintf("%.4f", v * scale) : "NA"
+        }
+
+        # The sample a curve belongs to: the longest sample name its label
+        # starts with, or the label itself for a run that was never split
+        function sample_of(label,   name, best) {
+            if (label in known) return label
+
+            best = ""
+            for (name in known)
+                if (index(label, name "_") == 1 && length(name) > length(best))
+                    best = name
+
+            return best
+        }
+
+        BEGIN {
+            while ((getline line < ENVIRON["PROFILE_SET"]) > 0) {
+                split(line, field, "\t")
+                known[field[1]] = 1
+            }
+        }
+
+        FNR == 1 {
+            for (i = 1; i <= NF; i++) head[i] = $i
+            columns = NF
+            next
+        }
+
+        # Where the header is a field short, every column named in it sits one
+        # field to the right of where it was named
+        FNR == 2 {
+            shift = (NF == columns + 1) ? 1 : 0
+            for (i = 1; i <= columns; i++) column[head[i]] = i + shift
+        }
+
+        {
+            name = sample_of($1)
+            if (name == "") next
+
+            effort = numeric($(column["LR"])) ? $(column["LR"]) + 0 : 0
+            if (name in depth && depth[name] >= effort) next
+
+            depth[name]      = effort
+            diversity[name]  = reading($(column["diversity"]), 1)
+            coverage[name]   = reading($(column["C"]), 100)
+            redundancy[name] = reading($(column["kappa"]), 100)
+            fit[name]        = reading($(column["modelR"]), 1)
+            spent[name]      = reading($(column["LR"]), 1 / 1000000000)
+            needed[name]     = reading($(column["LRstar"]), 1 / 1000000000)
+        }
+
+        END {
+            for (name in diversity)
+                printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", name, diversity[name], \
+                    coverage[name], redundancy[name], fit[name], spent[name], needed[name]
+        }
+    ' "$summary" | LC_ALL=C sort -k1,1
+}
+
+# How many mOTUs each sample carried, off its own profile.
+#
+# A profile names every cluster in the database and gives most of them a zero,
+# so what is counted is the rows that were not zero. The unassigned row is not a
+# cluster and is left out. The count is the last field of a row whichever flags
+# mOTUs was given: the NCBI id it prints by default sits between the name and
+# the number.
+motus_table() {
     local -a reports=("$@")
 
-    LC_ALL=C awk -F'\t' -v nfiles="$#" '
+    LC_ALL=C awk -F'\t' '
+        NR == FNR { sample[$2] = $1; observed[$1] = 0; next }
+
+        FNR == 1 { name = sample[FILENAME] }
+
+        /^#/               { next }
+        $1 == "unassigned" { next }
+
+        $NF + 0 > 0 { observed[name]++ }
+
+        END {
+            for (name in observed) printf "%s\t%d\n", name, observed[name]
+        }
+    ' "$MOTUS_SET" "${reports[@]}" | LC_ALL=C sort -k1,1
+}
+
+# Per-sample diversity, as the table published with the results, in the sample
+# order everything else on the page follows.
+#
+# Read depth is part of it: an estimate computed on 50,000 reads is not the same
+# measurement as one computed on 5,000,000, and a reader can only see that if the
+# depth is there. So is the model fit nonpareil reported, which is what says
+# whether its estimate for that sample is worth reading at all.
+#
+# Nothing is rarefied. Rarefaction exists to make counts comparable between
+# groups, and there are no groups here - and nonpareil's readings are estimates
+# of the whole community rather than counts to be levelled.
+write_alpha_table() {
+    LC_ALL=C awk -F'\t' '
+        function reading(v) {
+            return v == "" ? "NA" : v
+        }
+
         BEGIN {
             # Every read that reached the classifier, which is the depth the
-            # indices beside it were computed at
+            # readings beside it were measured at
             while ((getline line < ENVIRON["READ_TOTALS"]) > 0) {
                 split(line, field, "\t")
                 depth[field[1]] = field[2] + field[3]
             }
-        }
 
-        NR == FNR { sample[$2] = $1; next }
+            while ((getline line < ENVIRON["NONPAREIL_TABLE"]) > 0) {
+                split(line, field, "\t")
+                diversity[field[1]]  = field[2]
+                coverage[field[1]]   = field[3]
+                redundancy[field[1]] = field[4]
+                fit[field[1]]        = field[5]
+                spent[field[1]]      = field[6]
+                needed[field[1]]     = field[7]
+            }
 
-        FNR == 1 { seen++; name = sample[FILENAME] }
+            while ((getline line < ENVIRON["MOTUS_TABLE"]) > 0) {
+                split(line, field, "\t")
+                motus[field[1]] = field[2]
+            }
 
-        $(NF - 2) != "S" { next }
-
-        seen <= nfiles {
-            total[name] += $2
-            if ($2 + 0 > 0) observed[name]++
-            next
+            print "sample\treads\tnonpareil_diversity\tcoverage_pct\tredundancy_pct" \
+                  "\tmodel_fit\teffort_gbp\teffort_95_gbp\tobserved_motus"
         }
 
         {
-            if (total[name] <= 0 || $2 + 0 <= 0) next
+            name = $1
 
-            p = $2 / total[name]
-            shannon[name] -= p * log(p)
-            concentration[name] += p * p
+            printf "%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", name, depth[name] + 0, \
+                reading(diversity[name]), reading(coverage[name]), \
+                reading(redundancy[name]), reading(fit[name]), reading(spent[name]), \
+                reading(needed[name]), reading(motus[name])
+        }
+    ' "$PROFILE_SET"
+}
+
+# Whether the table carries a reading for at least one sample in one of its
+# columns, which is what decides whether the chart offers it
+alpha_has_column() {
+    LC_ALL=C awk -F'\t' -v want="$1" '
+        NR == 1 {
+            for (i = 1; i <= NF; i++) if ($i == want) column = i
+            next
         }
 
-        END {
-            print "sample\treads\tspecies_reads\tobserved_species\tshannon\tsimpson\tevenness"
-
-            while ((getline line < ENVIRON["PROFILE_SET"]) > 0) {
-                split(line, field, "\t")
-                name = field[1]
-                species = observed[name] + 0
-
-                # Pielou divides by the diversity of a sample in which every
-                # species is equally common, which is undefined for a sample
-                # holding one
-                evenness = species > 1 ? shannon[name] / log(species) : 0
-
-                # A sample nothing was placed in has no composition to describe,
-                # rather than a perfectly even one
-                simpson = total[name] > 0 ? 1 - concentration[name] : 0
-
-                printf "%s\t%d\t%d\t%d\t%.4f\t%.4f\t%.4f\n", name, depth[name] + 0, \
-                    total[name] + 0, species, shannon[name] + 0, simpson, evenness
-            }
+        column && $column ~ /^[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?$/ {
+            found = 1
+            exit
         }
-    ' "$PROFILE_SET" "${reports[@]}" "${reports[@]}"
+
+        END { exit !found }
+    ' "$ALPHA_TABLE"
+}
+
+# What the Overview offers on its diversity chart, and how to write each
+# reading. Only this script knows which of them the run produced, so it names
+# them rather than the page assuming a set. The first is the one the chart opens
+# on, and the one the samples can be sorted by.
+#
+# Fails for a run that measured no diversity at all, which leaves the page to
+# hide that half rather than draw a chart of read depth and call it diversity.
+composition_metrics() {
+    local -a metrics=()
+
+    if alpha_has_column nonpareil_diversity; then
+        metrics+=('{"key":"diversity","title":"Nonpareil diversity","note":"how varied the community is, read off how often the same sequence recurs rather than off a database","places":2}')
+        metrics+=('{"key":"coverage","title":"Estimated coverage","note":"how much of the community the reads reached","places":1,"unit":"%"}')
+    fi
+
+    if alpha_has_column observed_motus; then
+        metrics+=('{"key":"motus","title":"Observed mOTUs","note":"species-level clusters found in universal marker genes","integer":true}')
+    fi
+
+    if alpha_has_column effort_95_gbp; then
+        metrics+=('{"key":"effort95","title":"Effort for 95% coverage","note":"the sequencing this sample would take to reach 95% coverage","places":1,"unit":" Gbp"}')
+    fi
+
+    (( ${#metrics[@]} > 0 )) || return 1
+
+    metrics+=('{"key":"reads","title":"Read depth","note":"reads that reached the classifier","integer":true}')
+
+    local IFS=,
+    printf '%s' "${metrics[*]}"
 }
 
 # The same table as the arrays the plots read, plus the sample names every other
@@ -313,6 +604,14 @@ alpha_json() {
             gsub(/\\/, "\\\\", s)
             gsub(/"/, "\\\"", s)
             return "\"" s "\""
+        }
+
+        # A reading nothing produced is emitted as null rather than as a zero: a
+        # sample nonpareil could not fit a model for has no diversity to report,
+        # which is not the same as no diversity
+        function number(v) {
+            return v ~ /^[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?$/ \
+                ? v + 0 : "null"
         }
 
         function series(name, column,   i, out) {
@@ -328,7 +627,7 @@ alpha_json() {
         {
             n++
             name[n] = $1
-            for (i = 2; i <= NF; i++) value[n, i] = $i + 0
+            for (i = 2; i <= NF; i++) value[n, i] = number($i)
         }
 
         END {
@@ -337,8 +636,8 @@ alpha_json() {
             for (i = 1; i <= n; i++) out = out (i > 1 ? "," : "") json_string(name[i])
 
             printf "%s],%s,\"alpha\":{%s,%s,%s,%s}", out, series("reads", 2), \
-                series("observed", 4), series("shannon", 5), series("simpson", 6), \
-                series("evenness", 7)
+                series("diversity", 3), series("coverage", 4), \
+                series("effort95", 8), series("motus", 9)
         }
     ' "$ALPHA_TABLE"
 }
@@ -566,18 +865,6 @@ levels_json() {
     ' "${reports[@]}" "${reports[@]}"
 }
 
-# How many distinct taxa the run named at one rank, counted over the whole run
-# rather than in any one sample
-count_taxa() {
-    local rank="$1"
-    shift
-
-    LC_ALL=C awk -F'\t' -v rank="$rank" '
-        $(NF - 2) == rank && $2 + 0 > 0 { seen[$(NF - 1)] = 1 }
-        END { print length(seen) }
-    ' "$@"
-}
-
 # Reads the classifier placed inside some clade of one rank, summed over the run.
 # Read off the kraken2 reports whichever set is plotted: bracken pushes every
 # read it can down to a species, so its report says nothing about how far the
@@ -620,10 +907,28 @@ read_depth_stats() {
     ' "$READ_TOTALS"
 }
 
+# How the composition numbers were made, as the caption under the chart drawn
+# from them. Which classifier and which database produced a bar is a run's own,
+# and a reader is owed it beside the bar rather than three pages away.
+composition_method() {
+    local database
+
+    database=$(reports_database "$KRAKEN2_SET")
+
+    printf 'Reads were classified with Kraken2 against the %s database' "$database"
+
+    if [[ "$PROFILE_TOOL" == "Bracken" ]]; then
+        printf ', then re-estimated at every rank by Bracken'
+    else
+        printf ", and each bar is that report's own clade counts"
+    fi
+
+    printf '. Reads no taxon was found for are stacked as "Unclassified".'
+}
+
 # The run's headline numbers, keyed for the dashboard's sidebar. Each is left out
 # rather than guessed at when the reports behind it are missing.
 write_run_statistics() {
-    local -a profiles=("$@")
     local -a kraken2=()
 
     mapfile -t kraken2 < <(cut -f2 "$KRAKEN2_SET")
@@ -632,16 +937,17 @@ write_run_statistics() {
         printf 'profiler\t%s\n' "$PROFILE_TOOL"
         printf 'database\t%s\n' "$PROFILE_DB"
         printf 'samples\t%s\n'  "$(wc -l < "$PROFILE_SET")"
+        printf 'platform\t%s\n' "$(sequencing_summary)"
 
         read_depth_stats
+
+        if (( ${#FASTP_REPORTS[@]} > 0 )); then
+            fastp_totals "${FASTP_REPORTS[@]}"
+        fi
 
         printf 'phylum_reads\t%s\n'  "$(rank_resolved_reads P "${kraken2[@]}")"
         printf 'genus_reads\t%s\n'   "$(rank_resolved_reads G "${kraken2[@]}")"
         printf 'species_reads\t%s\n' "$(rank_resolved_reads S "${kraken2[@]}")"
-
-        printf 'phyla\t%s\n'   "$(count_taxa P "${profiles[@]}")"
-        printf 'genera\t%s\n'  "$(count_taxa G "${profiles[@]}")"
-        printf 'species\t%s\n' "$(count_taxa S "${profiles[@]}")"
 
         if [[ -s "$HOST_TABLE" ]]; then
             LC_ALL=C awk -F'\t' '
@@ -684,19 +990,57 @@ mapfile -t KRAKEN2_REPORTS < <(cut -f2 "$KRAKEN2_SET")
 read_totals "${KRAKEN2_REPORTS[@]}" > "$READ_TOTALS"
 host_removal > "$HOST_TABLE"
 
-# 2. Diversity, over the species the plotted reports name, and with it the sample
-#    order everything else follows
-if ! write_alpha_table "${PROFILES[@]}" > "$ALPHA_TABLE"; then
-    warn "The diversity indices could not be computed; the Overview will show no plots."
+# What quality filtering wrote about itself, on a run that filtered short reads
+declare -a FASTP_REPORTS=()
+mapfile -t FASTP_REPORTS < <(fastp_reports)
+
+# 2. Diversity, as nonpareil and mOTUs measured it, in the sample order the
+#    plotted reports set. Neither is required: a run that produced neither still
+#    gets its composition plotted and its read depths reported.
+if ! nonpareil_table > "$NONPAREIL_TABLE"; then
+    warn "The nonpareil summary could not be read; coverage and Nd will be missing."
+    : > "$NONPAREIL_TABLE"
+elif [[ ! -s "$NONPAREIL_TABLE" ]]; then
+    log "No nonpareil summary under $NONPAREIL_DIR; coverage and Nd will be missing."
+fi
+
+: > "$MOTUS_TABLE"
+
+if collect_reports "$MOTUS_DIR" "$MOTUS_SUFFIX" "$MOTUS_SET"; then
+    mapfile -t MOTUS_REPORTS < <(cut -f2 "$MOTUS_SET")
+
+    if ! motus_table "${MOTUS_REPORTS[@]}" > "$MOTUS_TABLE"; then
+        warn "The mOTUs profiles could not be counted; the cluster counts will be missing."
+        : > "$MOTUS_TABLE"
+    fi
+else
+    log "No mOTUs profiles under $MOTUS_DIR; the cluster counts will be missing."
+fi
+
+if ! write_alpha_table > "$ALPHA_TABLE"; then
+    warn "The diversity table could not be built; the Overview will show no plots."
     rm -f "$ALPHA_TABLE"
     exit 0
 fi
 
 DATA=$(alpha_json)
 
+# Which readings the run actually produced, and how the page writes each of
+# them. A run that measured none leaves the key off, which is what hides that
+# half of the panel.
+if METRICS=$(composition_metrics); then
+    DATA="\"metrics\":[$METRICS],$DATA"
+else
+    log "This run measured no diversity; the Overview will plot composition only."
+fi
+
 # What the reader is being shown a count of, so the page says species where the
 # 16S page says ASV
 DATA="\"feature\":{\"one\":\"species\",\"many\":\"species\",\"depth\":\"reads that reached the classifier\"},$DATA"
+
+# How those numbers were made, for the caption under the composition chart. jq
+# encodes it, since it is a sentence being written into JSON.
+DATA="\"method\":$(composition_method | jq -R -s .),$DATA"
 
 # 3. Composition, every rank in the order a reader reads them
 LEVELS=""
@@ -708,8 +1052,9 @@ fi
 
 DATA+=",\"levels\":[$LEVELS]"
 
-# 4. The same reports, counted for the dashboard's sidebar
-if ! write_run_statistics "${PROFILES[@]}"; then
+# 4. The run's headline numbers: the same reports, and the ones each step of the
+#    run wrote about its own reads
+if ! write_run_statistics; then
     warn "The run statistics could not be counted; the dashboard will show fewer numbers."
     state_unset "$STATS_KEY" || true
 fi

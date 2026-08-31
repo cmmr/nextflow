@@ -1,8 +1,9 @@
 # taxprofiler
 
 Shotgun metagenomic profiling with
-[nf-core/taxprofiler](https://nf-co.re/taxprofiler), running kraken2, bracken and
-metaphlan over the same lab samplesheet the ampliseq pipeline takes.
+[nf-core/taxprofiler](https://nf-co.re/taxprofiler), running kraken2, bracken,
+metaphlan and mOTUs over the same lab samplesheet the ampliseq pipeline takes,
+with nonpareil measuring how much of each community was sequenced at all.
 
 Everything here is taxprofiler-specific. For how a request becomes a run at all,
 see the [README](../index.md).
@@ -16,25 +17,35 @@ see the [README](../index.md).
 | Kraken2 database | **PlusPF 2026-06-26** | `db/kraken2/pluspf_20260626` (111 GB) |
 | Bracken distributions | 50, 75, 100, 150, 200, 250, 300-mers | same directory |
 | MetaPhlAn database | **mpa_vJun23_CHOCOPhlAnSGB_202403** | `db/metaphlan/…` (33 GB) |
+| mOTUs database | **db_mOTU_v3.1.0** | `db/motus/db_mOTU_v3.1.0/db_mOTU` (3.5 GB) |
 | Host — none | PhiX only (`GCF_000819615.1`) | `db/hostremoval/phix` |
 | Host — human | T2T-CHM13v2.0 (`GCF_009914755.1`) + PhiX | `db/hostremoval/chm13v2phix` (14 GB) |
 | Host — mouse | GRCm39 (`GCF_000001635.27`) + PhiX | `db/hostremoval/grcm39phix` (13 GB) |
 
 Tool versions come from taxprofiler 2.0.1 and are not ours to choose: kraken2
-2.1.5, bracken 3.1, metaphlan 4.1.1. The bowtie2 and minimap2 builds used for the
-host references are recorded in each reference's `manifest.json`.
+2.1.5, bracken 3.1, metaphlan 4.1.1, motus 3.1.0, nonpareil 3.5.5. Nonpareil
+needs no database of its own — it measures redundancy in the reads themselves.
+The bowtie2 and minimap2 builds used for the host references are recorded in
+each reference's `manifest.json`.
 
 Every database was fetched fresh by the scripts in
 [Cluster setup](#cluster-setup) rather than reused from elsewhere on the cluster,
 and each carries a `manifest.json` naming its source URLs, checksums and fetch
 date.
 
-**Two pins are deliberate and should not be bumped casually:**
+**Three pins are deliberate and should not be bumped casually:**
 
 - **MetaPhlAn's database.** Its own `mpa_latest` marker names
   `mpa_vJan26_CHOCOPhlAnSGB_202605`, which requires MetaPhlAn 4.2. taxprofiler
   2.0.1 pins 4.1.1, whose newest supported database is the one above. Moving
   forward needs a newer taxprofiler, not a newer database.
+- **mOTUs' database.** mOTUs checks the version recorded inside the database
+  against its own before it profiles anything, and taxprofiler 2.0.1 runs
+  `MOTUS_PROFILE` in the motus 3.1.0 container. `db_mOTU_v3.1.0` is what that
+  version accepts. The v4 catalogues published at `sunagawalab.ethz.ch` are not
+  an upgrade path: they are raw gene catalogues - 182 GB for NR95, 745 GB for
+  NR100 - for mOTUs 4, a different tool with a different database layout, whose
+  only public build is a 4.0.0a alpha. That move needs a newer taxprofiler.
 - **Kraken2's memory reservation** in
   [`config/taxprofiler/slurm.config`](../../config/taxprofiler/slurm.config) tracks
   the size of `hash.k2d`, currently 110 GB. A reservation below it is an OOM
@@ -110,7 +121,9 @@ lab sheet into the six-column CSV taxprofiler wants — `sample`, `run_accession
   read-renaming tools erase it. `INSTRUMENT_PLATFORM` in the environment pins the
   value and skips detection, e.g. for `PACBIO_SMRT`. Long reads presented as a
   pair are rejected, since taxprofiler errors on a long-read row that names a
-  second FASTQ.
+  second FASTQ. Whatever it settles on is recorded as `.samples.platform` as
+  well as written into the CSV: the samplesheet is not published with the
+  results, and the dashboard heads its read totals with what the reads were.
 - **Sample names are kept as submitted wherever possible.** taxprofiler forbids
   only whitespace, but the name ends up in output filenames that reach unquoted
   shell contexts inside the nf-core modules, so anything outside `[A-Za-z0-9._-]`
@@ -131,9 +144,10 @@ field. What its file index lists is
 [`templates/taxprofiler/outputs.conf`](../../templates/taxprofiler/outputs.conf).
 
 [`taxprofiler_composition.sh`](../results/composition.md) runs first and works
-out what the Overview plots and what its sidebar reports, from the same
-kraken2-style reports the run publishes. See [Composition and
-diversity](../results/composition.md).
+out what the Overview plots and what its sidebar reports: the plots and the
+classification bars from the kraken2-style reports the run publishes, and the
+read totals above them from what fastp and bowtie2 wrote about their own steps.
+See [Composition and diversity](../results/composition.md).
 
 **The raw reads are not published.** Unlike ampliseq, the uploader leaves
 `raw-sequences/` in the run directory: a WGS run's inputs are large enough that
@@ -195,9 +209,13 @@ database sheet:
 | Row | File |
 |---|---|
 | Species abundance table | `taxpasta/bracken_*.tsv`, or `taxpasta/kraken2_*.tsv` for a run without Bracken |
-| Per-sample diversity | `alpha_diversity.tsv` |
 | MetaPhlAn profiles | `metaphlan/metaphlan_*_combined_reports.txt` |
+| mOTUs profiles | `motus/motus_*_combined_reports.txt` |
 | Raw sequencing data | hidden, as above |
+
+`alpha_diversity.tsv` is not among them: it is the numbers behind a plot the
+reader is already looking at, and the file index lists it under `Start here` for
+anyone who wants them.
 
 All three open in a tab rather than downloading, which is what
 [their content types](../results/index.md#what-a-link-does-when-you-click-it)
@@ -252,6 +270,13 @@ Profiling databases come from
 | kraken2 | `pluspf_20260626` | RefSeq archaea, bacteria, viral, plasmid, human, UniVec_Core, protozoa, fungi. `db_type` is `short;long` |
 | bracken | `pluspf_20260626_bracken` | same directory as the kraken2 row; `db_params` is `;-r 150` |
 | metaphlan | `mpa_vJun23_CHOCOPhlAnSGB_202403` | `db_type` is `short` |
+| motus | `db_mOTU_v3.1.0` | `db_path` ends in `db_mOTU`; `db_type` is `short;long` |
+
+**The mOTUs `db_path` has to end in a directory called `db_mOTU`.** mOTUs
+resolves its own files relative to that name, so the release directory holds one
+rather than being one: `db/motus/db_mOTU_v3.1.0/db_mOTU`. The `db_name` beside it
+is taxprofiler's label, not mOTUs' — it names the output folder and every file
+in it, which is why it carries the version.
 
 **Bracken's `db_params` must contain a semicolon**, which splits kraken2's
 parameters from bracken's. That is the only part of the field that is required —
@@ -320,6 +345,64 @@ the worse trade: it gates the whole subworkflow, and would take
 it, along with their MultiQC sections.
 
 
+## Diversity and coverage
+
+**Shannon, Simpson and Pielou are not reported for a shotgun run.** They were,
+and they were misleading: around half the reads of a WGS sample routinely reach
+no taxon at all, and an index computed over only the half PlusPF happens to name
+describes the database as much as it describes the sample. Two samples can differ
+in "diversity" because one is better represented in RefSeq than the other.
+
+Two tools that do not depend on a classification answer that instead, and the
+Overview's diversity chart is drawn from them:
+
+| Reading | From | What it says |
+|---|---|---|
+| Nonpareil diversity (Nd) | nonpareil | How varied the community is, on a log scale, from how often the same sequence recurs |
+| Estimated coverage | nonpareil | What share of the community the reads reached |
+| Effort for 95% coverage | nonpareil | How much sequencing that sample would take to get there |
+| Observed mOTUs | mOTUs | Species-level clusters found in universal marker genes |
+| Read depth | kraken2 | The reads the estimates above were measured at |
+
+**Nonpareil never looks at a database.** It measures redundancy directly:
+how often a read has already been seen in the same dataset. A sample whose reads
+keep repeating has been sequenced deeply relative to its diversity; one whose
+reads are all new has not. That gives both a diversity index and — the reading a
+requester asks for without knowing its name — how much of the community the
+sequencing actually reached, and how much more it would take.
+
+**mOTUs is the richness count beside it.** It profiles ten universal
+single-copy marker genes rather than whole genomes, so it resolves species that
+have no assembled reference at all, which is where a Kraken2 database is blind by
+construction. Its profiles are published and merged like any other classifier's;
+what the diversity chart takes from them is one number per sample, the count of
+clusters with a non-zero read count.
+
+Three things about where taxprofiler 2.0.1 wires nonpareil are worth knowing
+before quoting its numbers, none of which we can change without patching the
+pipeline:
+
+- **It runs before host removal.** Nonpareil sees the reads fastp left, so on a
+  `Human + PhiX` run the host reads are still in what it measures. Coverage and
+  Nd for a host-heavy sample describe the sample *including* its host.
+- **It reads R1 only.** For paired data the module is handed the first mate. The
+  effort it reports is therefore about half the bases the sample was sequenced
+  at, and `effort_gbp` in the published table is what nonpareil saw rather than
+  what the sequencer produced.
+- **It runs per run, not per sample.** Its curves are fitted before runs are
+  merged, so a sample sequenced twice has two of them.
+  [`taxprofiler_composition.sh`](../results/composition.md) keeps the deepest —
+  every one of these readings saturates with effort, so the deepest run is the
+  best-supported estimate of the same community, and averaging two curves fitted
+  at different depths would not mean anything.
+
+All of it lands in `alpha_diversity.tsv`, one row per sample, with the model fit
+nonpareil reported for that curve beside each estimate — a low `model_fit` is how
+a reader knows not to trust the Nd next to it. A run that produced neither tool's
+output still gets its composition plotted; the Overview simply drops its
+diversity half rather than plotting read depth and calling it diversity.
+
+
 ## Resource limits
 
 taxprofiler has its own
@@ -329,11 +412,17 @@ template, which dropped `params.max_cpus` / `max_memory` / `max_time` in favour
 of `process.resourceLimits`; the `params` block in `config/slurm.config` sets
 nothing taxprofiler reads.
 
-Kraken2, MetaPhlAn and the host-depletion aligner are sized against the node
-rather than left on nf-core's `process_high` label. 16 cpus each puts two of any
-of them on a 32-core node with no cores stranded. Kraken2's memory is the figure
-to watch: it reads `hash.k2d` into its own heap, 110 GB for PlusPF, so the
+Kraken2, MetaPhlAn, mOTUs and the host-depletion aligner are sized against the
+node rather than left on nf-core's `process_high` label. 16 cpus each puts two of
+any of them on a 32-core node with no cores stranded. Kraken2's memory is the
+figure to watch: it reads `hash.k2d` into its own heap, 110 GB for PlusPF, so the
 reservation is 128 GB.
+
+**Nonpareil is given a memory reservation it will actually use.** The module
+passes `task.memory` straight to nonpareil's `-R`, which is the ceiling nonpareil
+sizes its k-mer table against, so the 64 GB reserved for it is a budget rather
+than a headroom estimate. Reserving less is a coarser estimate rather than a
+failed task.
 
 Nothing copies a database. Nextflow stages inputs as absolute symlinks
 (`stageInMode` defaults to `symlink`) and `scratch` copies only declared
@@ -350,13 +439,13 @@ databases and
 [`build_host_reference.sh`](../../scripts/build_host_reference.sh) for the host
 references — each of which verifies every download against the publisher's own
 checksums and writes a manifest beside its output. Each is a Slurm job; run them
-from the login node. Steps 1–2 and 3–5 are
+from the login node. Steps 1–3 and 4–6 are
 independent of each other and can run concurrently.
 
-Total: about 144 GB of profiling database and 19 GB of host references — each
+Total: about 148 GB of profiling database and 19 GB of host references — each
 mammalian reference is ~14 GB, being a 3 GB FASTA, a 4 GB bowtie2 index and a
 7 GB minimap2 index — and roughly four hours of wall time dominated by the two
-mammalian bowtie2 builds.
+mammalian bowtie2 builds. Nonpareil has no setup step: it needs no database.
 
 Every script refuses to overwrite existing output, so re-running a completed step
 is safe. To rebuild one, delete its output first.
@@ -380,7 +469,20 @@ sbatch --job-name=db-kraken2 --cpus-per-task=4 --mem=8G --time=24:00:00 --output
 sbatch --job-name=db-metaphlan --cpus-per-task=4 --mem=8G --time=24:00:00 --output=/data/prod/nextflow/log/db_%j.out /data/prod/nextflow/scripts/fetch_taxprofiler_db.sh metaphlan
 ```
 
-### 3. Host reference — PhiX only
+### 3. mOTUs — db_mOTU_v3.1.0
+
+3.1 GB from Zenodo, unpacking to ~3.5 GB. This is the archive `motus downloadDB`
+fetches for mOTUs 3.1.0, verified against the same md5 that command checks
+(`f841c36150025af837f7a9a358c9a3c3`), so what lands is what that command would
+have installed. The script writes `db_mOTU_versions` afterwards exactly as
+`downloadDB` writes it — the archive does not carry a usable one, and mOTUs
+refuses to profile without it.
+
+```bash
+sbatch --job-name=db-motus --cpus-per-task=4 --mem=8G --time=24:00:00 --output=/data/prod/nextflow/log/db_%j.out /data/prod/nextflow/scripts/fetch_taxprofiler_db.sh motus
+```
+
+### 4. Host reference — PhiX only
 
 Seconds. Used by the "PhiX" answer, and by "Human + PhiX" and "Mouse + PhiX" as one
 half of their combined references.
@@ -389,7 +491,7 @@ half of their combined references.
 sbatch --job-name=ref-phix --cpus-per-task=32 --mem=64G --time=12:00:00 --output=/data/prod/nextflow/log/ref_%j.out /data/prod/nextflow/scripts/build_host_reference.sh phix GCF_000819615.1
 ```
 
-### 4. Host reference — human + PhiX
+### 5. Host reference — human + PhiX
 
 One to two hours, ~4 GB of index. Used by the "Human + PhiX" answer.
 
@@ -397,7 +499,7 @@ One to two hours, ~4 GB of index. Used by the "Human + PhiX" answer.
 sbatch --job-name=ref-chm13v2phix --cpus-per-task=32 --mem=64G --time=12:00:00 --output=/data/prod/nextflow/log/ref_%j.out /data/prod/nextflow/scripts/build_host_reference.sh chm13v2phix GCF_009914755.1 GCF_000819615.1
 ```
 
-### 5. Host reference — mouse + PhiX
+### 6. Host reference — mouse + PhiX
 
 Same again. Used by the "Mouse + PhiX" answer.
 
@@ -405,7 +507,7 @@ Same again. Used by the "Mouse + PhiX" answer.
 sbatch --job-name=ref-grcm39phix --cpus-per-task=32 --mem=64G --time=12:00:00 --output=/data/prod/nextflow/log/ref_%j.out /data/prod/nextflow/scripts/build_host_reference.sh grcm39phix GCF_000001635.27 GCF_000819615.1
 ```
 
-### 6. Verify
+### 7. Verify
 
 Each host reference should show six `.bt2` files, and each database a manifest.
 
@@ -421,7 +523,7 @@ jq -r '"\(.name)\t\([.sources[].url] | join(" "))"' /data/prod/nextflow/db/*/*.m
 the `.mmi` is missing, since those are what `BOWTIE2_ALIGN` and `MINIMAP2_ALIGN`
 look for.
 
-### 7. Register the pipeline in Wrike
+### 8. Register the pipeline in Wrike
 
 `taxprofiler` is one of the "Nextflow Pipeline" options on the "Bioinformatics
 Pipeline" request form, and picking it asks the "Taxprofiler --hostremoval_reference" follow-up

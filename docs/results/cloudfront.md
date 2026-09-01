@@ -26,8 +26,8 @@ Every link this system writes names the file outright — a folder row in a
 listing points at `subfolder/directory_listing.html`, not at `subfolder/`. The
 function is for the links it does *not* write: the folder links inside
 nf-core's own report, and a reader editing the address bar. Naming the file is
-also what lets an unpacked copy of [the download zip](downloads.md) browse the
-same way the published run does, with no server involved at all.
+also what lets an unpacked copy of [`dashboard.zip`](../operations/globus.md)
+browse the same way the published run does, with no server involved at all.
 
 ## The function
 
@@ -109,13 +109,10 @@ runtime **cloudfront-js-2.0**.
     | Cache behavior | **Default (\*)** |
 
 **Associate it with the default behavior only.** A CloudFront function is
-configured per cache behavior, and the `/download/*` behavior that serves
-[the whole-run download](downloads.md) must not carry this one: a download
-address has no trailing slash and no dot, so rule 1 would redirect every one of
-them once before it reached the Lambda behind it.
-
-If you add behaviors later, the same rule applies — this function belongs on the
-behavior that serves published results, and on no other.
+configured per cache behavior. If you add behaviors later, this function belongs
+on the behavior that serves published results, and on no other — an address with
+no trailing slash and no dot would otherwise be redirected once by rule 1 before
+it reached whatever the new behavior points at.
 
 ## Checking it
 

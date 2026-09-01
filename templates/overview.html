@@ -34,8 +34,9 @@
   in the column and in the tooltip. Under the chart, the caption names the
   tools and the database the numbers came from, for the data that carries it.
 
-  "Download everything" is handed up to the framing page, which packages the run
-  behind a modal of its own.
+  "Download everything" is the archives this run published to the guest
+  collection, which the script at the foot of this page fetches one after
+  another.
 
   Placeholders are COMMON_HEAD, TASK_NAME, SUBTITLE, PLOT_DATA, DOWNLOADS,
   ZIP_BUTTON, STATS, YEAR and FOOTER_NOTE, each wrapped in doubled
@@ -251,25 +252,44 @@ __STATS__
 <div class="tip" hidden id="tip"></div>
 
 <script>
-// "Download everything" is packaged behind a modal on the page this one is
-// framed by, so the reader stays where they are while it builds. Asking for it
-// is all that happens here; anything that cannot ask - an unpacked copy opened
-// off a disk, a middle-click, a reader without scripting - follows the link.
+// "Download everything" is the archives this run published to the guest
+// collection, fetched one after another. Each address ends in "?download", so
+// the collection answers with an attachment and the page the reader is on never
+// goes anywhere - which is why these are started from a link of their own
+// rather than by navigating.
+//
+// The href is the first archive and the rest are in data-download, so anything
+// that cannot run this - a middle-click, a shared link, a reader without
+// scripting - still gets the largest of them.
 (function () {
   var all = document.getElementById("download-all");
 
-  if (!all || window.parent === window) return;
-  if (window.location.protocol !== "https:" && window.location.protocol !== "http:") return;
+  if (!all) return;
+
+  var extra = (all.getAttribute("data-download") || "").split(" ").filter(Boolean);
+
+  if (!extra.length) return;
+
+  // A second navigation started in the same tick is dropped, so they are spaced
+  // out. A browser asked for several files at once may ask the reader to allow
+  // it, which is the reader's call to make.
+  function fetchOne(url) {
+    var link = document.createElement("a");
+
+    link.href = url;
+    link.rel = "noopener";
+    link.style.display = "none";
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(function () { link.parentNode.removeChild(link); }, 1000);
+  }
 
   all.addEventListener("click", function (event) {
-    try {
-      window.parent.postMessage({ nxf: "download", href: all.getAttribute("href") },
-                                window.location.origin);
-    } catch (error) {
-      return;
-    }
-
     event.preventDefault();
+
+    [all.getAttribute("href")].concat(extra).forEach(function (url, index) {
+      setTimeout(function () { fetchOne(url); }, index * 900);
+    });
   });
 })();
 

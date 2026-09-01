@@ -7,17 +7,22 @@ in any process, and it carries no guard. It sets `NEXTFLOW_DIR`, sets the
 nextflow cache directories, unsets any `WRIKE_API_TOKEN` inherited from the
 caller, and then sources five things.
 
-It also sets the two key prefixes everything this system publishes lives under.
+It also sets the prefix everything this system publishes lives under.
 `S3_RUN_PREFIX` (`nxf`) is where a run's results and its landing page go, and
 every script that builds a results path must agree on it — changing it orphans
-everything already published. `S3_ZIP_PREFIX` (`zip`) is where the
-[download Lambdas](results/downloads.md) cache a run packaged as a single file.
-It is set on both of those functions as an environment variable of the same
-name, and the two tear-downs read it here, so that a cached zip is deleted along
-with the results it was made from. **The three copies have to agree**; see
-[Setting up the download URL](results/downloads-setup.md).
+everything already published.
 
-The five it sources:
+Beside it are the four values that address [the Globus guest
+collection](operations/globus.md) a run's two bulky downloads are served from:
+`GLOBUS_DIR` (where the collection is rooted on this host), `GLOBUS_RUN_PREFIX`
+(`nxf` again, the one subpath every run publishes under, and the subpath the
+collection's single anonymous read permission is granted on), `GLOBUS_URL` (the
+domain it answers on) and `GLOBUS_UUID` (the collection itself, used only by the
+commands run by hand on that page). Changing `GLOBUS_RUN_PREFIX` orphans
+everything already published *and* leaves the new path unreadable until a
+permission is granted on it.
+
+The six it sources:
 
 - `secrets/.env` — **credentials only**, never committed:
   - `WRIKE_API_TOKEN` — the bot's, and the only one anything here uses. `.env`

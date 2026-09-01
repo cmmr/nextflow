@@ -32,7 +32,8 @@ a listing of the per-level CSVs beside it.
 `subfolder/directory_listing.html`, not at `subfolder/`, and "up one folder"
 points at `../directory_listing.html`. Nothing depends on the server rewriting a
 folder URL, which is what lets an unpacked copy of
-[the download zip](downloads.md) browse exactly the way the published run does.
+[`dashboard.zip`](../operations/globus.md) browse exactly the way the published
+run does.
 
 **Folder URLs are reachable too**, because CloudFront maps one onto the listing
 beneath it — see [CloudFront](cloudfront.md). That is what catches the folder

@@ -2,14 +2,16 @@
 
 ```
 .env                  Non-secret environment; sources secrets/.env, utilities.sh,
-                      and wrike_api.sh. Sourced by every script here; does not
-                      touch PATH.
+                      globus.sh, and wrike_api.sh. Sourced by every script here;
+                      does not touch PATH.
 secrets/.env          Wrike token and AWS credentials. Credentials only; not in git.
 run                   CLI entry point. Files a Wrike request, then gets out of the way.
 
 scripts/
   utilities.sh             log, warn, fail, the page renderer, and the uid helpers.
                            Sourced by .env.
+  globus.sh                Where a run's two bulky downloads are written and how
+                           they are addressed. Likewise sourced.
   pipeline_params.sh       The parameter map a params file is built from. Likewise.
   wrike_api.sh             Wrike REST helpers and object IDs. Likewise sourced.
   publish_dashboard.sh     Builds the three pages a run is read through, and
@@ -22,6 +24,8 @@ scripts/
   wrike_followup.sh        Reports the outcome to Wrike. Slurm batch job.
   wrike_expiration.sh      Retires dashboards past their date. Daily, login node.
   nextflow_progress.sh     Publishes the live progress page. Backgrounded by wrike_job.sh.
+  prune_results.sh         Deletes what a run wrote for itself out of the results
+                           folder, per templates/<pipeline>/prune.conf.
   index_directories.sh     Writes a listing page into every results folder. Pipeline-agnostic.
   ampliseq_samplesheet.sh  PRE_PROCESS_CMDS for the ampliseq pipeline.
   ampliseq_detect_region.sh   Likewise; measures which 16S region was sequenced.
@@ -33,11 +37,6 @@ scripts/
   build_host_reference.sh     Builds a host-depletion reference. Setup, not part of a run.
   build_16s_reference.sh      Builds the 16S landmarks the region detector aligns to. Likewise.
   fetch_taxprofiler_db.sh     Downloads a taxprofiler database. Likewise.
-
-lambda/               The AWS functions behind the results download URL;
-                      see docs/results/downloads.md.
-  nxf_download.py          Answers /download/<uid>: a redirect, or a waiting page.
-  nxf_download_builder.py  Streams a run's results into one zip in the bucket.
 
 pipelines/            One file per pipeline; see docs/pipelines/index.md.
 config/               Nextflow config, passed to `nextflow run -c`.
@@ -62,9 +61,11 @@ templates/            Web pages published to S3 alongside a run's results.
   listing.html        Folder listing page template.
   ampliseq/
     outputs.conf      What the file index lists for an ampliseq run.
+    prune.conf        What is deleted from an ampliseq results folder first.
     abstract.md       The section ampliseq's own summary report opens with.
   taxprofiler/
     outputs.conf      What the file index lists for a taxprofiler run.
+    prune.conf        What is deleted from a taxprofiler results folder first.
   redesign/
     DESIGN.md         The Alkek design system the pages above are styled to:
                       tokens, type scale, and what each component is for.
@@ -95,8 +96,6 @@ docs/                 Source of the documentation site; one page per file.
     index.md          The dashboard, its file index, and the live progress view.
     browsable-folders.md  Listing pages written into every results folder.
     cloudfront.md     Viewer request function that serves those listing pages.
-    downloads.md      The on-demand zip of a whole run, and the Lambdas behind it.
-    downloads-setup.md  Building that in the AWS console, one time, step by step.
   wrike/
     account.md        The bot account, the space, and the request form.
     status.md         The task Status a run reports its progress as.

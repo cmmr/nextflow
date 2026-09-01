@@ -73,12 +73,36 @@ what was sequenced and writes `detected_params.yaml` — `sequencing_type`,
 `primer_fwd`, `primer_rev`, `skip_cutadapt`, and for ONT `asv_calling` and
 `savont_options` — which `wrike_job.sh` layers over the pipeline's defaults.
 
-[`ampliseq_upload.sh`](../../scripts/ampliseq_upload.sh) zips `raw-sequences/` into the
-results folder (`zip -0` — the reads are already compressed), works out
-[what the Overview plots](../results/composition.md), gives every folder in it a
-listing page, uploads the folder to `s3://$AWS_S3_BUCKET/nxf/<uid>/`, and writes
-the report URL to a Wrike custom field. Nextflow's `work/` directory is
-deliberately left behind.
+[`ampliseq_upload.sh`](../../scripts/ampliseq_upload.sh) zips `raw-sequences/`
+into the run's directory on [the Globus collection](../operations/globus.md)
+(`zip -0` — the reads are already compressed), works out
+[what the Overview plots](../results/composition.md), deletes what the run wrote
+for itself, gives every folder a listing page, uploads the folder to
+`s3://$AWS_S3_BUCKET/nxf/<uid>/`, publishes the whole dashboard as a second zip
+beside the reads, and writes the report URL to a Wrike custom field. Nextflow's
+`work/` directory is deliberately left behind.
+
+**What is deleted first** is named in
+[`templates/ampliseq/prune.conf`](../../templates/ampliseq/prune.conf), and
+[`prune_results.sh`](../results/index.md) takes it out of `results/` outright
+before anything is indexed — so the listings, the file index, the zip and the
+bucket cannot come to describe different things. An amplicon run is small enough
+that little of this is about storage; it is about a file index a reader can read.
+
+| Deleted | Why |
+|---|---|
+| `dada2/chunks/` | DADA2 classifies the ASVs in chunks and concatenates the results. With one chunk — which is every run we do — the chunk and the concatenation are byte-identical to `dada2/ASV_tax*.tsv` beside them. |
+| `dada2/QC/svg/` | The read-quality profiles and fitted error models, published as PDF in the folder above at a twentieth of the size. |
+| `dada2/QC/*plotQualityProfile.txt` | One three-byte file per plot, saying how many files it read. The number is in the plot's own title. |
+| `porechop_abi/*.log` | A few hundred kilobytes per sample of every adapter Porechop considered. What came off is in the MultiQC report, in `multiqc_data/porechop.txt`, and in `overall_summary.tsv`. |
+| `multiqc/multiqc_data/multiqc_data.json`, `multiqc.parquet`, `llms-full.txt`, `multiqc.log` | The whole report encoded again — as JSON, as parquet, as a prompt, and as its debug trace. The per-plot `.txt` files, which are the numbers behind each figure, stay. |
+| `multiqc/multiqc_plots/` | Each of the report's figures rendered again as PNG, SVG and PDF. |
+| `fastqc/*_fastqc.zip` | The same measurements as the `_fastqc.html` published beside it. |
+
+The per-sample FastQC reports themselves are **kept**: MultiQC summarises them
+but does not carry each file's own duplication and overrepresented-sequence
+detail, and they are the closest thing the run publishes to a statement about
+the reads as they arrived.
 
 What the requester actually opens — the landing page, and the live progress view
 it starts out as — is [The results page](../results/index.md). What it offers of
@@ -89,8 +113,9 @@ text file:
 dashboard_view report  "Analysis Report" "summary_report/summary_report.html"
 dashboard_view quality "Quality Control" "multiqc/multiqc_report.html"
 dashboard_index_view   "File Explorer"
-dashboard_button "raw-sequences.zip"
 dashboard_button "qiime2/abundance_tables/feature-table.biom"
+dashboard_bundle "Raw sequencing data" "$FASTQ_URL"
+dashboard_bundle "All result files" "$(globus_run_url "$RUN_ID" dashboard.zip)"
 dashboard_stat_group "READ TOTALS"    "$SEQUENCED"
 dashboard_stat_group "CLASSIFICATION" "$REFERENCE"
 ```

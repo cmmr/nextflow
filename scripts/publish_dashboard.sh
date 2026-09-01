@@ -17,16 +17,23 @@
 #
 # An upload script declares what its pipeline produced and then publishes:
 #
-#   dashboard_reset      <results_dir> <catalog> [glob ...]
-#                                                 the globs being whatever the
-#                                                 upload left behind
+#   dashboard_reset      <results_dir> <catalog> [run_url]
+#                                                 run_url being where the
+#                                                 archives it published to
+#                                                 Globus are served from
 #   dashboard_view       <id> <label> <path>      once per report the bar offers
 #   dashboard_index_view [label]                  where the file index sits in it
 #   dashboard_button     <glob> [label]           once per file the sidebar
 #                                                 offers, under its own name
-#                                                 unless the label says otherwise
+#                                                 unless the label says
+#                                                 otherwise; false when the glob
+#                                                 named nothing
 #   dashboard_link_button <href> <label> [icon]   a link to data held elsewhere,
 #                                                 hidden while <href> is empty
+#   dashboard_bundle     <label> <url>            one of the archives the run
+#                                                 publishes to Globus: a quick
+#                                                 download of its own, and part
+#                                                 of "Download everything"
 #   dashboard_stat_group <heading> [note]         opens a block of the statistics
 #   dashboard_stat_row   <label> <value>          a reading with no bar under it
 #   dashboard_stat_tiles <value|label|tone> ...   a row of counts
@@ -34,28 +41,39 @@
 #   dashboard_stat_bar   <label> <reading> <percent> [tone]
 #                        tone: growth for a share of the reads that were kept;
 #                        a total is left toneless and wears the navy
-#   publish_dashboard <s3_dir> <run_id> <task_name> <subtitle> <pipeline> \
+#   render_dashboard  <run_id> <task_name> <subtitle> <pipeline> \
 #                     <run_date> <sample_count> <expires> [plot_data]
+#   publish_results   <s3_dir>
 #
 # Each of those skips a file the run did not produce, so the pages describe the
 # run rather than the pipeline. Overview is always the first link and the one a
 # reader lands on; the file index is appended to the bar when the pipeline did
-# not say where it goes. Every run also gets a button for the whole of itself as
-# one zip.
+# not say where it goes. "Download everything" takes whatever bundles the run
+# declared, and a run that declared none has no such button.
+#
+# render_dashboard writes the three pages into the results folder rather than
+# straight to S3, so the zip a run publishes to Globus holds the same dashboard
+# the bucket serves: unpack it, open the index.html in it, and every link still
+# resolves.
+# publish_results then uploads the folder, landing the pages last so that
+# nothing they frame is still arriving.
 #
 # The file index comes from the catalog - templates/<pipeline>/outputs.conf -
 # which names paths, globs and folders in the order they should be read, grouped
 # under headings. A folder is listed as one row pointing at the
-# directory_listing.html index_directories.sh wrote into it.
+# directory_listing.html index_directories.sh wrote into it. A path that is an
+# absolute address instead is written as one row leading there, which is how the
+# archives served from Globus are listed among the files they hold.
 #
 # Icons are Material Symbols names, from the font the design system loads:
 # biotech, database, filter_alt, science, folder_zip, data_object and so on.
 #
 # Defines: dashboard_reset, dashboard_view, dashboard_index_view,
-#          dashboard_button, dashboard_link_button, dashboard_stat_group,
-#          dashboard_stat_row, dashboard_stat_tiles, dashboard_stat_chips,
-#          dashboard_stat_bar, publish_dashboard, upload_results_tree,
-#          TEXT_EXTENSIONS, DOWNLOAD_EXTENSIONS
+#          dashboard_button, dashboard_link_button, dashboard_bundle,
+#          dashboard_stat_group, dashboard_stat_row, dashboard_stat_tiles,
+#          dashboard_stat_chips, dashboard_stat_bar, render_dashboard,
+#          publish_results, DASHBOARD_PAGES, TEXT_EXTENSIONS,
+#          DOWNLOAD_EXTENSIONS
 # Requires: aws, GNU find; the escape_html/escape_url/human_size/render_template
 #           helpers from utilities.sh
 # Env:      NEXTFLOW_DIR
@@ -75,6 +93,10 @@ DOWNLOAD_EXTENSIONS=(zip gz bz2 xz tar tgz qza qzv biom rds rda parquet)
 readonly DASHBOARD_NAV_ON="text-on-primary border-b-2 border-secondary-fixed font-bold pb-1 px-2 py-1 rounded text-[13px] tracking-[0.02em] hover:bg-primary-container transition-colors"
 readonly DASHBOARD_NAV_OFF="text-primary-fixed/80 hover:text-on-primary hover:bg-primary-container transition-colors px-2 py-1 rounded text-[13px] tracking-[0.02em] font-medium"
 
+# The three pages this script writes into the results folder. Named here because
+# the upload sends them last, after everything they frame.
+readonly DASHBOARD_PAGES=(overview.html files.html index.html)
+
 DASHBOARD_RESULTS_DIR=""
 DASHBOARD_CATALOG=""
 DASHBOARD_VIEWS=()
@@ -82,44 +104,24 @@ DASHBOARD_DOWNLOADS=""
 DASHBOARD_STATS=""
 DASHBOARD_STAT_GROUP_OPEN=""
 
-# Globs, relative to the results folder, naming what the upload was told to leave
-# behind - so the file index counts what a reader will actually find rather than
-# what is on the disk here
-DASHBOARD_SKIPPED=()
+# The archives this run published to Globus, as "<label>|<url>" - the two
+# downloads "Download everything" starts, and a quick download each
+DASHBOARD_BUNDLES=()
+
+# Where this run's archives are served from, which is what a catalog entry
+# beginning __RUN_URL__ is read against. Empty for a run that published none,
+# which leaves those entries naming nothing and so out of the index.
+DASHBOARD_RUN_URL=""
 
 dashboard_reset() {
     DASHBOARD_RESULTS_DIR="${1%/}"
     DASHBOARD_CATALOG="$2"
+    DASHBOARD_RUN_URL="${3:-}"
     DASHBOARD_VIEWS=()
     DASHBOARD_DOWNLOADS=""
     DASHBOARD_STATS=""
     DASHBOARD_STAT_GROUP_OPEN=""
-
-    shift 2
-    DASHBOARD_SKIPPED=("$@")
-}
-
-# True when a path, named from the results folder, is one the upload was told to
-# leave behind. The glob is matched unquoted, so a "*" in it crosses folders the
-# way it does in the argument aws was given.
-dashboard_is_skipped() {
-    local name="$1" glob
-
-    for glob in ${DASHBOARD_SKIPPED[@]+"${DASHBOARD_SKIPPED[@]}"}; do
-        [[ "$name" == $glob ]] && return 0
-    done
-
-    return 1
-}
-
-# The find predicates that leave the unpublished files out of a count of a
-# folder, one argument to a line
-dashboard_skip_predicates() {
-    local glob
-
-    for glob in ${DASHBOARD_SKIPPED[@]+"${DASHBOARD_SKIPPED[@]}"}; do
-        printf '!\n-path\n%s\n' "$DASHBOARD_RESULTS_DIR/$glob"
-    done
+    DASHBOARD_BUNDLES=()
 }
 
 # True when a path is one a browser should be told to save
@@ -191,22 +193,21 @@ dashboard_sample_pill() {
 }
 
 # One quick download per file matching a glob. A file whose name is the name of
-# the thing - raw-sequences.zip - is offered under it; anything a pipeline names
-# after the tool, the database and the format it came out of is offered under the
-# label instead, since that string is what the file index is for. A label given
-# for a glob matching several files is used for each of them, so a label belongs
-# to a glob that names one.
+# the thing is offered under it; anything a pipeline names after the tool, the
+# database and the format it came out of is offered under the label instead,
+# since that string is what the file index is for. A label given for a glob
+# matching several files is used for each of them, so a label belongs to a glob
+# that names one.
 dashboard_button() {
     local pattern="$1" label="${2:-}"
     local path name text
+    local offered=1
 
     for path in "$DASHBOARD_RESULTS_DIR"/$pattern; do
         [[ -r "$path" ]] || continue
 
         name=${path#"$DASHBOARD_RESULTS_DIR/"}
         text=${label:-${name##*/}}
-
-        dashboard_is_skipped "$name" && continue
 
         DASHBOARD_DOWNLOADS+="<a class=\"flex items-center justify-between gap-2 px-2 py-1.5 rounded hover:bg-surface-container transition-colors group\""
         DASHBOARD_DOWNLOADS+=" href=\"$(escape_url "$name")\"$(dashboard_link_attributes "$name")>"
@@ -217,7 +218,12 @@ dashboard_button() {
         DASHBOARD_DOWNLOADS+=" title=\"$(escape_html "$name")\">$(escape_html "$text")</span></span>"
         DASHBOARD_DOWNLOADS+="<span class=\"material-symbols-outlined text-[18px] shrink-0 text-on-surface-variant opacity-0 group-hover:opacity-100 transition-opacity\">"
         DASHBOARD_DOWNLOADS+="file_download</span></a>"
+        offered=0
     done
+
+    # Whether the glob named anything, so a caller can offer a second choice for
+    # the run that produced neither
+    return $offered
 }
 
 # One quick download pointing at a whole address of its own rather than at a file
@@ -225,12 +231,22 @@ dashboard_button() {
 # leaves the row in the page but hidden, so filling the address in is the whole
 # of turning the link on. Hidden inline rather than by class, since the row's
 # own "flex" would win over a utility class.
+#
+# An address the collection answers as an attachment - anything ending in
+# "?download" - is left to download in place; anything else opens outside the
+# frame the page is read in.
 dashboard_link_button() {
     local href="$1" label="$2" icon="${3:-folder_zip}"
-    local attributes
+    local attributes trailing="open_in_new"
 
     if [[ -n "$href" ]]; then
-        attributes=" href=\"$(escape_html "$href")\" target=\"_blank\" rel=\"noopener\""
+        attributes=" href=\"$(escape_html "$href")\""
+
+        if [[ "$href" == *"?download" ]]; then
+            trailing="file_download"
+        else
+            attributes+=" target=\"_blank\" rel=\"noopener\""
+        fi
     else
         attributes=' hidden style="display: none;"'
     fi
@@ -242,21 +258,52 @@ dashboard_link_button() {
     DASHBOARD_DOWNLOADS+="$(escape_html "$icon")</span>"
     DASHBOARD_DOWNLOADS+="<span class=\"text-[13px] leading-5 text-on-surface truncate\">$(escape_html "$label")</span></span>"
     DASHBOARD_DOWNLOADS+="<span class=\"material-symbols-outlined text-[18px] shrink-0 text-on-surface-variant opacity-0 group-hover:opacity-100 transition-opacity\">"
-    DASHBOARD_DOWNLOADS+="open_in_new</span></a>"
+    DASHBOARD_DOWNLOADS+="$trailing</span></a>"
 }
 
-# The button for the whole run as one zip, which every run has. Its address is
-# the only absolute link on the page: the zip is served by a behavior of the
-# distribution rather than sitting beside the page, so it is also the one link
-# that does not resolve in an unpacked copy.
+# One archive the run published to the guest collection: the reads it was given,
+# and the whole of this dashboard. Each is a quick download of its own and one
+# of the files "Download everything" starts, so the button and the rows beside
+# it cannot come to name different things.
+dashboard_bundle() {
+    local label="$1" url="$2"
+
+    [[ -n "$url" ]] || return 0
+
+    DASHBOARD_BUNDLES+=("$label|$url")
+    dashboard_link_button "$url" "$label"
+}
+
+# The button for everything the run published as archives, or nothing at all
+# when it published none. Its addresses are the only absolute links on the page:
+# the archives are served from the guest collection rather than sitting beside
+# the page, so they are also the links that do not resolve in an unpacked copy.
 #
-# The landing page catches the click and packages the run behind a modal. The
-# href is what everything else follows - a middle-click, a shared link, a reader
-# without scripting - and answers with a redirect or the page that waits.
+# The href is the first of them, which is what everything that cannot run a
+# script follows - a middle-click, a shared link, a reader without scripting.
+# The rest are carried in data-download, and the page's own script starts them
+# one after another.
 dashboard_zip_button() {
+    local entry url first="" rest=""
+
+    for entry in ${DASHBOARD_BUNDLES[@]+"${DASHBOARD_BUNDLES[@]}"}; do
+        url=${entry#*|}
+
+        if [[ -z "$first" ]]; then
+            first="$url"
+        else
+            rest+="${rest:+ }$url"
+        fi
+    done
+
+    [[ -n "$first" ]] || return 0
+
     printf '<a class="w-full bg-primary text-on-primary px-3 py-2 rounded-lg text-[13px] font-semibold hover:bg-primary-container transition-colors flex items-center justify-center gap-2"'
-    printf ' id="download-all" href="/download/%s" target="_blank" rel="noopener">' "$(escape_url "$1")"
-    printf '<span class="material-symbols-outlined text-[18px]">archive</span>Download everything</a>'
+    printf ' id="download-all" href="%s"' "$(escape_html "$first")"
+
+    [[ -n "$rest" ]] && printf ' data-download="%s"' "$(escape_html "$rest")"
+
+    printf '><span class="material-symbols-outlined text-[18px]">archive</span>Download everything</a>'
 }
 
 # Close whichever block of the statistics is open, so the next heading starts
@@ -492,12 +539,24 @@ dashboard_trim() {
     printf '%s' "$s"
 }
 
-# One row of the file index: what it is called, what it holds, and how big it is
+# One row of the file index: what it is called, what it holds, and how big it is.
+# An href that is already a whole address is written as it stands - it was built
+# here, not read off a disk - and always downloads, since the only such rows are
+# the archives the collection serves as attachments.
 dashboard_row() {
     local href="$1" label="$2" description="$3" size="$4" tag="$5"
+    local link attributes
+
+    if [[ "$href" == http://* || "$href" == https://* ]]; then
+        link="$href"
+        attributes=""
+    else
+        link="$(escape_url "$href")"
+        attributes="$(dashboard_link_attributes "$href")"
+    fi
 
     printf '<tr><td class="name"><a href="%s"%s>%s</a>' \
-        "$(escape_url "$href")" "$(dashboard_link_attributes "$href")" "$(escape_html "$label")"
+        "$link" "$attributes" "$(escape_html "$label")"
 
     [[ -n "$tag" ]] && printf '<span class="tag">%s</span>' "$(escape_html "$tag")"
 
@@ -506,13 +565,17 @@ dashboard_row() {
 }
 
 # Every row one catalog entry produces. A folder is one row naming its listing
-# page; a glob is one row per file it matches, in name order.
+# page; a glob is one row per file it matches, in name order; an absolute address
+# is one row leading there, for an archive published to the guest collection
+# rather than into the results folder.
 dashboard_entry() {
     local path="$1" label="$2" description="$3"
     local full match name count size
-    local -a skip=()
 
-    mapfile -t skip < <(dashboard_skip_predicates)
+    if [[ "$path" == http://* || "$path" == https://* ]]; then
+        dashboard_row "$path" "${label:-${path##*/}}" "$description" "" ""
+        return 0
+    fi
 
     if [[ "$path" == */ ]]; then
         full="$DASHBOARD_RESULTS_DIR/${path%/}"
@@ -520,10 +583,8 @@ dashboard_entry() {
         [[ -d "$full" ]] || return 0
 
         # The listing pages index_directories.sh writes are how the folder is
-        # read, not something the run produced, and neither is anything the
-        # upload was told to leave behind
-        count=$(find -L "$full" -type f ! -name directory_listing.html \
-            ${skip[@]+"${skip[@]}"} | wc -l)
+        # read, not something the run produced
+        count=$(find -L "$full" -type f ! -name directory_listing.html | wc -l)
         (( count > 0 )) || return 0
 
         dashboard_row "${path}directory_listing.html" "${label:-$path}" "$description" \
@@ -542,7 +603,6 @@ dashboard_entry() {
         # produced, so a glob over a folder's web pages does not catch them
         [[ "${name##*/}" == directory_listing.html ]] && continue
 
-        dashboard_is_skipped "$name" && continue
         match="$label"
         size=""
 
@@ -597,6 +657,10 @@ dashboard_index() {
 
         [[ -n "$group" && -n "$path" ]] || continue
 
+        # An entry for something served from the guest collection rather than
+        # published into the results folder
+        path=${path//__RUN_URL__/$DASHBOARD_RUN_URL}
+
         if [[ "$group" != "$current" ]]; then
             dashboard_end_group "$current" "$group_rows"
             current="$group"
@@ -644,7 +708,7 @@ render_overview() {
         SUBTITLE    "$(escape_html "$subtitle")" \
         PLOT_DATA   "$(dashboard_plot_data "$plot_data")" \
         DOWNLOADS   "$(dashboard_downloads)" \
-        ZIP_BUTTON  "$(dashboard_zip_button "$run_id")" \
+        ZIP_BUTTON  "$(dashboard_zip_button)" \
         STATS       "$(dashboard_stats_card "$sample_count")" \
         YEAR        "$(date '+%Y')" \
         FOOTER_NOTE "$(dashboard_footer_note "$run_date" "$pipeline" "$run_id")"
@@ -672,18 +736,23 @@ render_files() {
         FOOTER_NOTE "$(dashboard_footer_note "$run_date" "$pipeline" "$run_id")"
 }
 
-# Render the three pages and upload them to the run's prefix, the landing page
-# last so that nothing it frames is still arriving. Prints whatever failed.
+# Write the three pages into the results folder, from what the run produced and
+# what the upload script declared. Prints whatever failed.
+#
+# Into the folder rather than straight to the bucket, because the zip published
+# to the guest collection is made from this folder: a reader who unpacks it gets
+# the same dashboard, and the pages the bucket serves are the same bytes rather
+# than a second rendering of them.
 #
 # subtitle names the analysis the pipeline performed and run_date is already
 # written out for a reader; sample_count is a bare number, or empty for a run
-# that never recorded one; plot_data is the file ampliseq_composition.sh wrote,
+# that never recorded one; plot_data is the file the composition script wrote,
 # or empty for a pipeline that draws nothing.
-publish_dashboard() {
-    local s3_dir="${1%/}" run_id="$2" task_name="$3" subtitle="$4" pipeline="$5"
-    local run_date="$6" sample_count="$7" expires="$8" plot_data="${9:-}"
+render_dashboard() {
+    local run_id="$1" task_name="$2" subtitle="$3" pipeline="$4"
+    local run_date="$5" sample_count="$6" expires="$7" plot_data="${8:-}"
 
-    local name page output
+    local name page
 
     for name in overview files shell; do
         case "$name" in
@@ -700,34 +769,30 @@ publish_dashboard() {
 
         [[ "$name" == "shell" ]] && name="index"
 
-        # --content-type because reading the body from stdin leaves aws nothing
-        # to guess from, and a page served as binary downloads instead of
-        # rendering
-        if ! output=$(printf '%s\n' "$page" \
-                | aws s3 cp - "$s3_dir/$name.html" --content-type "text/html" 2>&1); then
-            printf '%s' "$output"
+        if ! printf '%s\n' "$page" > "$DASHBOARD_RESULTS_DIR/$name.html"; then
+            printf 'The %s page could not be written into %s.' "$name" "$DASHBOARD_RESULTS_DIR"
             return 1
         fi
     done
 }
 
-# Copy a results folder to its prefix in two passes, so that the tables, logs
-# and configuration files a reader clicks open in the browser instead of
-# downloading. aws types an object from its name, and only recognises some of
-# these; the rest arrive as binary and are saved.
+# Copy the results folder to its prefix, then the three pages on top of it.
 #
-# Anything matching one of the globs after the destination is left behind. They
-# are for the files a pipeline writes for itself rather than for whoever asked
-# for the run - a re-run's cached alignments, a report's own machine-readable
-# copy - which on a shotgun run are most of what it produces by size. Each is
-# read relative to the results folder, and a "*" in one crosses folders. The
-# same globs go to index_directories.sh and dashboard_reset, so the listings and
-# the file index describe what was published rather than what was on the disk.
+# The copy runs in two passes, so that the tables, logs and configuration files
+# a reader clicks open in the browser instead of downloading: aws types an
+# object from its name and only recognises some of these, and the rest arrive as
+# binary and are saved.
+#
+# The pages go last and on their own, so that nothing they frame is still
+# arriving when a reader is handed them - index.html overwrites the progress
+# page nextflow_progress.sh published to the same key, which is how someone
+# watching the run is handed the report.
 #
 # Prints whatever aws had to say about a failure.
-upload_results_tree() {
-    local src="${1%/}" dest="${2%/}"
-    local extension glob output
+publish_results() {
+    local dest="${1%/}"
+    local src="$DASHBOARD_RESULTS_DIR"
+    local extension page output
     local -a other=() text=(--exclude "*")
 
     for extension in "${TEXT_EXTENSIONS[@]}"; do
@@ -736,11 +801,9 @@ upload_results_tree() {
     done
 
     # After the includes, which is what lets an exclude overrule one
-    shift 2
-
-    for glob in "$@"; do
-        other+=(--exclude "$glob")
-        text+=(--exclude "$glob")
+    for page in "${DASHBOARD_PAGES[@]}"; do
+        other+=(--exclude "$page")
+        text+=(--exclude "$page")
     done
 
     if ! output=$(aws s3 cp "$src/" "$dest/" --recursive "${other[@]}" 2>&1); then
@@ -753,4 +816,16 @@ upload_results_tree() {
         printf '%s' "$output"
         return 1
     fi
+
+    # index.html is last in DASHBOARD_PAGES, so the page that frames the other
+    # two is the last object of the run to land
+    for page in "${DASHBOARD_PAGES[@]}"; do
+        [[ -f "$src/$page" ]] || continue
+
+        if ! output=$(aws s3 cp "$src/$page" "$dest/$page" \
+                --content-type "text/html" 2>&1); then
+            printf '%s' "$output"
+            return 1
+        fi
+    done
 }

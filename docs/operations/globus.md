@@ -1,12 +1,14 @@
 # Globus
 
-An alternative to [the results page](../results/index.md) for handing someone a
-dataset directly: rather than publishing to S3 behind a dashboard, a file or
-directory already on the cluster is shared straight from BCM's Globus Connect
-Server endpoint (`bcmdtn2`, mapped collection `BCMDTN2-POSIX`) as its own guest
-collection. Nothing here is invoked by a pipeline — it is an admin tool, run by
-hand, for the case a dashboard doesn't fit: sharing something that never went
-through `publish_dashboard.sh`, or a dataset with no expiration date in mind.
+Where the two bulky downloads of every run are served from, and the tool for
+handing someone a dataset directly. Files already on the cluster are shared
+straight out of BCM's Globus Connect Server endpoint (`bcmdtn2`, mapped
+collection `BCMDTN2-POSIX`) through a guest collection, `CMMR-Nextflow` — no
+upload, no egress, and at the cluster's own bandwidth.
+
+Both pipelines publish here: a run's `raw-sequences.zip` and `dashboard.zip` go
+into `$GLOBUS_DIR/nxf/<uid>/`, and [the results page](../results/index.md)
+links to them. Everything else about a run still publishes to S3.
 
 `globus-cli` is what does this from the command line. It is a pure-Python
 package with no compiled release, so it is installed into its own venv rather
@@ -79,109 +81,186 @@ confirms which):
 bin/globus whoami
 ```
 
-## How the pipeline authenticates
+## The pipeline needs no Globus credentials
 
-### Currently: `dpsmith`'s own login
+Nothing in the pipeline shells out to `globus`. It writes files into
+`$GLOBUS_DIR` as an ordinary Unix user and the collection serves them, so there
+is no token for a run to hold and nothing to expire in the middle of one. The
+`globus login` above is for the commands on this page — granting the permission,
+listing it, retiring it — which are run by hand.
 
-The pipeline does not have its own Globus identity yet. It runs as `dpsmith`
-and relies on the refresh token `bin/globus login` cached in that account's
-`~/.globus/` — the same login used interactively above, not a separate
-credential set up for automation. This works and is what's running today, with
-three things worth knowing about it as a stopgap rather than a destination:
+That is a deliberate consequence of the one-permission scheme below. Under a
+grant per run the pipeline would have to authenticate to Globus Auth on every
+publish and every tear-down, which would mean either a cached refresh token in
+one person's home directory or a confidential client registered for the
+purpose, and a run failing on an expired credential having produced its results.
+As it stands, the only thing that can break the downloads is the `/nxf/` grant
+being removed, which is visible in one command.
 
-- Every share the pipeline creates is attributed to `dpsmith`, not to the
-  pipeline — there's no way to tell, from a collection's `Original Owner`,
-  whether a human or the automation made it.
-- It only keeps working as long as *someone* logs in as `dpsmith` at least
-  once every six months — the refresh token's inactivity limit — and as long
-  as `dpsmith`'s account exists at all.
-- It has to run under `dpsmith`'s Unix account specifically, since the cached
-  token lives in that account's home directory.
+## What the pipeline publishes here
 
-### Recommended: migrate to a service identity
+Every run writes two files into the collection, and links to them from its
+dashboard:
 
-The intended mechanism for a script is a **confidential client**: a Globus
-Auth service identity (a client ID and secret) that represents the pipeline
-itself, the same way `bcmdtn2`'s own `Original Owner` —
-`cb94237b-af5f-41fa-b161-bd4289338137@clients.auth.globus.org` — is a service
-identity for the endpoint rather than a person. `globus-cli` picks one up from
-two environment variables and skips `login` entirely when both are set:
+| | |
+|---|---|
+| `$GLOBUS_DIR/nxf/<uid>/raw-sequences.zip` | the reads the run was given, exactly as they went in |
+| `$GLOBUS_DIR/nxf/<uid>/dashboard.zip` | the whole `results/` folder, the three pages it is read through included |
+
+Both are served as
+`$GLOBUS_URL/nxf/<uid>/<file>?download`, which is what the Overview's
+**Quick Downloads** rows point at and what its **Download everything** button
+fetches, one after the other. `?download` is what makes the collection answer
+with an attachment rather than with the file itself.
+
+They are written straight onto the collection's own filesystem — which is on
+this cluster — so publishing them is a `zip` into place rather than an upload,
+and nothing about them costs S3 storage or egress. They are also the two things
+most likely to be fetched whole and least likely to be read through a browser,
+which is why they are the ones that live here rather than in the bucket. The
+analysis itself still publishes to S3, where the dashboard is served from.
+
+[`scripts/globus.sh`](../../scripts/globus.sh) is the whole of the mechanism:
+`globus_run_dir`, `globus_run_url`, `globus_archive` and `globus_discard_run`,
+sourced by `.env` and called from each pipeline's upload script. The three
+values it reads — `GLOBUS_DIR`, `GLOBUS_RUN_PREFIX` and `GLOBUS_URL` — are set
+in [`.env`](../configuration.md), and `GLOBUS_UUID` beside them is for the
+commands on this page rather than for the pipeline, which never shells out to
+`globus`.
+
+`globus_discard_run` is called from both places a run is torn down —
+[`wrike_expiration.sh`](expiration.md) when its date arrives, and
+`wrike_delete_handler.sh` when its task goes away — so the archives go on the
+same pass as the dashboard that linked to them.
+
+## One permission, every run
+
+**A run is a directory under `/nxf/`, not a permission of its own.** One
+anonymous read grant on `/nxf/` covers all of them:
 
 ```bash
-export GLOBUS_CLI_CLIENT_ID=<client-id>
-export GLOBUS_CLI_CLIENT_SECRET=<client-secret>
+globus endpoint permission create "$GLOBUS_UUID:/nxf/" --anonymous --permissions r
 ```
 
-Register the client at `app.globus.org/settings/developers`, then store the
-two values in [`secrets/.env`](../configuration.md) alongside
-`WRIKE_API_TOKEN` — credentials only, never committed, sourced by `.env`
-before anything else runs.
+That is granted once, by hand, and nothing in the pipeline creates, lists or
+deletes permissions. The alternative — a grant per run, created at publish time
+and revoked at expiration — buys nothing, because what keeps one requester out
+of another's files is not the permission:
 
-A fresh client isn't automatically allowed to create guest collections or set
-permissions under `BCMDTN2-POSIX` just because it has valid credentials — the
-storage gateway has to recognize it first (mapped to a local user, or granted
-a role on the mapped collection), the same way any identity has to be before
-it can act there. That's a change on the endpoint side, so it's a request to
-whoever administers `bcmdtn2` for BCM, and it's the blocker on doing this
-migration today rather than a technical one on the pipeline's side.
+1. **HTTPS access to a Globus collection has no directory listing, at all.**
+   Nobody can browse from `/nxf/` to enumerate the run directories under it —
+   there is no "list files" HTTPS endpoint to ask. A per-run grant would not
+   hide anything a shared one exposes.
+2. **Each run directory is named with its uid**, the eight base32 characters
+   [`derive_uid`](../conventions.md) works out by HMAC from the Wrike task ID.
+   Knowing one uid tells you nothing about any other, and knowing a task ID is
+   not enough to compute where its results are.
 
-Not yet done — tracked as follow-up work, not a problem with the current
-setup.
+It also sidesteps a cap and a failure mode. [A guest collection holds at most
+1,000 permissions](https://docs.globus.org/api/transfer/permissions/), which a
+grant per run would reach; and a permission left behind by a tear-down that
+failed part way through would leave a stale grant nothing cleans up. With one
+grant there is nothing per run to get out of step — deleting the directory is
+the whole of retiring a run's downloads.
 
-## Sharing something by direct link only
+The collection's own `Visible To` setting is a third, unrelated thing: it
+controls whether *the collection itself* — `CMMR-Nextflow` as a whole — is
+listed when someone browses BCM's collections. It says nothing about what is
+inside it.
 
-A guest collection has two settings that matter here, and they're
-independent: whether it's **discoverable** (listed when someone browses
-BCM's collections) and whether it's **anonymous** (downloadable with no
-Globus login at all). A share that's public-by-link only wants the collection
-private and the permission anonymous — the opposite pairing from
-`CMMR-Nextflow`, which is `Visible To: Public`.
+## Setting that permission up
 
-**1. Find the mapped collection's UUID.** Guest collections are created as a
-child of `BCMDTN2-POSIX`, not of `bcmdtn2` itself. If you don't have that UUID
-memorized, read it off any existing guest collection you administer:
+`CMMR-Nextflow` (`906ce447-a02f-4b41-a7f2-6237c243cb8a`) already exists, and
+the grant below is already in place. This is what to repeat if the collection
+is ever rebuilt, or if `GLOBUS_RUN_PREFIX` is ever changed to something other
+than `nxf`.
+
+**Prerequisite, one time:** `collection show` and other GCS-level management
+calls need a separate consent from your base login, scoped to the specific
+GCS endpoint:
+
+```bash
+bin/globus login --gcs cb94237b-af5f-41fa-b161-bd4289338137
+```
+
+**1. Find where `CMMR-Nextflow` is rooted on disk.** This is what `GLOBUS_DIR`
+in `.env` is set to:
 
 ```bash
 bin/globus collection show 906ce447-a02f-4b41-a7f2-6237c243cb8a
 ```
 
-(`906ce447-a02f-4b41-a7f2-6237c243cb8a` is `CMMR-Nextflow` — swap in whichever
-collection you can see.) The `mapped_collection_id` field in the output is
-what the next step wants.
-
-**2. Create the new collection as private:**
+**2. Make the prefix the runs go under:**
 
 ```bash
-bin/globus collection create guest <MAPPED_COLLECTION_ID> /path/on/posix/share "Share name" --private
+mkdir -p "$GLOBUS_DIR/nxf"
 ```
 
-Note the ID it returns (`<NEW_ID>` below).
-
-**3. Grant anonymous read on it:**
+**3. Grant anonymous read scoped to it:**
 
 ```bash
-bin/globus endpoint permission create <NEW_ID>:/ --anonymous --permissions r
+bin/globus endpoint permission create "$GLOBUS_UUID:/nxf/" --anonymous --permissions r
 ```
 
-Scope the path narrower than `/` to expose only a subfolder of what you gave
-step 2.
+The trailing `/` matters — it is what scopes the grant to that subtree rather
+than to the single path entry.
 
-**4. Get the URL:**
+**4. Check it took.** The grant shows up as `r`, shared with `fallback`, on
+`/nxf/`:
 
 ```bash
-bin/globus collection show <NEW_ID>
+bin/globus endpoint permission list "$GLOBUS_UUID"
 ```
 
-The `domain` field is a subdomain of `data.globus.org`, one per guest
-collection (`CMMR-Nextflow`'s is `g-8d60ea.bd9c6d.eb38.data.globus.org`). The
-direct link is `https://<that domain>/<path-to-file>?download`.
+```
+Rule ID                              | Permissions | Shared With      | Path
+------------------------------------ | ----------- | ---------------- | -----
+80678c22-a576-11f1-8def-02ce27bde401 | r           | fallback         | /nxf/
+b6c4edf9-a557-11f1-a946-0ee7ef9370d9 | rw          | dpsmith@bcm.edu  | /
+```
 
-**This is a permanent, unauthenticated link the moment step 3 succeeds** —
-anyone who has it can download indefinitely, with no record of who did, until
-the permission is revoked (`bin/globus endpoint permission delete`) or the
-collection is deleted. Treat handing it out the same as you would publishing
-to S3 with no expiration date: worth a second thought for anything that
-isn't meant to be public forever.
+Removing it again is by rule ID, and takes every run's downloads offline at
+once:
+
+```bash
+bin/globus endpoint permission delete "$GLOBUS_UUID" "80678c22-a576-11f1-8def-02ce27bde401"
+```
+
+## Sharing something else by direct link
+
+The same collection is the tool for handing someone a dataset that never went
+through a pipeline — a folder already on the cluster, a re-delivery, anything
+with no dashboard behind it. Put it in a directory of its own under a name
+nobody could guess, and grant anonymous read on that directory the same way:
+
+```bash
+mkdir "$GLOBUS_DIR/<token>"
+```
+
+```bash
+bin/globus endpoint permission create "$GLOBUS_UUID:/<token>/" --anonymous --permissions r
+```
+
+```
+https://g-8d60ea.bd9c6d.eb38.data.globus.org/<token>/<filename>?download
+```
+
+Not under `/nxf/`: that prefix is the pipeline's, and `wrike_expiration.sh`
+deletes directories under it by uid. A hand-made share sitting there would be
+safe by accident rather than by design.
+
+**`--anonymous` is one shared "no login" principal, not a per-recipient
+credential.** Nothing above stops anyone who *already has* a link from handing
+it on — there is no authentication step behind it to catch that. Treat each
+link the way you would treat a bearer token: fine to hand out, not something to
+publish somewhere it could be indexed or forwarded past the intended recipient.
+
+**There is no download count.** Anonymous HTTPS access is not a Transfer task,
+so it never appears in `globus task list` or the web app's Activity tab — those
+only cover real endpoint-to-endpoint transfers. The requests are logged, but
+server-side, in `globus_access_log` on `bcmdtn2` itself, which means reading it
+means asking whoever administers that GCS install. If knowing whether a link
+was used ever actually matters, that is the only place it is written down.
 
 ## When it does not work
 
@@ -190,5 +269,7 @@ isn't meant to be public forever.
 | `globus: command not found` | `$NEXTFLOW_DIR/bin` isn't on your `PATH` — use `bin/globus` or add it |
 | `Error: No such option: --version` | use `bin/globus version`, not `--version` |
 | `globus update` fails with `Requires-Python >=3.10` | [the Python 3.9 ceiling](#the-python-39-ceiling) — the venv needs rebuilding against a newer interpreter, not a retry |
+| `MissingLoginError: Missing 'manage_collections' consent` | run `bin/globus login --gcs cb94237b-af5f-41fa-b161-bd4289338137` once — a GCS-level call needs its own consent beyond the base `login` |
 | `endpoint permission create --anonymous` is rejected | anonymous/HTTPS access may not be enabled on the `BCMDTN2-POSIX` storage gateway itself — that's a BCM GCS-admin setting, not something a guest-collection admin can turn on |
-| the direct link redirects to a login page instead of downloading | step 3 didn't take, or the path in the URL falls outside what step 3 scoped the permission to |
+| the direct link redirects to a login page instead of downloading | the anonymous grant on `/nxf/` is gone, or the path in the URL falls outside the subtree it was scoped to — check `endpoint permission list` |
+| a dashboard's downloads 404 | the run's directory under `$GLOBUS_DIR/nxf/` is missing; a run torn down by `wrike_expiration.sh` has had it deleted on purpose |

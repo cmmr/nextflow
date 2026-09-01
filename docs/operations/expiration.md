@@ -70,13 +70,14 @@ lets an expired run still be repeated:
 | `pipeline_manifest.json`, `rerun_manifest.json`, `form_answers.tsv`, `region.txt` | Names used before the run directory moved to one state file, kept for prefixes that still carry them |
 
 Only the top level of the prefix is offered a match, so every results folder —
-`summary_report/`, `qiime2/`, and the listing pages under them — goes, along with
-`raw-sequences.zip`, which is most of the storage the tear-down is for.
+`summary_report/`, `qiime2/`, and the listing pages under them — goes.
 
-The cached [whole-run download](../results/downloads.md), `zip/<uid>.zip` and
-its `zip/<uid>.json`, is deleted alongside them. It is published from a prefix
-of its own, so listing `nxf/<uid>/` does not reach it — and a zip that outlived
-its dashboard would break the promise the expiration notice makes, which is that
+`$GLOBUS_DIR/nxf/<uid>/` is deleted alongside them, by
+[`globus_discard_run`](globus.md). That directory holds the run's
+`raw-sequences.zip` and `dashboard.zip`, which is most of the storage the
+tear-down is for; it is on this cluster's own disk rather than in the bucket, so
+listing `nxf/<uid>/` does not reach it — and archives that outlived their
+dashboard would break the promise the expiration notice makes, which is that
 this page and every file it links to go on this date.
 
 `index.html` is deleted with the rest and immediately republished from

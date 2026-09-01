@@ -6,9 +6,10 @@
 # Date:   August 12th, 2026
 #
 # Called by wrike_sqs_listener.sh for TaskDeleted and TaskParentsRemoved events.
-# Cleanup covers all three places a run leaves state: queued or running Slurm
-# jobs, published S3 results, and the local run directory. Every step is
-# best-effort, since a run may never have created the thing being removed.
+# Cleanup covers all four places a run leaves state: queued or running Slurm
+# jobs, published S3 results, the archives it published to the Globus collection,
+# and the local run directory. Every step is best-effort, since a run may never
+# have created the thing being removed.
 #
 # TaskParentsRemoved fires for any parent change on a task the webhook can see,
 # so the removed parent is checked before anything is destroyed.
@@ -18,10 +19,10 @@
 # Called by: wrike_sqs_listener.sh
 # Requires:  jq, aws, scancel (Slurm), openssl (via derive_uid), curl (via
 #            call_wrike_api)
-# Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, S3_ZIP_PREFIX, RUN_ID_SALT,
-#            WRIKE_FOLDER_ID,
-#            the Wrike helper functions and the log/fail/derive_uid helpers, all
-#            sourced from .env
+# Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, GLOBUS_DIR,
+#            GLOBUS_RUN_PREFIX, RUN_ID_SALT, WRIKE_FOLDER_ID,
+#            the Wrike and Globus helper functions and the log/fail/derive_uid
+#            helpers, all sourced from .env
 
 set -euo pipefail
 
@@ -84,11 +85,10 @@ scancel --name="nf-$RUN_ID" --user="$(whoami)" > /dev/null 2>&1 || true
 #    top of it if the run got that far.
 aws s3 rm "$S3_RESULTS_DIR" --recursive > /dev/null 2>&1 || true
 
-#    And the zip the download Lambda cached of all that, which is published from
-#    a prefix of its own and so is not under the recursive delete above
-for CACHED in "$S3_ZIP_PREFIX/$RUN_ID.zip" "$S3_ZIP_PREFIX/$RUN_ID.json"; do
-    aws s3 rm "s3://$AWS_S3_BUCKET/$CACHED" > /dev/null 2>&1 || true
-done
+#    And the archives the run published to the guest collection - the reads and
+#    the dashboard zip - which are on this cluster's own disk rather than in the
+#    bucket, and so are not under the delete above
+globus_discard_run "$RUN_ID" || warn "Could not delete the Globus directory for uid $RUN_ID."
 
 # 3. Confirm to the user. Only a removed Dashboards tag gets a comment; a deleted
 #    task has nowhere to comment on.

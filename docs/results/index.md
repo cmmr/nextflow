@@ -79,11 +79,13 @@ is drawn to the space the page has rather than the page growing a scrollbar to
 fit the chart.
 
 **Quick downloads**, at the top of the sidebar. One row per headline file the
-pipeline declared, then [the whole run as a single zip](downloads.md) — the
-emphasised one, since it is what most readers want before the deletion date.
-That last opens a modal on the landing page rather than a tab of its own: the
-zip is packaged while the reader carries on reading, and closing the modal stops
-the watching rather than the build.
+pipeline declared, then a row for each of the two archives the run published to
+[the Globus collection](../operations/globus.md) — the reads it was given, and
+the whole dashboard as one zip. Under them, **Download everything** is the
+emphasised button, since it is what most readers want before the deletion date:
+it fetches both of those archives, one after the other. Each address ends in
+`?download`, so the collection answers with an attachment and the page the
+reader is on never goes anywhere.
 
 **Run statistics**, under them, headed by how many samples the run covered —
 from `.samples.count`, the count *after* entries sharing a sample name were
@@ -216,10 +218,56 @@ object, including the ones in the folder listing pages.
 ## Taking a copy of the whole thing
 
 The one thing a client most wants before their deletion date is all of it at
-once, and `https://$AWS_S3_BUCKET/download/<uid>` is that: the entire prefix,
-packaged on demand into a single zip that unpacks into a working offline copy of
-this page. The sidebar's **Download everything** button is that link. See
-[Downloading a whole run](downloads.md).
+once, and `dashboard.zip` is that: the whole results folder plus the three pages
+it is read through, built by the upload script and served from
+[the Globus collection](../operations/globus.md). It unpacks into a `results/` folder; open the `index.html` in it and the same
+dashboard comes up — every link is relative, so the navigation bar, the
+Overview, the file index and the folder listings all resolve against the
+extracted folder.
+
+**A copy read off a disk still wants a network**, because the three pages fetch
+Tailwind and their fonts from a CDN — see [How the pages are styled
+](#how-the-pages-are-styled). Everything is there and every link works; with no
+network it is the styling that is missing, not the results. The two links that
+do not resolve offline are the ones in Quick Downloads that point back at the
+collection.
+
+`raw-sequences.zip` sits beside it, holding the reads exactly as they went in.
+The sidebar's **Download everything** button fetches both.
+
+Neither is built on demand and neither is in the bucket: the upload script zips
+them into place on the cluster's own disk, which is why a run's reads cost
+nothing to publish and nothing to serve.
+
+## What is not published
+
+A finished run writes about ten times more than anyone reads, nearly all of it a
+tool's own scratch or a second copy of something already published in a form a
+reader can use. [`prune_results.sh`](../../scripts/prune_results.sh) deletes that
+out of `results/` before the folders are indexed, driven by
+`templates/<pipeline>/prune.conf`:
+
+```
+action | path | argument
+```
+
+`remove` deletes everything the path matches — a path ending in `/` matches
+directories only — and `drop-zero-rows` rewrites a merged table, keeping the rows
+that carry a count and taking the argument as the first data column. A path
+matching nothing is skipped, which is how a step a run did not perform
+disappears. Directories the deletions empty are removed too.
+
+Two rules decide what goes in a prune list. A set of per-sample files goes when a
+merged file published beside it carries the same numbers, since the merged one is
+what anybody loads. Everything else goes only when it is a tool's own scratch or
+a second encoding of a report already published — not when it is the only place
+something is written down. Each list says which of the two applies, per entry:
+[ampliseq](../pipelines/ampliseq.md#preparing-a-run),
+[taxprofiler](../pipelines/taxprofiler.md).
+
+**Deleting rather than excluding** is what keeps the pages honest. The listings,
+the file index, `dashboard.zip` and the bucket are all built from the folder
+after the pruning, so none of them can describe a file a reader cannot fetch.
 
 ## Before and after the dashboard
 

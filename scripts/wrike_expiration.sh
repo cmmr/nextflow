@@ -13,8 +13,10 @@
 #   two weeks out      comment on the task, mentioning whoever raised it and
 #                      anyone following it, so the date can be pushed out before
 #                      anything is deleted
-#   reached or passed  delete the published results, leave an expired page where
-#                      the dashboard was, and set the task's status to "Expired"
+#   reached or passed  delete the published results and the archives the run
+#                      published to the Globus collection, leave an expired page
+#                      where the dashboard was, and set the task's status to
+#                      "Expired"
 #
 # Only a task whose status is "Completed" is looked at: those are the runs with a
 # dashboard to lose. A task with no Expiration date is kept indefinitely, which
@@ -36,10 +38,11 @@
 #            wrike_expiration.sh --dry-run   # report what it would do, change nothing
 # Requires:  aws, jq, GNU date, curl (via call_wrike_api), openssl (via derive_uid)
 # Reads:     templates/expired.html
-# Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, S3_ZIP_PREFIX, RUN_ID_SALT,
-#            WRIKE_FOLDER_ID, WRIKE_EXPIRATION_CFID,
-#            WRIKE_CUSTOM_STATUS_IDS, WRIKE_BOT_USER_ID, the Wrike helpers and
-#            the log/warn/fail/derive_uid/escape_html helpers, all from .env
+# Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, GLOBUS_DIR,
+#            GLOBUS_RUN_PREFIX, RUN_ID_SALT, WRIKE_FOLDER_ID,
+#            WRIKE_EXPIRATION_CFID, WRIKE_CUSTOM_STATUS_IDS, WRIKE_BOT_USER_ID,
+#            the Wrike and Globus helpers and the
+#            log/warn/fail/derive_uid/escape_html helpers, all from .env
 
 set -euo pipefail
 
@@ -327,7 +330,7 @@ warn_of_expiration() {
 # it.
 expire_task() {
     local task_json="$1" expired="$2"
-    local run_id prefix listing title completed samples shown reply relative key cached
+    local run_id prefix listing title completed samples shown reply relative key
     local -a keys=() kept=() doomed=()
 
     # An empty uid would make the prefix below the whole bucket, and everything
@@ -358,15 +361,6 @@ expire_task() {
         fi
     done
 
-    # The zip the download Lambda cached of these results is published from a
-    # prefix of its own, so the listing above does not reach it. The page says
-    # everything it links to goes on this date, and this is one of those things.
-    for cached in "$S3_ZIP_PREFIX/$run_id.zip" "$S3_ZIP_PREFIX/$run_id.json"; do
-        if aws s3api head-object --bucket "$AWS_S3_BUCKET" --key "$cached" > /dev/null 2>&1; then
-            doomed+=("$cached")
-        fi
-    done
-
     # Read before the deletion, since the landing page is one of the things it
     # takes and is where an older run's sample count is written down.
     title=$(echo "$task_json" | jq -r '.title // empty')
@@ -375,7 +369,7 @@ expire_task() {
 
     if [[ "$DRY_RUN" == true ]]; then
         log "[dry run] Task $TASK_ID (uid $run_id) expired on $shown:" \
-            "would delete ${#doomed[@]} object(s) published for this run," \
+            "would delete ${#doomed[@]} object(s) and the Globus directory published for this run," \
             "keeping ${kept[*]:-nothing}."
         return 0
     fi
@@ -384,6 +378,12 @@ expire_task() {
         warn "Could not empty s3://$AWS_S3_BUCKET/$prefix/; task $TASK_ID is left as it is."
         return 0
     fi
+
+    # The reads and the dashboard zip, which are on the guest collection rather
+    # than in the bucket and so are not among the keys above. The page says
+    # everything it links to goes on this date, and these are two of those
+    # things.
+    globus_discard_run "$run_id" || warn "Could not delete the Globus directory for uid $run_id."
 
     # The expired page takes the key the landing page had, which the deletion
     # above just emptied - so the link on the task, and any link a reader kept,

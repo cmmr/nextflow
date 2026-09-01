@@ -5,21 +5,26 @@
 # Author: Daniel Smith
 # Date:   August 19th, 2026
 #
-# Gives every folder below the results root a listing page, copies the folder to
+# Deletes what the run wrote for itself, gives every folder below the results
+# root a listing page, and copies the folder to
 # s3://$AWS_S3_BUCKET/$S3_RUN_PREFIX/<uid>/ from the inside out - so
-# multiqc/multiqc_report.html lands directly under the uid - and lands the page
-# that frames it last. Nextflow's work/ directory is left behind.
+# multiqc/multiqc_report.html lands directly under the uid - landing the pages
+# that frame it last. Nextflow's work/ directory is left behind.
 #
-# So is everything named in SKIP_UPLOAD below: a shotgun run publishes about ten
-# times more bytes than anyone reads, nearly all of it a tool's own scratch or a
-# second copy of something the reports already show. The listings, the file index
-# and the download zip are all built from the same list, so what the pages
-# describe is what a reader can actually fetch.
+# The pruning is most of what makes that affordable: a shotgun run publishes
+# about ten times more bytes than anyone reads, nearly all of it a tool's own
+# scratch or a second copy of something the reports already show. What goes is
+# named in templates/taxprofiler/prune.conf and deleted from the results folder
+# outright, so the listings, the file index, the zip and the bucket cannot come
+# to describe different things.
 #
-# The raw reads are not published with the results: a WGS run's inputs are large
-# enough that packaging and uploading them costs more than the analysis did, and
-# the requester already holds them. The page keeps a hidden row for the link
-# that will offer them from the cluster instead - see dashboard_link_button.
+# The two bulky downloads do not go to S3 at all. The reads
+# taxprofiler_samplesheet.sh staged, and the whole dashboard as one zip, are
+# written into the run's directory on the CMMR-Nextflow guest collection and
+# linked from the page - see scripts/globus.sh. A WGS run's inputs are large
+# enough that uploading them would cost more than the analysis did; from the
+# collection they cost neither storage in the bucket nor egress out of it, and
+# the requester gets them at the cluster's own bandwidth.
 #
 # The pages a reader sees are publish_dashboard.sh's, filled in from what this
 # run actually produced: which reports the navigation bar offers, what the
@@ -33,16 +38,18 @@
 # Usage:     taxprofiler_upload.sh [results_dir]
 #            defaults to ./results, the outdir set in the taxprofiler params file
 # Called by: wrike_job.sh, as the POST_PROCESS_CMDS entry of the taxprofiler pipelines
-# Requires:  aws, curl and jq (via the Wrike helpers)
+# Requires:  aws, zip, curl and jq (via the Wrike helpers)
 # Reads:     templates/dashboard.html, templates/overview.html,
 #            templates/files.html and templates/taxprofiler/outputs.conf, via
-#            the dashboard helpers; ./composition_data.json, and the run's
-#            statistics and manifest out of ./run_state.json
-# Runs:      taxprofiler_composition.sh and index_directories.sh, over the
-#            results folder
+#            the dashboard helpers; templates/taxprofiler/prune.conf;
+#            ./composition_data.json, and the run's statistics and manifest out
+#            of ./run_state.json
+# Runs:      taxprofiler_composition.sh, prune_results.sh and
+#            index_directories.sh, over the results folder
 # Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, WRIKE_DASHBOARD_URL_CFID,
-#            the Wrike and dashboard helper functions and the log/fail/is_valid_uid
-#            helpers, all sourced from .env
+#            GLOBUS_DIR, GLOBUS_RUN_PREFIX, GLOBUS_URL, the Wrike, Globus and
+#            dashboard helper functions and the log/fail/is_valid_uid helpers,
+#            all sourced from .env
 # Outputs:   an explanation of a failure in ./run_state.json
 #
 # Does not record the run's status: wrike_job.sh marks the run Completed only
@@ -58,6 +65,15 @@ RESULTS_DIR="${RESULTS_DIR%/}"
 # Also written per run by taxprofiler_samplesheet.sh, and published with the
 # results as part of the record
 DB_SHEET="taxprofiler_database.csv"
+
+# Input FASTQ directory, named to match what taxprofiler_samplesheet.sh creates,
+# and the archive it becomes on the guest collection. Both are named for the
+# reader downloading them, since those names are what the buttons show.
+FASTQ_DIR="raw-sequences"
+FASTQ_ZIP_NAME="raw-sequences.zip"
+
+# The whole dashboard as one zip, published beside the reads
+DASHBOARD_ZIP_NAME="dashboard.zip"
 
 # The headline numbers taxprofiler_composition.sh counted out of the classifier
 # reports, as key and value, for the Overview's sidebar
@@ -77,39 +93,8 @@ SUBTITLE="Shotgun metagenomic taxonomic profiling"
 # What the landing page's "All output files" view lists, in the order it lists it
 readonly OUTPUT_CATALOG="$NEXTFLOW_DIR/templates/taxprofiler/outputs.conf"
 
-# What is not worth the bucket it would sit in, as globs read from the results
-# folder. Passed to the listings, to the file index and to the upload, so all
-# three agree.
-#
-# The MetaPhlAn alignments are the whole of the difference: they are its record
-# of which read hit which marker gene, kept so that MetaPhlAn can be re-run
-# without aligning again, and on this run they were 1.2 GB of a 1.4 GB folder.
-# Nobody who asked us for a profile re-runs MetaPhlAn from them; the profile
-# itself, the BIOM table and the merged report are all published.
-#
-# Nonpareil's .npa and .npc are the same kind of thing: the per-read redundancy
-# values and the mating vector it works its curve out from, both of which grow
-# with the reads rather than with the answer. The .npo the curve is read from,
-# the plots, and the summary table are all published.
-#
-# The rest are second copies. MultiQC's data.json is every number in its own
-# report as machine-readable JSON, its log is its debug trace, and multiqc_plots
-# is each of the report's interactive figures rendered again as PNG, SVG and PDF.
-# A FastQC zip holds the same measurements as the HTML report published beside
-# it, which is also what MultiQC read to build its own.
-# A folder every file of which is left behind is named twice: once for what is
-# in it, and once as itself, so that the folder above stops listing a folder
-# there is nothing left in.
-readonly SKIP_UPLOAD=(
-    "metaphlan/*/*.bowtie2out.txt"
-    "nonpareil/*.npa"
-    "nonpareil/*.npc"
-    "multiqc/multiqc_data/multiqc_data.json"
-    "multiqc/multiqc_data/multiqc.log"
-    "multiqc/multiqc_plots"
-    "multiqc/multiqc_plots/*"
-    "fastqc/*/*_fastqc.zip"
-)
+# What is deleted from the results before any of it is published
+readonly PRUNE_LIST="$NEXTFLOW_DIR/templates/taxprofiler/prune.conf"
 
 # The run directory is named after the uid, so results publish under the
 # directory's own name. Validated because an empty value would make
@@ -141,46 +126,51 @@ if [[ -r "$DB_SHEET" ]]; then
     cp "$DB_SHEET" "$RESULTS_DIR/" || warn "Could not publish $DB_SHEET with the results."
 fi
 
-# 2. Work out the two things a requester asks for first - what was in each
+# 2. Archive the reads into this run's directory on the guest collection. A WGS
+#    run's inputs are larger than everything else it publishes put together, and
+#    from there they are a copy on the cluster's own disk rather than an upload.
+FASTQ_URL=""
+
+if [[ -d "$FASTQ_DIR" ]]; then
+    command -v zip > /dev/null \
+        || fail "The results could not be packaged for download: zip is not installed."
+
+    log "Archiving $FASTQ_DIR for task $TASK_ID..."
+
+    # zip's output goes into the failure message, so the requester is told why
+    # their data could not be packaged
+    if ! ZIP_OUTPUT=$(globus_archive "$RUN_ID" "$FASTQ_ZIP_NAME" "$FASTQ_DIR" -0); then
+        fail "The sequencing data could not be packaged for download:"$'\n'"$ZIP_OUTPUT"
+    fi
+
+    FASTQ_URL=$(globus_run_url "$RUN_ID" "$FASTQ_ZIP_NAME")
+else
+    log "No $FASTQ_DIR directory; skipping raw sequence archive."
+fi
+
+# 3. Work out the two things a requester asks for first - what was in each
 #    sample, and how varied each sample was - for the Overview to plot. Ahead of
-#    the listings, so the table it leaves in the results is in them.
+#    the pruning and the listings, so the table it leaves in the results is in
+#    them.
 if ! "$NEXTFLOW_DIR/scripts/taxprofiler_composition.sh" "$RESULTS_DIR"; then
     warn "The composition and diversity data could not be built; the plots will be missing."
 fi
 
-# 3. Give every folder below the results root a listing page, so that the folder
-#    links the landing page carries still resolve once the results are objects in
-#    a bucket rather than directories on disk.
-if ! "$NEXTFLOW_DIR/scripts/index_directories.sh" "$RESULTS_DIR" "${SKIP_UPLOAD[@]}"; then
-    warn "The results folders could not be indexed; their listings will be missing."
-fi
-
-# 4. Publish everything below the landing page
-log "Initiating S3 upload for Task $TASK_ID..."
-
-if ! UPLOAD_OUTPUT=$(upload_results_tree "$RESULTS_DIR" "$S3_RESULTS_DIR" \
-        "${SKIP_UPLOAD[@]}"); then
-    fail "The results could not be uploaded to S3:"$'\n'"$UPLOAD_OUTPUT"
-fi
-
-# 5. Build the pages that frame all of it, from what the run produced.
-dashboard_reset "$RESULTS_DIR" "$OUTPUT_CATALOG" "${SKIP_UPLOAD[@]}"
-
-#    The navigation bar, after the Overview every run opens on. Krona is the one
-#    report of the three that reads a whole taxonomy rather than a summary of it,
-#    and the run writes one per classifier and database.
+# 4. Choose the Krona chart the navigation bar offers. The run writes one per
+#    classifier and database, and the one whose name does not say bracken is the
+#    one offered.
 #
-#    The one whose name does not say bracken is the one offered. Both are drawn
-#    from kraken2's clade counts - checked against the reports on run vbnhm2tf,
-#    where every wedge of the two charts carries the same number, and it is
-#    kraken2's rather than bracken's: Segatella in sample 4211 is 4,720,453 on
-#    both, which is what kraken2 placed there and not the 4,893,782 bracken
-#    reassigned to it. So the choice is between two names for one chart, and the
-#    one that does not promise bracken's estimates is the one to hand a reader.
-#    Both stay in the file index either way.
+#    Both are drawn from kraken2's clade counts - checked against the reports on
+#    run vbnhm2tf, where every wedge of the two charts carries the same number,
+#    and it is kraken2's rather than bracken's: Segatella in sample 4211 is
+#    4,720,453 on both, which is what kraken2 placed there and not the 4,893,782
+#    bracken reassigned to it. So the choice is between two names for one chart,
+#    and the one that does not promise bracken's estimates is the one to hand a
+#    reader - and the other, being the same six megabytes under a name that
+#    would mislead, is deleted rather than published beside it.
 #
-#    The folder's own listing page is passed over: index_directories.sh has
-#    already written it, and it sorts ahead of every chart in it.
+#    The folder's own listing page is passed over: index_directories.sh writes
+#    it after this, and it sorts ahead of every chart in it.
 KRONA_CHART=""
 KRONA_FALLBACK=""
 
@@ -197,8 +187,32 @@ for KRONA_PATH in "$RESULTS_DIR"/krona/*.html; do
     break
 done
 
+if [[ -n "$KRONA_CHART" && -n "$KRONA_FALLBACK" ]]; then
+    rm -f "$RESULTS_DIR/$KRONA_FALLBACK" \
+        || warn "Could not delete the duplicate Krona chart $KRONA_FALLBACK."
+fi
+
 : "${KRONA_CHART:=$KRONA_FALLBACK}"
 
+# 5. Delete what the run wrote for itself: the per-sample profiles every merged
+#    table already holds, a tool's own scratch, and the reports MultiQC encoded
+#    a second time. Ahead of the listings, so nothing describes a file that is
+#    not there.
+if ! "$NEXTFLOW_DIR/scripts/prune_results.sh" "$RESULTS_DIR" "$PRUNE_LIST"; then
+    warn "The results could not be pruned; the run will publish its working files too."
+fi
+
+# 6. Give every folder below the results root a listing page, so that the folder
+#    links the landing page carries still resolve once the results are objects in
+#    a bucket rather than directories on disk.
+if ! "$NEXTFLOW_DIR/scripts/index_directories.sh" "$RESULTS_DIR"; then
+    warn "The results folders could not be indexed; their listings will be missing."
+fi
+
+# 7. Build the pages that frame all of it, from what the run produced.
+dashboard_reset "$RESULTS_DIR" "$OUTPUT_CATALOG" "$(globus_run_url "$RUN_ID")"
+
+#    The navigation bar, after the Overview every run opens on
 dashboard_view krona   "Taxonomy Explorer" "$KRONA_CHART"
 dashboard_view quality "Quality Control"   "multiqc/multiqc_report.html"
 dashboard_index_view   "File Explorer"
@@ -207,19 +221,23 @@ dashboard_index_view   "File Explorer"
 #    for the tool, the database and the format that named the file. taxpasta's
 #    merged bracken profile is the one to load into R or Python; MetaPhlAn and
 #    mOTUs are the second opinions, the last of them naming species no reference
-#    genome exists for. The raw reads follow them as a row that stays hidden
-#    until it is given the address they are served from.
+#    genome exists for. The two archives follow them: the reads as they went in,
+#    and the whole of this dashboard, both served from the guest collection and
+#    both of what "Download everything" fetches.
 #
 #    The diversity table is not among them: it is the numbers behind a plot the
 #    reader is already looking at, and the file index lists it under Start here
 #    for anyone who wants them.
 if ! dashboard_button "taxpasta/bracken_*.tsv" "Species abundance table"; then
-    dashboard_button "taxpasta/kraken2_*.tsv" "Taxonomic profile table"
+    dashboard_button "taxpasta/kraken2_*.tsv" "Taxonomic profile table" || true
 fi
 
-dashboard_button "metaphlan/metaphlan_*_combined_reports.txt" "MetaPhlAn profiles"
-dashboard_button "motus/motus_*_combined_reports.txt" "mOTUs profiles"
-dashboard_link_button "" "Raw sequencing data"
+#    "|| true" because a glob that names nothing is a false return, which is
+#    what the fallback above reads - and here there is nothing to fall back to
+dashboard_button "metaphlan/metaphlan_*_combined_reports.txt" "MetaPhlAn profiles" || true
+dashboard_button "motus/motus_*_combined_reports.txt" "mOTUs profiles" || true
+dashboard_bundle "Raw sequencing data" "$FASTQ_URL"
+dashboard_bundle "All result files" "$(globus_run_url "$RUN_ID" "$DASHBOARD_ZIP_NAME")"
 
 #    How the run was set up. The pipeline version comes off the manifest
 #    wrike_job.sh recorded, so the page and the record cannot disagree; what was
@@ -355,12 +373,26 @@ if [[ -n "$SAMPLE_COUNT" && ! "$SAMPLE_COUNT" =~ ^[0-9]+$ ]]; then
     SAMPLE_COUNT=""
 fi
 
-# 6. Land the pages last, once nothing they point at is still uploading. The
-#    landing page overwrites the progress page published to this key.
-if ! UPLOAD_OUTPUT=$(publish_dashboard "$S3_RESULTS_DIR" "$RUN_ID" "$TASK_NAME" \
-        "$SUBTITLE" "$PIPELINE" "$(date '+%b %-d, %Y')" "$SAMPLE_COUNT" \
-        "$EXPIRES_ON" "$PLOT_DATA_FILE"); then
-    fail "The results were uploaded, but the pages that present them were not:"$'\n'"$UPLOAD_OUTPUT"
+# 8. Write the three pages into the results folder, so the zip below holds the
+#    same dashboard the bucket will serve.
+if ! RENDER_OUTPUT=$(render_dashboard "$RUN_ID" "$TASK_NAME" "$SUBTITLE" \
+        "$PIPELINE" "$(date '+%b %-d, %Y')" "$SAMPLE_COUNT" "$EXPIRES_ON" \
+        "$PLOT_DATA_FILE"); then
+    fail "The pages that present these results could not be built:"$'\n'"$RENDER_OUTPUT"
+fi
+
+# 9. Archive the finished dashboard beside the reads. Deflated rather than
+#    stored: what is left after the pruning is mostly HTML and tables.
+if ! ZIP_OUTPUT=$(globus_archive "$RUN_ID" "$DASHBOARD_ZIP_NAME" "$RESULTS_DIR"); then
+    warn "The results could not be packaged as one download:"$'\n'"$ZIP_OUTPUT"
+fi
+
+# 10. Publish everything, the pages last - the landing page overwrites the
+#     progress page published to that key.
+log "Initiating S3 upload for Task $TASK_ID..."
+
+if ! UPLOAD_OUTPUT=$(publish_results "$S3_RESULTS_DIR"); then
+    fail "The results could not be uploaded to S3:"$'\n'"$UPLOAD_OUTPUT"
 fi
 
 update_wrike_custom_field "$WRIKE_DASHBOARD_URL_CFID" "$S3_RESULTS_URL"

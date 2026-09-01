@@ -137,9 +137,10 @@ lab sheet into the six-column CSV taxprofiler wants — `sample`, `run_accession
   [Databases](#databases).
 
 [`taxprofiler_upload.sh`](../../scripts/taxprofiler_upload.sh) summarises the
-classifier reports, indexes the results folders, copies them to
+classifier reports, prunes and indexes the results folders, copies them to
 `s3://$AWS_S3_BUCKET/nxf/<uid>/`, renders the shared
-[dashboard](../results/index.md), and writes the report URL to the Wrike custom
+[dashboard](../results/index.md), publishes the reads and the dashboard zip to
+[Globus](../operations/globus.md), and writes the report URL to the Wrike custom
 field. What its file index lists is
 [`templates/taxprofiler/outputs.conf`](../../templates/taxprofiler/outputs.conf).
 
@@ -149,33 +150,44 @@ classification bars from the kraken2-style reports the run publishes, and the
 read totals above them from what fastp and bowtie2 wrote about their own steps.
 See [Composition and diversity](../results/composition.md).
 
-**The raw reads are not published.** Unlike ampliseq, the uploader leaves
-`raw-sequences/` in the run directory: a WGS run's inputs are large enough that
-packaging and uploading them costs more than the analysis did, and the requester
-already holds them. The Overview keeps a hidden row for the link that will offer
-them from the cluster instead — a `dashboard_link_button` with an empty address,
-which renders the markup and hides it. Give it a URL to turn the link on.
+**The two bulky downloads go to Globus, not to S3.** The reads staged in
+`raw-sequences/` and the whole dashboard as one zip are written into
+`$GLOBUS_DIR/nxf/<uid>/` and linked from the Overview — see
+[Globus](../operations/globus.md). A WGS run's inputs are large enough that
+uploading them would cost more than the analysis did; writing them onto the
+guest collection is a `zip` into place on the cluster's own disk, and the
+requester fetches them at the cluster's own bandwidth.
 
-**Neither is most of what the pipeline wrote.** `SKIP_UPLOAD` in the uploader
-names what a run produces for itself rather than for whoever asked for it, as
-globs read from the results folder. The same list goes to
-[`index_directories.sh`](../results/browsable-folders.md), to the file index and
-to the upload, so the listings, the row counts and the
-[download zip](../results/downloads.md) all describe what is actually in the
-bucket.
+**Most of what the pipeline wrote is deleted before any of it is published.**
+[`templates/taxprofiler/prune.conf`](../../templates/taxprofiler/prune.conf)
+names what a run produces for itself rather than for whoever asked for it, and
+[`prune_results.sh`](../results/index.md) deletes it out of `results/` outright —
+before the folders are indexed, so the listings, the row counts, the file index,
+the zip and the bucket cannot come to describe different things. Any folder the
+deletions empty goes with them.
 
-| Left behind | Why |
+| Deleted | Why |
 |---|---|
-| `metaphlan/*/*.bowtie2out.txt` | MetaPhlAn's record of which read hit which marker gene, kept only so MetaPhlAn can be re-run without aligning again. On run `vbnhm2tf` these were 1,209 MB — 88% of everything the run published. The profile, the BIOM table and the merged report all stay. |
-| `multiqc/multiqc_data/multiqc_data.json` | Every number in the MultiQC report again, as JSON. 28 MB. |
-| `multiqc/multiqc_data/multiqc.log` | MultiQC's own debug trace. |
-| `multiqc/multiqc_plots` and `multiqc/multiqc_plots/*` | Each of the report's interactive figures rendered again as PNG, SVG and PDF. The folder is named twice — once for what is in it, and once as itself, so `multiqc/` stops listing a folder there is nothing left in. |
+| `kraken2/*/`, `bracken/*/`, `metaphlan/*/`, `motus/*/` | The per-sample profiles. Each is one column of the merged table published in the folder above it, and of the taxpasta table beside that: a Kraken2 sample report is the `N_all`/`N_lvl` pair of `kraken2_*_combined_reports.txt`, a mOTUs `.out` is one column of `motus_*_combined_reports.txt` with the same 34,344 rows in the same order. `metaphlan/*/` also holds MetaPhlAn's alignments — its record of which read hit which marker gene, kept only so MetaPhlAn can be re-run without aligning again, and on run `vbnhm2tf` 1,209 MB of 1,381 MB. |
+| `kraken2/kraken2_*-bracken_combined_reports.txt`, `taxpasta/kraken2_*-bracken.tsv` | nf-core/taxprofiler names Bracken's kraken-style outputs `<db>-bracken`, but what it aggregates there is Kraken2's own clade counts. The two combined reports are byte-identical below their headers, and the two taxpasta tables carry the same value for every taxon in every sample. The plain-named one is kept. |
+| `fastp/*.fastp.json`, `fastp/*.fastp.log` | Every number in the HTML report beside it, written for a machine; and what fastp printed while it ran, which MultiQC read. |
+| `bowtie2/align/*.log`, `minimap2/align/*.log`, `samtools/stats/*.stats` | Host removal's per-sample alignment rates, which are in the MultiQC report and in `multiqc_data/multiqc_bowtie2.txt`. |
+| `nonpareil/*.npl`, `*.npa`, `*.npc` | Nonpareil's fitting log, and the per-read redundancy values and mating vector it works the curve out from — both of which grow with the reads rather than with the answer. The `.npo`, the plots and the summary table stay. |
+| `multiqc/multiqc_data/multiqc_data.json`, `multiqc.parquet`, `llms-full.txt`, `multiqc.log` | The whole report encoded again — as JSON, as parquet, as a prompt, and as its debug trace. The per-plot `.txt` files beside them, which are the numbers behind each figure, stay. |
+| `multiqc/multiqc_data/multiqc_kraken.txt`, `multiqc_bracken*.txt`, `multiqc_metaphlan.txt`, `multiqc_nonpareil.txt` | Whole profile tables restated inside MultiQC's data folder, where the published tables are what anybody would use instead. |
+| `multiqc/multiqc_plots/` | Each of the report's interactive figures rendered again as PNG, SVG and PDF. |
 | `fastqc/*/*_fastqc.zip` | The same measurements as the `_fastqc.html` published beside it, which is also what MultiQC read. |
+| one of `krona/*.html` | See below. |
 
-On run `vbnhm2tf` — ten samples, PlusPF and CHOCOPhlAn — that is 1,278 MB of
-1,381 MB, **92.5% of the bytes and 298 of the 533 files**, leaving 103 MB to
-publish. Drop a line from the list to publish it again; nothing else has to
-change.
+`motus/motus_*_combined_reports.txt` is not deleted but is rewritten:
+`drop-zero-rows` takes out the rows that are zero in every sample. A mOTUs
+profile has a row for every species-level marker gene cluster in the database, so
+a run that saw 1,302 of them still publishes 34,344 rows — 2.7 MB of table, 103
+KB of which is the run and the rest of which is the database.
+
+On run `vbnhm2tf` — ten samples, PlusPF and CHOCOPhlAn — the alignments alone
+were 1,278 MB of 1,381 MB, **92.5% of the bytes and 298 of the 533 files**. Drop
+a line from the list to publish it again; nothing else has to change.
 
 **The navigation bar carries the Krona chart.** It is the one report that reads a
 whole taxonomy rather than a summary of it, and the run writes one per classifier
@@ -194,13 +206,15 @@ magnitude for every taxon in every sample. *Segatella* in sample 4211 is
 So the choice is between two names for one chart, and
 [`taxprofiler_upload.sh`](../../scripts/taxprofiler_upload.sh) links the one that
 does not promise estimates it is not showing: the first `krona/*.html` whose name
-does not say `bracken`, with a `bracken`-named chart as the fallback for a run
-that has only that. Both stay in the file index either way.
+does not say `bracken`. A `bracken`-named chart is the fallback for a run that
+has only that; where both exist, the `bracken`-named one is **deleted** rather
+than published beside its twin, since six megabytes under a name that would
+mislead is worse than nothing.
 
 If a later taxprofiler release starts drawing the Bracken chart from Bracken's
-own numbers, the preference is one condition in that loop — and worth
-re-checking against the reports the way the above was, rather than trusting the
-filename.
+own numbers, the preference and the deletion are one condition in that loop —
+and worth re-checking against the reports the way the above was, rather than
+trusting the filename.
 
 The sidebar's quick downloads are labelled rather than named after the file,
 since those filenames carry the tool, the database and the format from the
@@ -211,7 +225,8 @@ database sheet:
 | Species abundance table | `taxpasta/bracken_*.tsv`, or `taxpasta/kraken2_*.tsv` for a run without Bracken |
 | MetaPhlAn profiles | `metaphlan/metaphlan_*_combined_reports.txt` |
 | mOTUs profiles | `motus/motus_*_combined_reports.txt` |
-| Raw sequencing data | hidden, as above |
+| Raw sequencing data | `$GLOBUS_URL/nxf/<uid>/raw-sequences.zip?download` |
+| All result files | `$GLOBUS_URL/nxf/<uid>/dashboard.zip?download` |
 
 `alpha_diversity.tsv` is not among them: it is the numbers behind a plot the
 reader is already looking at, and the file index lists it under `Start here` for

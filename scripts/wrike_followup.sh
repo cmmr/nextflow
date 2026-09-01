@@ -82,14 +82,17 @@ run_report() {
 }
 
 # No recorded status means wrike_job.sh died before its first progress update
-STATUS=$(run_status)
+STATUS=$(get_run_status)
 : "${STATUS:=Starting}"
 
 if [[ "$STATUS" == "Completed" ]]; then
-    update_wrike_task_status "Completed"
+    set_wrike_status "Completed"
 
-    REPLY="The pipeline completed successfully."
+    RESULTS_URL=$(run_results_url "$RUN_ID")
+
+    REPLY="Complete: $RESULTS_URL"
     REPLY+="$(run_report)"
+    add_wrike_comment "$REPLY"
 
     # The last word on the run, published beside its results before the working
     # copy goes with the directory. Every earlier state reached S3 through
@@ -102,12 +105,12 @@ if [[ "$STATUS" == "Completed" ]]; then
     cd /
     rm -rf "$RUN_DIR"
 
-    add_wrike_task_comment "$REPLY"
+    add_wrike_comment "$REPLY"
     exit 0
 fi
 
-report_status "Failed" || true
-update_wrike_task_status "Failed"
+set_run_status "Failed" || true
+set_wrike_status "Failed"
 
 # Leave the results page saying so, with the logs on it. wrike_job.sh publishes
 # one itself when nextflow is what failed, but every other way a run ends -
@@ -122,7 +125,7 @@ REPLY="An error occurred while the pipeline was ${STATUS,,}."
 REPLY+="$(run_report)"
 REPLY+=$'\n'"See $PWD for details."
 
-add_wrike_task_comment "$REPLY"
+add_wrike_comment "$REPLY"
 
 # A bare exit rather than fail: the failure is the pipeline's, and fail would
 # overwrite the state file's ".message" with its own text, destroying the

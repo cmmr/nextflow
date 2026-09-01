@@ -316,7 +316,7 @@ warn_of_expiration() {
     reply+=" To keep it up for longer, change this task's \"Expiration\" date to a later one."
     reply+=" Either way the settings this run used are kept, so it can always be run again."
 
-    add_wrike_task_html_comment "$reply" \
+    add_wrike_html_comment "$reply" \
         || warn "Could not post the expiration notice on task $TASK_ID."
 
     log "Warned task $TASK_ID that its dashboard expires on $shown ($days days)."
@@ -404,10 +404,10 @@ expire_task() {
     reply+=" again - on this data or on new data - submit a request choosing \"prev_run_id\""
     reply+=" as the pipeline and \"$run_id\" as the previous run ID."
 
-    add_wrike_task_comment "$reply" \
+    add_wrike_comment "$reply" \
         || warn "Could not comment the tear-down on task $TASK_ID."
 
-    update_wrike_task_status "Expired" \
+    set_wrike_status "Expired" \
         || warn "Could not set task $TASK_ID to \"Expired\"."
 
     log "Expired task $TASK_ID (uid $run_id): deleted ${#doomed[@]} object(s), kept ${#kept[@]}."

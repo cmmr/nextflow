@@ -20,12 +20,17 @@
   a run with none leaves the panel on its empty state. Which indices the second
   half offers is the run's own - the two pipelines share none of them - so the
   data names them and this page draws whatever it is handed, falling back to the
-  amplicon set for data that names nothing.
+  amplicon set for data that names nothing. An index carries its axis with it:
+  how its readings are written, the tool that measured them, the top of its
+  scale where that is a whole rather than the best sample, and whether it is a
+  count to be drawn on a square root.
 
   The eleven colours are a categorical set whose ordering is what keeps
   neighbouring fills apart under colour vision deficiency, so they are assigned
   in that order and never cycled. A twelfth taxon is not given a twelfth
-  colour: the tail is summed into "Other", which wears the neutral. Sorting the
+  colour: the tail is summed into "Other", which wears the neutral. What the
+  classifier named nothing wears a neutral of its own and takes no step with
+  it, so the colours go to the taxa that were actually named. Sorting the
   samples never reassigns them either. Several of the steps sit under 3:1
   against a white page, which is why the legend above the chart names every
   taxon beside its swatch, and carries its share and prevalence in a tooltip.
@@ -55,7 +60,9 @@ __COMMON_HEAD__
 <style>
 /* What the charts are drawn in. The categorical set is the only palette the
    design system does not carry, and the four names under it are the tokens the
-   canvas has to read as values rather than as classes. */
+   canvas has to read as values rather than as classes. The two greys are the
+   two bands that are not a taxon: the summed tail, and the reads nothing was
+   found for. */
 :root {
   --series-1: #2a78d6;
   --series-2: #eb6834;
@@ -69,6 +76,7 @@ __COMMON_HEAD__
   --series-10: #00a0b0;
   --series-11: #861358;
   --series-other: #b3bec9;
+  --series-unnamed: #9aa5b1;
 
   --border: #c5c5d3;
   --muted: #454651;
@@ -355,21 +363,48 @@ __STATS__
   // The gutter the composition chart leaves down its left for the axis title
   // and its percentage labels, and the margin it keeps at the right. The legend
   // is inset by both, so it sits over the columns rather than over the axis
-  // beside them.
+  // beside them. The composition scale is always "0%" to "100%", so its gutter
+  // is a number; the diversity chart measures its own and is given whatever it
+  // asks for.
   var COMPOSITION_LEFT = 58;
   var PLOT_RIGHT = 8;
+
+  // What the axis title costs down the left of a chart: the 11px it is drawn in
+  // from, its own line height, and a gap before the labels beside it
+  var TITLE_BAND = 28;
+
+  // What the labels on a scale are set in from the plot
+  var LABEL_GAP = 8;
 
   var tip = document.getElementById("tip");
   var order = samples.map(function (_, i) { return i; });
 
+  // A taxon that is the absence of one: reads the classifier placed nowhere.
+  // Both pipelines write it as a single word - the shotgun run's "Unclassified"
+  // and the amplicon run's "Unassigned" - which is what separates it from
+  // "Unclassified Pseudomonadota", a sequence placed in a phylum and no deeper.
+  function unnamed(label) {
+    return label === "Unclassified" || label === "Unassigned";
+  }
+
   // Read off the stylesheet rather than repeated here, so one palette serves
-  // the fills and the legend swatches
+  // the fills and the legend swatches.
+  //
+  // The categorical steps are handed out to the named taxa in order of
+  // abundance. What was named nothing wears a grey of its own instead and takes
+  // no step with it: it leads the stack on most shotgun samples, and drawing
+  // the biggest, brightest band over the reads that carry the least is the
+  // wrong way round.
   function palette(taxa) {
     var style = getComputedStyle(document.documentElement);
     var colors = [];
+    var step = 1;
 
     for (var i = 0; i < taxa.length; i++) {
-      var slot = i === taxa.length - 1 ? "--series-other" : "--series-" + (i + 1);
+      var slot = i === taxa.length - 1 ? "--series-other"
+               : unnamed(taxa[i].label) ? "--series-unnamed"
+               : "--series-" + step++;
+
       colors.push(style.getPropertyValue(slot).trim());
     }
 
@@ -659,7 +694,7 @@ __STATS__
   var DEFAULT_METRICS = [
     { key: "shannon", title: "Shannon index", note: "richness and evenness together", places: 2 },
     { key: "observed", title: "Observed " + MANY, note: "distinct " + MANY + " seen in the sample", integer: true },
-    { key: "reads", title: "Read depth", note: DEPTH, integer: true },
+    { key: "reads", title: "Read depth", note: DEPTH, integer: true, scale: "sqrt" },
     { key: "simpson", title: "Simpson index", note: "the chance two reads are different " + MANY, places: 3 },
     { key: "evenness", title: "Pielou's evenness", note: "0 = one " + ONE + " dominates, 1 = all equal", places: 3 }
   ];
@@ -702,6 +737,44 @@ __STATS__
     return spec.unit ? written + spec.unit : written;
   }
 
+  // Where a reading sits up the axis, as a share of its height, and the reading
+  // a gridline drawn at that share stands for. One index in the set is a count
+  // rather than a measurement - a run holds a sample that failed beside one
+  // sequenced a hundred times as deep - and on a straight axis every column but
+  // the deepest is a hairline. So the scale is the index's own, declared by
+  // whichever script worked the numbers out, and a square root is the one that
+  // carries a count: it keeps zero at the floor, which a logarithm cannot, so
+  // the columns still start where the axis does.
+  function rise(spec, value, top) {
+    return spec.scale === "sqrt" ? Math.sqrt(Math.max(value, 0) / top) : value / top;
+  }
+
+  function gridline(spec, share, top) {
+    return spec.scale === "sqrt" ? top * share * share : top * share;
+  }
+
+  // How wide a gutter this index needs down the left of its chart. The readings
+  // on the scale are the index's own - a coverage runs to "97.0%" and a read
+  // depth to "186,000,000" - so the room they take is measured rather than
+  // assumed, or the widest of them is drawn over the axis title beside it. Never
+  // narrower than the composition chart's, so the two halves of the panel line
+  // up on the runs where they can, and never past a third of the chart.
+  function gutter(ctx, top, width) {
+    var widest = 0;
+
+    ctx.font = LABEL_FONT;
+
+    [0.25, 0.5, 0.75, 1].forEach(function (share) {
+      var written = format(metric, gridline(metric, share, top));
+
+      widest = Math.max(widest, ctx.measureText(written).width);
+    });
+
+    return Math.min(Math.round(width / 3),
+                    Math.max(COMPOSITION_LEFT,
+                             Math.ceil(TITLE_BAND + widest + LABEL_GAP)));
+  }
+
   function drawMetric() {
     if (!metric) return;
 
@@ -712,12 +785,20 @@ __STATS__
     var ctx = view.ctx;
     var foot = band(ctx, total);
     var height = Math.max(80, total - TOP - foot);
-    var geometry = columns(view.width, 66, PLOT_RIGHT);
-    var floor = TOP + height;
     var top = 0;
 
     for (var i = 0; i < series.length; i++) if (series[i] > top) top = series[i];
     if (top <= 0) top = 1;
+
+    // An index that is a share of a whole carries the top of its own scale, so
+    // that the topmost gridline is that whole rather than the best sample in
+    // the run - a chart whose tallest column is always full height says every
+    // run reached the same coverage. Raised past it only by a reading that
+    // overshoots, which would otherwise be drawn off the chart.
+    if (metric.max) top = Math.max(top, metric.max);
+
+    var geometry = columns(view.width, gutter(ctx, top, view.width), PLOT_RIGHT);
+    var floor = TOP + height;
 
     ctx.strokeStyle = ink("--border");
     ctx.fillStyle = ink("--muted");
@@ -726,22 +807,25 @@ __STATS__
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
 
-    [0, 0.25, 0.5, 0.75, 1].forEach(function (fraction) {
-      var y = Math.round(floor - fraction * height) + 0.5;
+    [0, 0.25, 0.5, 0.75, 1].forEach(function (share) {
+      var y = Math.round(floor - share * height) + 0.5;
 
       ctx.beginPath();
       ctx.moveTo(geometry.left, y);
       ctx.lineTo(view.width - 8, y);
       ctx.stroke();
 
-      if (fraction > 0) ctx.fillText(format(metric, top * fraction), geometry.left - 8, y);
+      if (share > 0) {
+        ctx.fillText(format(metric, gridline(metric, share, top)),
+                     geometry.left - LABEL_GAP, y);
+      }
     });
 
     ctx.fillStyle = ink("--series-1");
 
     for (var slot = 0; slot < count; slot++) {
       var value = series[order[slot]] || 0;
-      var high = (value / top) * height;
+      var high = rise(metric, value, top) * height;
 
       if (high <= 0) continue;
 
@@ -760,34 +844,48 @@ __STATS__
     if (names) drawNames(ctx, geometry, floor, foot);
     else       axisFoot(ctx, "Samples", geometry.left, view.width - 8, floor + 8);
 
+    // Which tool measured the index, beside the index it measured. A shotgun
+    // run reads its indices off two tools that answer different questions, and
+    // a reader comparing two of them is owed which is which. Data that names no
+    // source - the amplicon set, whose indices are all computed over the one
+    // ASV table - leaves the sentence off.
     metricAbout.textContent = metric.title + " for each sample on its own: "
-      + metric.note + ".";
+      + metric.note + "."
+      + (metric.source ? " Values come from " + metric.source + "." : "");
     metricNote.textContent = ordering()
+      + (metric.scale === "sqrt"
+         ? " Drawn on a square-root scale, so a column twice as tall is four"
+           + " times the reading."
+         : "")
       + " Hover a column for the sample it belongs to.";
 
     return { geometry: geometry, height: height };
   }
 
+  // The spread of the index the chart is drawn from, under the chart. Only that
+  // one: the other indices are a select away, and three numbers for an index
+  // the reader is not looking at read as though they belonged to the one they
+  // are.
   function drawSummary() {
     var html = "";
 
-    METRICS.forEach(function (spec) {
-      // A sample the tool could not measure is left out of the three numbers
-      // rather than counted as a zero in them
-      var series = (values(spec.key) || []).filter(function (value) {
-        return value !== null && value !== undefined;
-      }).sort(function (a, b) { return a - b; });
+    // A sample the tool could not measure is left out of the three numbers
+    // rather than counted as a zero in them
+    var series = (values(metric.key) || []).filter(function (value) {
+      return value !== null && value !== undefined;
+    }).sort(function (a, b) { return a - b; });
 
-      if (!series.length) return;
-
+    if (series.length) {
       var middle = series.length % 2
         ? series[(series.length - 1) / 2]
         : (series[series.length / 2 - 1] + series[series.length / 2]) / 2;
 
-      html += "<tr><td>" + spec.title + "</td><td class=\"num\">" + format(spec, series[0])
-        + "</td><td class=\"num\">" + format(spec, middle)
-        + "</td><td class=\"num\">" + format(spec, series[series.length - 1]) + "</td></tr>";
-    });
+      html = "<tr><td>" + escape(metric.title) + "</td><td class=\"num\">"
+        + format(metric, series[0])
+        + "</td><td class=\"num\">" + format(metric, middle)
+        + "</td><td class=\"num\">" + format(metric, series[series.length - 1])
+        + "</td></tr>";
+    }
 
     document.getElementById("summary").innerHTML = html;
   }
@@ -950,6 +1048,7 @@ __STATS__
 
     metricSelect.addEventListener("change", function () {
       metric = METRICS[metricSelect.value];
+      drawSummary();
       redraw();
     });
 

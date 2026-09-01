@@ -24,6 +24,11 @@
 # tell one colour from the next, and the full tables are published for anyone who
 # needs every row.
 #
+# A sequence the classifier placed nowhere and one it placed in Bacteria and no
+# deeper are one taxon here, "Unassigned". The domain is the one every sequence
+# in a 16S run is expected to land in, so naming it says nothing a reader can
+# use, and the two shares compete for the top of the chart when they are apart.
+#
 # A run publishes agglomerated tables only for the ranks tax_agglom_min..
 # tax_agglom_max covered, which stops at genus by default. Species is read out of
 # QIIME 2's barplot instead, which carries every rank the taxonomy names.
@@ -93,7 +98,7 @@ readonly STATS_KEY="statistics"
 
 # How many taxa of each rank are drawn in their own colour before the tail is
 # summed into "Other". Eleven is what the palette carries, and a rank's list is
-# usually seven or eight named taxa plus the unclassified and unassigned shares.
+# usually nine or ten named taxa plus the unassigned share.
 readonly TOP_TAXA=11
 
 # The rank each rank-<n> table is agglomerated to, indexed by that number
@@ -278,6 +283,21 @@ level_json() {
             return out
         }
 
+        # The row a taxonomy is counted under, which is not always the taxonomy
+        # itself. Everything that named nothing is summed into one row and drawn
+        # as "Unassigned": a sequence the classifier placed nowhere, and a
+        # sequence it placed in Bacteria and no deeper. The second is the one
+        # domain a 16S run expects every sequence to land in, so "Unclassified
+        # Bacteria" told a reader only that the run had worked - while being
+        # routinely the largest band on the chart.
+        function bin(taxon,   name) {
+            name = label(taxon)
+
+            if (name == "Unassigned" || name == "Unclassified Bacteria") return ""
+
+            return taxon
+        }
+
         function json_string(s) {
             gsub(/\\/, "\\\\", s)
             gsub(/"/, "\\\"", s)
@@ -329,25 +349,33 @@ level_json() {
 
         NR == FNR {
             for (i = 2; i <= columns; i++) {
-                if (column[i]) total[$1] += $i + 0
+                if (column[i]) total[bin($1)] += $i + 0
             }
             next
         }
 
         !ranked { choose(); ranked = 1 }
 
-        $1 in chosen {
+        {
+            place = chosen[bin($1)]
+
+            if (!place) next
+
+            # Summed rather than assigned, since two taxonomies can be the one
+            # row here, and rounded once in END rather than once per taxonomy
             for (i = 2; i <= columns; i++) {
-                if (!column[i]) continue
-
-                share = int(($i + 0) * 10000 + 0.5)
-
-                value[chosen[$1], column[i]] = share
-                if (share > 0) present[chosen[$1]]++
+                if (column[i]) value[place, column[i]] += $i + 0
             }
         }
 
         END {
+            for (t = 1; t <= drawn; t++) {
+                for (s = 1; s <= samples; s++) {
+                    share[t, s] = int(value[t, s] * 10000 + 0.5)
+                    if (share[t, s] > 0) present[t]++
+                }
+            }
+
             printf "{\"rank\":%d,\"name\":%s,\"taxa\":[", rank, json_string(rank_name)
 
             for (t = 1; t <= drawn; t++) {
@@ -367,7 +395,7 @@ level_json() {
 
             for (t = 1; t <= drawn; t++) {
                 printf "%s[", (t > 1 ? "," : "")
-                for (s = 1; s <= samples; s++) printf "%s%d", (s > 1 ? "," : ""), value[t, s] + 0
+                for (s = 1; s <= samples; s++) printf "%s%d", (s > 1 ? "," : ""), share[t, s] + 0
                 printf "]"
             }
 
@@ -375,7 +403,7 @@ level_json() {
 
             for (s = 1; s <= samples; s++) {
                 rest = 10000
-                for (t = 1; t <= drawn; t++) rest -= value[t, s] + 0
+                for (t = 1; t <= drawn; t++) rest -= share[t, s] + 0
                 printf "%s%d", (s > 1 ? "," : ""), (rest > 0 ? rest : 0)
             }
 

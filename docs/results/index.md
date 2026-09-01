@@ -41,9 +41,18 @@ it.
 | `#files` | `files.html` | `files.html` |
 
 The open view is remembered in the URL fragment, so `#quality` is a link
-straight to the MultiQC report with the bar still around it. Each link also
+straight to the Technical Report with the bar still around it. Each link also
 carries `target="view"`, so the bar works with scripting off — the script only
 keeps the fragment and the underline in step with the frame.
+
+**Back and forward walk the views.** A view costs exactly one history entry —
+the fragment — because the frame is sent to its page by replacing the address it
+is on rather than by having its `src` rewritten, which would push a second entry
+on top of the fragment's. Without that, a reader's first *back* undid the
+frame's navigation while the fragment and the underline stayed where they were,
+and the bar named a view the frame had already left. A page opened off disk
+rather than out of the bucket — the copy inside `dashboard.zip` — falls back to
+rewriting `src`, since the frame is then an origin of its own.
 
 **The expiration notice**, at the end of the bar. See [The expiration
 notice](#the-expiration-notice) below.
@@ -90,14 +99,20 @@ reader is on never goes anywhere.
 **Run statistics**, under them, headed by how many samples the run covered —
 from `.samples.count`, the count *after* entries sharing a sample name were
 merged, and the count every number under it is a count over. Then what the run
-measured, in the units a sidebar has room for. An ampliseq run reports the reads
-that went in against the reads that reached an ASV, the thinnest, middle and
-deepest sample, how many ASVs it called, and how much of it the classifier could
-place at family, at genus and at species. A taxprofiler run reports the reads it
-started with, how many of them came through quality filtering, and how many were
-left once the host was taken out; then the same three sample depths, and how much
-of what reached the classifier it could place at phylum, at genus and at species.
+measured, in the units a sidebar has room for. Both pipelines report the same two
+read totals — the reads that went in, and the reads that were left — then the
+thinnest, middle and deepest sample. An ampliseq run's retained reads are the
+ones that reached an ASV, and under them it reports how many ASVs it called and
+how much of that the classifier could place at family, at genus and at species. A
+taxprofiler run's are the ones that reached the classifier, after quality
+filtering and host depletion have each taken their cut, and under them it reports
+how much of that the classifier could place at phylum, at genus and at species.
 The same pass that works out the plots counts all of it, into `.statistics`.
+
+**Two bars, not a funnel.** What each step in between took is that step's own
+accounting and is in the Technical Report, per sample and per tool; a sidebar
+restating all of it is a funnel nobody reads, and it crowded out the readings
+that were worth the room.
 
 A share is written whole. On a shotgun run there is one exception, for the step
 that needs it: where rounding whole would read 100% for a step that did drop
@@ -117,9 +132,7 @@ leaves its note off rather than naming an empty one. On a taxprofiler run the
 note over the read totals is what the reads were — *"Illumina, 2 x 151 bp"*,
 *"Nanopore"* — which is measured off the reads rather than declared, so it comes
 off `.statistics` with the numbers under it; the classifier and database sit over
-the classification. What the run was depleted
-against is named on the bar it explains, as *"Excluding PhiX"* or *"Excluding
-Human + PhiX"*; a run that depleted nothing has no such bar.
+the classification.
 
 **A footer** saying when the run finished, which pipeline version produced it,
 and the uid. That last is there so a reader asking us about these results has
@@ -281,7 +294,7 @@ pipeline work. The final upload overwrites it.
 **It starts before nextflow does**, because the stages before nextflow are the
 ones a requester waits through with nothing to look at: recompressing and
 staging a few hundred FASTQ files, and measuring what was sequenced, take long
-enough to look like a stall. Each stage calls `report_stage` as it begins, which
+enough to look like a stall. Each stage calls `set_run_stage` as it begins, which
 writes one sentence to `.stage` in the run's state file, and the page says it
 under the run's name — *Preparing your sequencing files.* The watcher is stopped
 before the results are uploaded, since that upload lands the finished dashboard

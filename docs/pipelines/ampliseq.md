@@ -111,7 +111,7 @@ text file:
 
 ```bash
 dashboard_view report  "Analysis Report" "summary_report/summary_report.html"
-dashboard_view quality "Quality Control" "multiqc/multiqc_report.html"
+dashboard_view quality "Technical Report" "multiqc/multiqc_report.html"
 dashboard_index_view   "File Explorer"
 dashboard_button "qiime2/abundance_tables/feature-table.biom"
 dashboard_bundle "Raw sequencing data" "$FASTQ_URL"

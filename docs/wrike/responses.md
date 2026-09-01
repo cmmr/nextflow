@@ -784,53 +784,8 @@ call_wrike_api GET "/spaces/$WRIKE_SPACE_ID/workflows"
         {
           "standardName": false,
           "standard": false,
-          "id": "IEAAIKU5JMHRVOK6",
-          "name": "Validating",
-          "color": "Blue",
-          "group": "Active",
-          "hidden": false
-        },
-        {
-          "standardName": false,
-          "standard": false,
-          "id": "IEAAIKU5JMHRVOLI",
-          "name": "Queued",
-          "color": "Orange",
-          "group": "Active",
-          "hidden": false
-        },
-        {
-          "standardName": false,
-          "standard": false,
-          "id": "IEAAIKU5JMHRXWVK",
-          "name": "Initializing",
-          "color": "Blue",
-          "group": "Active",
-          "hidden": false
-        },
-        {
-          "standardName": false,
-          "standard": false,
-          "id": "IEAAIKU5JMHRVOLS",
-          "name": "Pre-Processing",
-          "color": "Blue",
-          "group": "Active",
-          "hidden": false
-        },
-        {
-          "standardName": false,
-          "standard": false,
           "id": "IEAAIKU5JMHRVOL4",
           "name": "Running",
-          "color": "Blue",
-          "group": "Active",
-          "hidden": false
-        },
-        {
-          "standardName": false,
-          "standard": false,
-          "id": "IEAAIKU5JMHRVOMG",
-          "name": "Post-Processing",
           "color": "Blue",
           "group": "Active",
           "hidden": false
@@ -860,15 +815,6 @@ call_wrike_api GET "/spaces/$WRIKE_SPACE_ID/workflows"
           "name": "Expired",
           "color": "Brown",
           "group": "Completed",
-          "hidden": false
-        },
-        {
-          "standardName": true,
-          "standard": false,
-          "id": "IEAAIKU5JMHRVONH",
-          "name": "Cancelled",
-          "color": "Gray",
-          "group": "Cancelled",
           "hidden": false
         }
       ],

@@ -570,27 +570,47 @@ alpha_has_column() {
 # them rather than the page assuming a set. The first is the one the chart opens
 # on, and the one the samples can be sorted by.
 #
+# Estimated coverage leads them. It is the reading that says whether the rest of
+# this run is worth reading at all - a sample the reads only reached a third of
+# has a diversity and a cluster count that describe the sequencing rather than
+# the community - and it is the one a requester asks about first.
+#
+# Each names the tool it came from, which the page prints under the chart. The
+# readings come off two tools that answer different questions, and a reader
+# comparing two of them is owed which is which. Each column is offered on its
+# own rather than on the table's, since a run can produce one of a tool's
+# readings and not another.
+#
+# Two of them carry their axis with them. A coverage is a share of a whole, so
+# its scale tops out at 100 rather than at the best sample in the run. A read
+# depth is a count, and a run holding a sample that failed beside one sequenced
+# a hundred times as deep draws every column but the deepest as a hairline, so
+# it is plotted on a square root.
+#
 # Fails for a run that measured no diversity at all, which leaves the page to
 # hide that half rather than draw a chart of read depth and call it diversity.
 composition_metrics() {
     local -a metrics=()
 
+    if alpha_has_column coverage_pct; then
+        metrics+=('{"key":"coverage","title":"Estimated coverage","note":"how much of the community the reads reached","places":1,"unit":"%","max":100,"source":"Nonpareil"}')
+    fi
+
     if alpha_has_column nonpareil_diversity; then
-        metrics+=('{"key":"diversity","title":"Nonpareil diversity","note":"how varied the community is, read off how often the same sequence recurs rather than off a database","places":2}')
-        metrics+=('{"key":"coverage","title":"Estimated coverage","note":"how much of the community the reads reached","places":1,"unit":"%"}')
+        metrics+=('{"key":"diversity","title":"Nonpareil diversity","note":"how varied the community is, read off how often the same sequence recurs rather than off a database","places":2,"source":"Nonpareil"}')
     fi
 
     if alpha_has_column observed_motus; then
-        metrics+=('{"key":"motus","title":"Observed mOTUs","note":"species-level clusters found in universal marker genes","integer":true}')
+        metrics+=('{"key":"motus","title":"Observed mOTUs","note":"species-level clusters found in universal marker genes","integer":true,"source":"mOTUs"}')
     fi
 
     if alpha_has_column effort_95_gbp; then
-        metrics+=('{"key":"effort95","title":"Effort for 95% coverage","note":"the sequencing this sample would take to reach 95% coverage","places":1,"unit":" Gbp"}')
+        metrics+=('{"key":"effort95","title":"Effort for 95% coverage","note":"the sequencing this sample would take to reach 95% coverage","places":1,"unit":" Gbp","source":"Nonpareil"}')
     fi
 
     (( ${#metrics[@]} > 0 )) || return 1
 
-    metrics+=('{"key":"reads","title":"Read depth","note":"reads that reached the classifier","integer":true}')
+    metrics+=('{"key":"reads","title":"Read depth","note":"reads that reached the classifier","integer":true,"scale":"sqrt","source":"the Kraken2 reports"}')
 
     local IFS=,
     printf '%s' "${metrics[*]}"

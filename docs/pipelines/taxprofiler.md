@@ -223,14 +223,16 @@ database sheet:
 | Row | File |
 |---|---|
 | Species abundance table | `taxpasta/bracken_*.tsv`, or `taxpasta/kraken2_*.tsv` for a run without Bracken |
-| MetaPhlAn profiles | `metaphlan/metaphlan_*_combined_reports.txt` |
-| mOTUs profiles | `motus/motus_*_combined_reports.txt` |
 | Raw sequencing data | `$GLOBUS_URL/nxf/<uid>/raw-sequences.zip?download` |
 | All result files | `$GLOBUS_URL/nxf/<uid>/dashboard.zip?download` |
 
-`alpha_diversity.tsv` is not among them: it is the numbers behind a plot the
-reader is already looking at, and the file index lists it under `Start here` for
-anyone who wants them.
+**Three rows and the button under them, and nothing else.** The merged MetaPhlAn
+and mOTUs profiles, and `alpha_diversity.tsv`, are all published — they are just
+not what this list is for. It is the shortest route to the file a requester came
+for, and every row added to it makes that route longer. The file index carries
+each of them under the heading that says what it is for, and the second-opinion
+profiles and the numbers behind a plot the reader is already looking at are both
+a click into it.
 
 All three open in a tab rather than downloading, which is what
 [their content types](../results/index.md#what-a-link-does-when-you-click-it)
@@ -373,11 +375,29 @@ Overview's diversity chart is drawn from them:
 
 | Reading | From | What it says |
 |---|---|---|
-| Nonpareil diversity (Nd) | nonpareil | How varied the community is, on a log scale, from how often the same sequence recurs |
 | Estimated coverage | nonpareil | What share of the community the reads reached |
+| Nonpareil diversity (Nd) | nonpareil | How varied the community is, on a log scale, from how often the same sequence recurs |
 | Effort for 95% coverage | nonpareil | How much sequencing that sample would take to get there |
 | Observed mOTUs | mOTUs | Species-level clusters found in universal marker genes |
 | Read depth | kraken2 | The reads the estimates above were measured at |
+
+That is the order the `Index` select offers them in, so **estimated coverage is
+the reading the chart opens on**. It is the one that says whether the rest of the
+run is worth reading: a sample the reads only reached a third of has a diversity
+and a cluster count that describe the sequencing rather than the community. It is
+also the reading a requester asks about first, in those words or in others.
+
+Because the five come off two tools that answer different questions, the caption
+under the chart **names the tool each reading came from** — *"Values come from
+Nonpareil."* — so a reader comparing two of them knows which is which.
+
+Two of them carry their own axis. Estimated coverage is a share of a whole, so
+its topmost gridline is 100% rather than the best sample in the run — otherwise
+every run's tallest column reaches the top and a run that covered 40% looks like
+one that covered 97%. Read depth is a count, and a run holding a failed sample
+beside one sequenced a hundred times as deep would draw everything but the
+deepest as a hairline, so it is plotted on a square root. See [the composition
+panel](../results/composition.md#what-is-in-the-panel).
 
 **Nonpareil never looks at a database.** It measures redundancy directly:
 how often a read has already been seen in the same dataset. A sample whose reads

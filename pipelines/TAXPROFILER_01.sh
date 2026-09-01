@@ -14,7 +14,6 @@ NEXTFLOW_ARGS=(
     run nf-core/taxprofiler
     -r "$TAXPROFILER_REVISION"
     -profile apptainer
-    -resume
     -c "$NEXTFLOW_DIR/config/taxprofiler/slurm.config"
     -params-file taxprofiler_args.yaml
 )

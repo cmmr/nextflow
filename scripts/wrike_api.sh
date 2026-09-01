@@ -8,8 +8,8 @@
 # is_valid_wrike_id and read_wrike_task_id acts on the task named by TASK_ID,
 # read from the environment rather than passed in.
 #
-# Nothing here writes the run's own state. update_wrike_task_status moves the
-# Wrike task; report_status, in run_state.sh, records the same name in the run
+# Nothing here writes the run's own state. set_wrike_status moves the
+# Wrike task; set_run_status, in run_state.sh, records the same name in the run
 # directory.
 #
 # Request bodies are built with jq rather than by splicing values into
@@ -103,16 +103,10 @@ WRIKE_ANSWER_MAX_LENGTH=256
 
 declare -A WRIKE_CUSTOM_STATUS_IDS=(
     [Submitted]="IEAAIKU5JMHRVOKU"
-    [Validating]="IEAAIKU5JMHRVOK6"
-    [Queued]="IEAAIKU5JMHRVOLI"
-    [Initializing]="IEAAIKU5JMHRXWVK"
-    [Pre-Processing]="IEAAIKU5JMHRVOLS"
     [Running]="IEAAIKU5JMHRVOL4"
-    [Post-Processing]="IEAAIKU5JMHRVOMG"
     [Completed]="IEAAIKU5JMHRVOKV"
     [Failed]="IEAAIKU5JMHRVOMR"
     [Expired]="IEAAIKU5JMHRVOM3"
-    [Cancelled]="IEAAIKU5JMHRVONH"
 )
 # Where the run's state file keeps what this system records about its Wrike
 # task, and the checked answers to the request form. wrike_task_handler.sh
@@ -222,7 +216,7 @@ update_wrike_task() {
 # A rejected write warns but still returns success: these fields are display
 # only, and callers on the compute node run under set -e, where a non-zero return
 # would abandon a finished pipeline. A transport failure still returns non-zero.
-update_wrike_custom_field() {
+set_wrike_custom_field() {
     local custom_field_id="$1"
     local new_value="$2"
 
@@ -248,10 +242,10 @@ update_wrike_custom_field() {
 # above. An unmapped name is logged and skipped rather than reported.
 #
 # This reports to Wrike and nothing else. The run's own record of how far it got
-# is report_status, in run_state.sh, and a caller that wants both calls both -
+# is set_run_status, in run_state.sh, and a caller that wants both calls both -
 # which is what each stage of wrike_job.sh does. They are separate so the task
 # can be moved on without touching the run's record, and the other way round.
-update_wrike_task_status() {
+set_wrike_status() {
     local new_value="$1"
     local status_id="${WRIKE_CUSTOM_STATUS_IDS[$new_value]:-}"
 
@@ -263,13 +257,13 @@ update_wrike_task_status() {
     update_wrike_task '{customStatus: $status}' --arg status "$status_id"
 }
 
-update_wrike_add_parent() {
+add_wrike_parent() {
     local new_parent="$1"
 
     update_wrike_task '{addParents: [$parent]}' --arg parent "$new_parent"
 }
 
-add_wrike_task_comment() {
+add_wrike_comment() {
     local message="$*"
 
     call_wrike_api POST "tasks/$TASK_ID/comments" \
@@ -282,7 +276,7 @@ add_wrike_task_comment() {
 # to want. Wrike takes plainText=true literally and would post the tags as
 # characters, so this omits it; a caller mixing in text of its own escapes it
 # with escape_html first.
-add_wrike_task_html_comment() {
+add_wrike_html_comment() {
     local message="$*"
 
     call_wrike_api POST "tasks/$TASK_ID/comments" \

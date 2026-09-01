@@ -13,12 +13,17 @@ handler's pre-Slurm sanity checks. Everything from `Queued` on is set from insid
 a run directory.
 
 **Reporting to Wrike and recording the run's own status are separate calls.**
-`update_wrike_task_status` sets the task's status and nothing else;
-`report_status`, in [`scripts/run_state.sh`](../../scripts/run_state.sh), writes
+`set_wrike_status` sets the task's status and nothing else;
+`set_run_status`, in [`scripts/run_state.sh`](../../scripts/run_state.sh), writes
 `.status` in the run's `run_state.json`, which `wrike_followup.sh` reads to find
 out how far the run got. A stage inside a run directory calls both, the run's own
 record first, so a task reading `Queued` is always backed by a run that says the
 same.
+
+To reduce Wrike notifications, Wrike only uses the following statuses:
+```
+Submitted → Running → Completed / Failed
+```
 
 They are separate so either can happen on its own. `Submitted` and `Validating`
 happen before any run directory exists, so they only move the task — a status
@@ -43,7 +48,7 @@ call_wrike_api GET "/spaces/$WRIKE_SPACE_ID/workflows"
 
 A stage name that isn't a key of the map is logged and skipped, deliberately:
 losing a progress update is not worth killing a twelve-hour pipeline over, and
-`report_status` records the stage either way. So a rename in Wrike shows up only in
+`set_run_status` records the stage either way. So a rename in Wrike shows up only in
 the daemon log:
 
 ```

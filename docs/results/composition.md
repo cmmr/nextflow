@@ -83,8 +83,26 @@ select and drawn in the same sample order as the composition above it. Which
 indices those are is the run's own: an amplicon run offers the Shannon index
 first, then observed ASVs, read depth, the Simpson index and Pielou's evenness; a
 shotgun run offers what nonpareil and mOTUs measured, none of which needs a
-classification database. Under it, a table of the lowest, median and highest
-value of every one of them.
+classification database, and opens on estimated coverage. Under it, the caption
+says what the index is and — where the run's data names one — which tool
+measured it, and a table gives the lowest, median and highest value **of that
+index**. The other indices are a select away, and three numbers for an index the
+reader is not looking at read as though they belonged to the one they are.
+
+**The axis belongs to the index, not to the chart.** Most of them are drawn
+straight, from zero to the best sample in the run. Two are not, and say so in
+the data rather than in the page:
+
+- **A share of a whole tops out at that whole.** Estimated coverage runs to
+  100%, so the topmost gridline is 100% however well the run did. Scaled to the
+  best sample instead, every run's tallest column reached the top and a run that
+  covered 40% of its communities looked like one that covered 97%.
+- **A count is drawn on a square root.** Read depth is the one index that is a
+  count, and a run holding a sample that failed beside one sequenced a hundred
+  times as deep draws every column but the deepest as a hairline. The square
+  root pulls the top in while keeping zero at the floor — which a logarithm
+  cannot, so the columns still start where the axis does — and the caption says
+  a column twice as tall is four times the reading.
 
 Both are drawn to a `<canvas>`. A column per sample stays a column per sample
 whether there are six or six thousand; nothing is added to the document, so
@@ -107,6 +125,15 @@ Per sample, from the **unrarefied** counts:
 | Shannon | `−Σ p ln p` |
 | Simpson | `1 − Σ p²` |
 | Pielou's evenness | `H / ln S`, and 0 for a sample holding one ASV |
+
+**A sequence classified only to `Bacteria` is drawn as `Unassigned`.** Silva
+writes it as `Bacteria;;;;;`, which is a rank short of a classification at every
+rank the chart offers, and the domain it names is the one every sequence in a 16S
+run is expected to land in — so the band said only that the run had worked, while
+routinely being the largest one on the chart. Its counts are summed into the
+`Unassigned` share and the two are drawn as one taxon, which also frees a colour
+for a genus somebody can act on. Everything else keeps its own row: `Unclassified
+Pseudomonadota` names a phylum the sequence really did reach.
 
 **No Chao1.** It estimates the species that were missed from the ones seen
 exactly once and twice, and DADA2 has already dropped most of the singletons —
@@ -151,9 +178,10 @@ reads are counted, since Bracken drops that line and renormalises over what it
 placed, and the only honest account of how far the classifier got. So:
 
 - the stacks are shares of **every read that reached the classifier**, with the
-  unclassified reads entered as a taxon of their own and competing for a colour
-  like any other. On a shotgun run they are routinely the largest share of a
-  sample, and a chart that left them out would say the opposite of what it means;
+  unclassified reads entered as a taxon of their own — drawn in a grey rather
+  than in a colour, see [Colour](#colour). On a shotgun run they are routinely
+  the largest share of a sample, and a chart that left them out would say the
+  opposite of what it means;
 - the sidebar's rank bars are read off Kraken2 rather than Bracken, which would
   otherwise report that ~100% of reads reached species level.
 
@@ -271,9 +299,19 @@ for its sample count and nothing else.
 
 Only the **eleven most abundant taxa** of each rank are drawn in their own
 colour; everything rarer is summed into `Other`, which wears a neutral. A rank's
-eleven are usually eight or nine named taxa plus the unclassified and unassigned
-shares. Past that many fills, a reader cannot reliably tell one from the next —
+eleven are usually nine or ten named taxa plus the share of the sample nothing
+was named in. Past that many fills, a reader cannot reliably tell one from the next —
 least of all a colour-blind one — so a twelfth taxon is not given a twelfth hue.
+
+**What was named nothing wears a grey too, and takes no colour with it.** A
+shotgun run's `Unclassified` and a 16S run's `Unassigned` are the absence of a
+taxon rather than a taxon, and on most samples they are the largest band on the
+chart — so drawing them in the first and brightest step of the set gave the
+loudest colour to the one band that says nothing about what was in the sample.
+They are drawn in a grey of their own, a shade off the one `Other` wears, and the
+categorical steps go to the named taxa under them. On a 16S run `Unassigned`
+already carries the sequences classified no deeper than `Bacteria`, which is
+where that chart's biggest, brightest band used to come from.
 
 The eleven are a categorical set whose *order* keeps neighbouring fills apart under
 colour vision deficiency, so they are assigned in that order and never cycled.

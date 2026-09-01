@@ -160,7 +160,7 @@ if ! TASK_JSON=$(call_wrike_api POST "folders/$STAGING_SPACE_ID/tasks" \
     fail "$REASON"
 fi
 
-# TASK_ID is read by update_wrike_add_parent and discard_staged_task
+# TASK_ID is read by add_wrike_parent and discard_staged_task
 TASK_ID=$(echo "$TASK_JSON" | jq -r '.data[0].id // empty')
 PERMALINK=$(echo "$TASK_JSON" | jq -r '.data[0].permalink // empty')
 
@@ -181,7 +181,7 @@ fi
 # 6. File it under "Dashboards", which fires the TaskParentsAdded that puts the
 #    request on the rails. The staging space is left attached; detaching it would
 #    fire the TaskParentsRemoved that wrike_delete_handler.sh tears runs down on.
-if ! update_wrike_add_parent "$WRIKE_FOLDER_ID" > /dev/null; then
+if ! add_wrike_parent "$WRIKE_FOLDER_ID" > /dev/null; then
     discard_staged_task
     fail "Could not file the task under \"Dashboards\"."
 fi

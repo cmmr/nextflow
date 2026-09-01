@@ -15,7 +15,6 @@ NEXTFLOW_ARGS=(
     run nf-core/ampliseq
     -r "$AMPLISEQ_REVISION"
     -profile apptainer
-    -resume
     -c "$NEXTFLOW_DIR/config/slurm.config"
     -params-file ampliseq_args.yaml
 )

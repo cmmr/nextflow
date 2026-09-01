@@ -62,7 +62,7 @@ readonly NEXTFLOW_LOG="nextflow.log"
 readonly NEXTFLOW_CMD="nextflow_command.sh"
 
 # Everything below that is not a log comes out of the run's state file: the
-# status, the task name that heads the page, the sentence report_stage wrote for
+# status, the task name that heads the page, the sentence set_run_stage wrote for
 # the line under it, the message a failed stage left, and the clocks the last
 # page that had jobs to read recorded - kept there because a run that has ended
 # has nothing left in squeue, and the page it is left showing should still say
@@ -538,7 +538,7 @@ publish_once() {
 
     # Status from the run's own record unless the caller named one
     if [[ -z "$status" ]]; then
-        status=$(run_status)
+        status=$(get_run_status)
     fi
     : "${status:=Running}"
 

@@ -61,7 +61,7 @@ The six it sources:
   through `jq`. Values are addressed by a dotted path (`state_get wrike.task_id`,
   `state_set_number samples.count 10`); writes are serialized on
   `.run_state.lock` and land by rename, so a reader never sees half a document.
-  `report_status` and `report_stage` are the two named shortcuts, for the status
+  `set_run_status` and `set_run_stage` are the two named shortcuts, for the status
   `wrike_followup.sh` reads and the sentence the progress page shows, and
   `publish_run_state` puts the file at `nxf/<uid>/run_state.json` beside the
   results. Nothing in it is secret - it is published in full; see
@@ -70,7 +70,7 @@ The six it sources:
   parameter map a pipeline declares its defaults in and `wrike_job.sh` writes the
   params file from; see [Pipelines](pipelines/index.md).
 - [`scripts/wrike_api.sh`](../scripts/wrike_api.sh) — `call_wrike_api` plus the
-  `update_wrike_*` / `add_wrike_task_comment` helpers, which read `TASK_ID` from
+  `update_wrike_*` / `add_wrike_comment` helpers, which read `TASK_ID` from
   the environment rather than taking it as an argument. **It also defines every
   Wrike object ID the system works against:**
   - `WRIKE_FOLDER_ID` — the folder the webhook watches

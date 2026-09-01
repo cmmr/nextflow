@@ -32,8 +32,8 @@
 # Defines: RUN_STATE_FILE, RUN_STATE_KEY, state_init, state_present,
 #          state_update, state_get, state_get_json, state_get_tsv, state_has,
 #          state_set, state_set_json, state_set_number, state_set_tsv,
-#          state_append, state_unset, publish_run_state, report_status,
-#          report_stage, run_status
+#          state_append, state_unset, publish_run_state, set_run_status,
+#          set_run_stage, get_run_status
 # Requires: jq, and flock where two writers can overlap; aws for
 #           publish_run_state; the warn helper and is_valid_uid from
 #           utilities.sh, which .env sources first
@@ -65,8 +65,9 @@ state_init() {
     jq -n \
         --argjson schema "$RUN_STATE_SCHEMA" \
         --arg run_id "$run_id" \
+        --arg status "Submitted" \
         --arg created_utc "$(date -u "+%Y-%m-%dT%H:%M:%SZ")" \
-        '{schema: $schema, run_id: $run_id, created_utc: $created_utc, notes: []}' \
+        '{schema: $schema, run_id: $run_id, status: $status, created_utc: $created_utc, notes: []}' \
         > "$RUN_STATE_FILE"
 }
 
@@ -241,13 +242,13 @@ publish_run_state() {
 # through "Running" to "Completed" or "Failed". wrike_followup.sh reads this to
 # find out how the run ended, and nextflow_progress.sh to head the page.
 #
-# Deliberately separate from update_wrike_task_status, which sets the same name
+# Deliberately separate from set_wrike_status, which sets the same name
 # on the Wrike task: a caller reports to one, the other, or both.
-report_status() {
+set_run_status() {
     state_set status "$1"
 }
 
-run_status() {
+get_run_status() {
     state_get status
 }
 
@@ -256,6 +257,6 @@ run_status() {
 # than appended: the page reports where the run is, not how it got there.
 #
 # Best effort, since a run must not fail over a status line.
-report_stage() {
+set_run_stage() {
     state_set stage "$1" 2>/dev/null || true
 }

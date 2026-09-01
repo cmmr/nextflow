@@ -188,7 +188,7 @@ dashboard_reset "$RESULTS_DIR" "$OUTPUT_CATALOG" "$(globus_run_url "$RUN_ID")"
 
 #    The navigation bar, after the Overview every run opens on
 dashboard_view report  "Analysis Report" "summary_report/summary_report.html"
-dashboard_view quality "Quality Control" "multiqc/multiqc_report.html"
+dashboard_view quality "Technical Report" "multiqc/multiqc_report.html"
 dashboard_index_view   "File Explorer"
 
 #    The ASV table carries its taxonomy as observation metadata, so it is the
@@ -219,12 +219,15 @@ else
     warn "This run recorded no manifest; the page will not say how the run was set up."
 fi
 
+#    The instrument the reads came off, which is what the note over the read
+#    totals is. Whether the run was paired or single-end is how the pipeline was
+#    set up rather than what the reads are, and it is in the samplesheet and the
+#    manifest for anyone who needs it.
 case "$SEQUENCING_TYPE" in
-    illumina_pe) PLATFORM="Illumina, paired-end" ;;
-    illumina_se) PLATFORM="Illumina, single-end" ;;
-    nanopore)    PLATFORM="Oxford Nanopore" ;;
-    pacbio)      PLATFORM="PacBio HiFi" ;;
-    *)           PLATFORM="$SEQUENCING_TYPE" ;;
+    illumina_pe|illumina_se) PLATFORM="Illumina" ;;
+    nanopore)                PLATFORM="Oxford Nanopore" ;;
+    pacbio)                  PLATFORM="PacBio HiFi" ;;
+    *)                       PLATFORM="$SEQUENCING_TYPE" ;;
 esac
 
 #    ampliseq names a database as it is passed to it - "silva=138.2". Read as a
@@ -372,5 +375,5 @@ if ! UPLOAD_OUTPUT=$(publish_results "$S3_RESULTS_DIR"); then
     fail "The results could not be uploaded to S3:"$'\n'"$UPLOAD_OUTPUT"
 fi
 
-update_wrike_custom_field "$WRIKE_DASHBOARD_URL_CFID" "$S3_RESULTS_URL"
+set_wrike_custom_field "$WRIKE_DASHBOARD_URL_CFID" "$S3_RESULTS_URL"
 log "Upload successful: $S3_RESULTS_URL"

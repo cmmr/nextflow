@@ -93,9 +93,8 @@ if ! TASK_ID=$(read_wrike_task_id); then
     fail "Cannot tell which Wrike task this run belongs to."
 fi
 
-report_status "Initializing"
-update_wrike_task_status "Initializing"
-report_stage "Getting your run ready."
+set_run_status "Initializing"
+set_run_stage "Getting your run ready."
 
 # Publish a progress page for the length of the run, from here rather than from
 # the nextflow stage: staging a few hundred FASTQ files takes long enough that a
@@ -144,7 +143,7 @@ if [[ ! -f "$NEXTFLOW_DIR/pipelines/$PIPELINE_VERSION.sh" ]]; then
     PIPELINE_VERSION="$PIPELINE_UPPER"
 fi
 
-update_wrike_custom_field "$WRIKE_PIPELINE_NAME_CFID" "$PIPELINE_VERSION" \
+set_wrike_custom_field "$WRIKE_PIPELINE_NAME_CFID" "$PIPELINE_VERSION" \
     || warn "Could not set the pipeline name on task $TASK_ID."
 
 # 3. A rerun takes its command line and its params file from the run it
@@ -177,9 +176,8 @@ fi
 #    plus its arguments. They name it by absolute path, so nothing here depends
 #    on PATH.
 if [[ ${#PRE_PROCESS_CMDS[@]} -gt 0 ]]; then
-    report_status "Pre-Processing"
-    update_wrike_task_status "Pre-Processing"
-    report_stage "Preparing your sequencing files."
+    set_run_status "Pre-Processing"
+    set_run_stage "Preparing your sequencing files."
 
     for stage_command in "${PRE_PROCESS_CMDS[@]}"; do
         $stage_command
@@ -267,9 +265,8 @@ state_set_json manifest "$MANIFEST" \
 } > nextflow_command.sh
 chmod +x nextflow_command.sh
 
-report_status "Running"
-update_wrike_task_status "Running"
-report_stage "Running the analysis."
+set_run_status "Running"
+set_run_stage "Running the analysis."
 
 # Teed because nextflow's console output is the only live account it gives of its
 # own progress, and nextflow_progress.sh reads it from nextflow.out. It still
@@ -297,9 +294,8 @@ fi
 
 # 7. Post-process, e.g. uploading results to S3. Unquoted for the same reason as above.
 if [[ ${#POST_PROCESS_CMDS[@]} -gt 0 ]]; then
-    report_status "Post-Processing"
-    update_wrike_task_status "Post-Processing"
-    report_stage "Packaging and publishing your results."
+    set_run_status "Post-Processing"
+    set_run_stage "Packaging and publishing your results."
 
     # One last page, by hand: the watcher was stopped above because the upload
     # below lands the finished dashboard on the same key, and a loop still
@@ -315,5 +311,5 @@ fi
 # above succeeded. Any earlier exit leaves the state file's ".status" on the
 # stage that failed. The Wrike task is left to wrike_followup.sh, which moves it
 # once it has read this.
-report_status "Completed"
+set_run_status "Completed"
 exit 0

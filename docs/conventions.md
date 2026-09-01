@@ -56,7 +56,7 @@ These carry most of the system's state, and nothing works if you break them:
   interprets one, which is what keeps it ignorant of pipelines and keeps each
   pipeline version owning its own parameter names.
 - **`.stage` is what the progress page says the run is doing.** One sentence,
-  overwritten by `report_stage` as each stage begins, and read by
+  overwritten by `set_run_stage` as each stage begins, and read by
   `nextflow_progress.sh` for the line under the run's name. It is kept beside
   `nextflow.out` rather than in it: that file is nextflow's own output, and the
   parser that reads it should never have to tell our lines from nextflow's.
@@ -65,7 +65,7 @@ These carry most of the system's state, and nothing works if you break them:
   `wrike_followup.sh` posts it whether the run succeeded or failed, where
   `.message` explains only failures.
 - **Reporting to Wrike and recording state are separate calls.**
-  `update_wrike_task_status` moves the task; `report_status` records the same
+  `set_wrike_status` moves the task; `set_run_status` records the same
   name in the state file. A stage that wants both makes both calls, in that
   order — so the task can be moved without touching the run's record, and the
   other way round.

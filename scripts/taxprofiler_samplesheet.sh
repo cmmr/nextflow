@@ -227,7 +227,7 @@ declare -A RUN_COUNT=() SAMPLE_LAYOUT=()
 # Staged files, in row order. STAGED_R2 holds an empty string for single-end rows.
 declare -a STAGED_R1=() STAGED_R2=()
 
-report_stage "Checking your samplesheet and staging the sequencing files."
+set_run_stage "Checking your samplesheet and staging the sequencing files."
 
 # 1. Read and validate the samplesheet line by line.
 # The || clause picks up a final line that is missing its trailing newline.

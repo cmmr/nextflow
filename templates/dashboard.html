@@ -16,8 +16,10 @@
 
   The links carry target="view", so they load into that frame with or without
   scripting; the script only remembers which one is open in the fragment, so
-  #quality is a link straight to the MultiQC report with the bar still around
-  it.
+  #quality is a link straight to the Technical Report with the bar still
+  around it. A view costs one history entry - the fragment - and the frame is
+  sent to its page by replacing the address it is on, so the browser's back
+  button walks the views the bar shows rather than the loads behind them.
 
   Every link is relative, because this page is served from S3 next to the
   objects it points at. The head is shared with the other two pages and is
@@ -87,14 +89,38 @@ __COMMON_HEAD__
     }
   }
 
+  // Which page the frame was last sent to, since the address it is showing is
+  // not read back off the attribute below
+  var loaded = frame.getAttribute("src");
+
+  // Sending the frame somewhere by its src pushes an entry onto the reader's
+  // session history, on top of the fragment this bar had just written. Back
+  // then undoes the frame's navigation while the fragment - and the link marked
+  // active - stay where they were, so the bar names a view the frame has
+  // already left. Replacing the frame's own address instead leaves the fragment
+  // as the only entry a view costs, so back and forward always land on the view
+  // the bar is pointing at.
+  //
+  // A page opened off disk rather than out of the bucket - the copy in the zip
+  // this run publishes - gives the frame an origin of its own, so the fallback
+  // is the attribute and the entry that comes with it.
+  function load(url) {
+    try {
+      frame.contentWindow.location.replace(url);
+    } catch (error) {
+      frame.setAttribute("src", url);
+    }
+  }
+
   function show(view) {
     links.forEach(function (link) {
       var on = link.getAttribute("data-view") === view;
 
       link.className = on ? ON : OFF;
 
-      if (on && frame.getAttribute("src") !== link.getAttribute("href")) {
-        frame.setAttribute("src", link.getAttribute("href"));
+      if (on && loaded !== link.getAttribute("href")) {
+        loaded = link.getAttribute("href");
+        load(loaded);
       }
     });
   }

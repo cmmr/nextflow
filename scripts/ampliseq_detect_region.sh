@@ -177,7 +177,7 @@ fi
 
 THREADS="${SLURM_CPUS_PER_TASK:-${SLURM_CPUS_ON_NODE:-1}}"
 
-report_stage "Measuring which 16S region was sequenced."
+set_run_stage "Measuring which 16S region was sequenced."
 
 # 1. Read layout, from the sheet ampliseq_samplesheet.sh wrote: it leaves the
 #    fastq_2 column off entirely for a single-end run.

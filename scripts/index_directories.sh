@@ -68,7 +68,6 @@ render_rows() {
     local dir="$1" omit="${2:-}"
 
     find -L "$dir" -mindepth 1 -maxdepth 1 -printf '%y\t%s\t%f\n' \
-            -printf '%y\t%s\t%f\n' \
         | LC_ALL=C sort -t$'\t' -k1,1 -k3,3 \
         | LC_ALL=C awk -F'\t' -v omit="$omit" -v listing="$LISTING_NAME" '
             # HTML-escape, a character at a time

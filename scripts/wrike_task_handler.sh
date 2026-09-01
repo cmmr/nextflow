@@ -68,7 +68,7 @@ fi
 
 MESSAGE_BODY="$1"
 
-# TASK_ID is read by the update_wrike_* and add_wrike_task_comment helpers.
+# TASK_ID is read by the update_wrike_* and add_wrike_comment helpers.
 # "// empty" matters: without it jq prints "null" for a missing key, which looks
 # like a perfectly good Wrike ID to the check below.
 TASK_ID=$(echo "$MESSAGE_BODY" | jq -r '.[0].taskId // empty')
@@ -91,10 +91,10 @@ publish_progress_page() {
 # directory exists there is no state file to record it in and no page to publish,
 # so only the task's own status is set.
 mark_failed() {
-    update_wrike_task_status "Failed" || true
+    set_wrike_status "Failed" || true
 
     if [[ "$PWD" == "${RUN_DIR:-}" ]]; then
-        report_status "Failed" || true
+        set_run_status "Failed" || true
         publish_progress_page
     fi
 }
@@ -104,7 +104,7 @@ mark_failed() {
 reject() {
     local reply="$1" reason="$2"
 
-    add_wrike_task_comment "$reply" || true
+    add_wrike_comment "$reply" || true
     mark_failed
     log "Validation failed: $reason"
     exit 0
@@ -116,7 +116,7 @@ reject() {
 fail_with_apology() {
     local reply="Something went wrong on my end while handling this request."
     reply+=" Please submit a new request to try again."
-    add_wrike_task_comment "$reply" || true
+    add_wrike_comment "$reply" || true
 
     mark_failed
 
@@ -127,14 +127,7 @@ fail_with_apology() {
 
 # Show the requester their request was picked up, before anything slow. The
 # task's status only: there is no run directory yet for a state file to live in.
-update_wrike_task_status "Validating" || true
-
-# Everything after this point reports back by commenting on the task, so this
-# also tells the requester where the answer will show up.
-REPLY="Hi! I've picked up your request and am validating it now."
-REPLY+=" Watch this task's \"Status\" to follow the job's progress,"
-REPLY+=" and I'll comment here as soon as there's anything to report."
-add_wrike_task_comment "$REPLY" || true
+set_wrike_status "Running" || true
 
 # 1. Read the task: the request form's answers, and the title, which heads the
 #    results page.
@@ -202,7 +195,7 @@ state_set "$WRIKE_TASK_ID_KEY" "$TASK_ID"
 state_set "$WRIKE_TASK_NAME_KEY" "$TASK_NAME"
 
 # The run's own record of how far it has got, which the page below reads
-report_status "Validating"
+set_run_status "Validating"
 
 # What this request was and how it was read: the event that started it, every
 # question with the field it resolved through and the value that came back, and
@@ -240,9 +233,9 @@ if [[ "$(echo "$S3_LISTING" | jq -r '.KeyCount // 0')" -ne 0 ]]; then
     REPLY="Something rare went wrong on my end: the storage location for this"
     REPLY+=" job's results is already taken. Please submit a new request, which"
     REPLY+=" will be given a different one."
-    add_wrike_task_comment "$REPLY" || true
+    add_wrike_comment "$REPLY" || true
 
-    update_wrike_task_status "Failed" || true
+    set_wrike_status "Failed" || true
 
     # The one rejection that publishes nothing and removes its run directory:
     # both the prefix and the directory belong to the run that got there first.
@@ -258,7 +251,7 @@ RESULTS_URL=$(run_results_url "$RUN_ID")
 
 publish_progress_page
 
-update_wrike_custom_field "$WRIKE_DASHBOARD_URL_CFID" "$RESULTS_URL" \
+set_wrike_custom_field "$WRIKE_DASHBOARD_URL_CFID" "$RESULTS_URL" \
     || warn "Could not set the results URL on task $TASK_ID."
 
 # 4. Check every answer against the list the form offers. These values reach a
@@ -290,12 +283,12 @@ done
 #    that will not write is not worth refusing a good request over.
 EXPIRES_ON=$(wrike_expiration_date "$(wrike_answer retention)")
 
-update_wrike_custom_field "$WRIKE_EXPIRATION_CFID" "$EXPIRES_ON" \
+set_wrike_custom_field "$WRIKE_EXPIRATION_CFID" "$EXPIRES_ON" \
     || warn "Could not set the expiration date on task $TASK_ID."
 
 # Clear the "Dashboard Retention" field so users don't change it and expect
 # that to change the expiration date.
-update_wrike_custom_field "$WRIKE_RETENTION_CFID" "" \
+set_wrike_custom_field "$WRIKE_RETENTION_CFID" "" \
     || warn "Could not unset retention field on task $TASK_ID."
 
 
@@ -453,23 +446,10 @@ if [[ ! "$ATTACHMENT_NAME" =~ \.(txt|tsv|out)$ ]]; then
     reject "$REPLY" "Invalid extension on file $ATTACHMENT_NAME."
 fi
 
-# 9. Move the run and its task on, before submission: the job starts by
-#    overwriting both. The run's own record goes first, so a task reading
-#    "Queued" is always backed by a run that says the same.
-report_status "Queued" || fail_with_apology "Could not record the run's status"
 
-if ! update_wrike_task_status "Queued"; then
-    fail_with_apology "Could not set the task's status"
-fi
-
-# 10. Submit the job, then a follow-up job that reports the outcome either way.
-#     Both are named after the uid so wrike_delete_handler.sh can scancel them,
-#     and both run in RUN_DIR. sbatch options must precede the script name.
-#
-#     Queue depth is cosmetic, so a failing squeue must not take the submission
-#     with it.
-JOBS_AHEAD=$(squeue -h -t PENDING | wc -l) || JOBS_AHEAD="an unknown number of"
-
+# 9. Submit the job, then a follow-up job that reports the outcome either way.
+#    Both are named after the uid so wrike_delete_handler.sh can scancel them,
+#    and both run in RUN_DIR. sbatch options must precede the script name.
 if JOB_ID=$(sbatch --parsable --job-name="nf-$RUN_ID" --chdir="$RUN_DIR" \
         "$NEXTFLOW_DIR/scripts/wrike_job.sh" "$PIPELINE_UPPER" "$ATTACHMENT_ID" "$RERUN_UID"); then
 
@@ -483,24 +463,16 @@ if JOB_ID=$(sbatch --parsable --job-name="nf-$RUN_ID" --chdir="$RUN_DIR" \
         warn "Follow-up submission failed for task $TASK_ID; job $JOB_ID will run unreported."
     fi
 
-    # Bring the page up to the "Queued" step 8 just set. nextflow_progress.sh
-    # takes over once the pipeline is under way.
+    # Bring the page up to the "Queued".
+    # nextflow_progress.sh takes over once the pipeline is under way.
+    set_run_status "Queued" || fail_with_apology "Could not record the run's status"
     publish_progress_page
 
-    REPLY="Success! Your job for the $PIPELINE_UPPER pipeline was successfully"
-    REPLY+=" submitted to the cluster using the attached samplesheet."
-    if [[ -n "$RERUN_UID" ]]; then
-        REPLY+=" It runs with exactly the settings run $RERUN_UID used."
-    fi
-    REPLY+=" There are currently $JOBS_AHEAD pending jobs ahead of yours in the queue."
-    REPLY+=$'\n\n'"You can follow along here, and this is where your results will"
-    REPLY+=" appear once the run finishes:"$'\n'"$RESULTS_URL"
-    add_wrike_task_comment "$REPLY"
     log "Job $JOB_ID submitted for task $TASK_ID as uid $RUN_ID, followed by dependent job $FOLLOWUP_ID."
 else
     REPLY="Your pipeline name and samplesheet are valid, but there was an error"
     REPLY+=" submitting this job to the cluster. Please submit a new request."
-    add_wrike_task_comment "$REPLY" || true
+    add_wrike_comment "$REPLY" || true
 
     mark_failed
 

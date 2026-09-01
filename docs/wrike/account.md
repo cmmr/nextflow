@@ -12,7 +12,7 @@ It was a Collaborator until August 2026. That costs no seat, but Collaborators
 may not create tasks (`403 not_allowed`, a license restriction rather than a
 permission grantable on the folder) *or edit custom fields* — and a rejected
 custom field write comes back `200` with the change quietly dropped, which is why
-`update_wrike_custom_field` reads the reply back and warns when Wrike did not
+`set_wrike_custom_field` reads the reply back and warns when Wrike did not
 apply what it was asked for.
 
 To check which account a token belongs to:

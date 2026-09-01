@@ -214,28 +214,28 @@ dashboard_reset "$RESULTS_DIR" "$OUTPUT_CATALOG" "$(globus_run_url "$RUN_ID")"
 
 #    The navigation bar, after the Overview every run opens on
 dashboard_view krona   "Taxonomy Explorer" "$KRONA_CHART"
-dashboard_view quality "Quality Control"   "multiqc/multiqc_report.html"
+dashboard_view quality "Technical Report"  "multiqc/multiqc_report.html"
 dashboard_index_view   "File Explorer"
 
-#    The tables a requester opens first, named for what they hold rather than
-#    for the tool, the database and the format that named the file. taxpasta's
-#    merged bracken profile is the one to load into R or Python; MetaPhlAn and
-#    mOTUs are the second opinions, the last of them naming species no reference
-#    genome exists for. The two archives follow them: the reads as they went in,
-#    and the whole of this dashboard, both served from the guest collection and
-#    both of what "Download everything" fetches.
+#    The one table a requester opens first, named for what it holds rather than
+#    for the tool, the database and the format that named the file: taxpasta's
+#    merged bracken profile, the file to load into R or Python. The two archives
+#    follow it: the reads as they went in, and the whole of this dashboard, both
+#    served from the guest collection and both of what "Download everything"
+#    fetches.
 #
-#    The diversity table is not among them: it is the numbers behind a plot the
-#    reader is already looking at, and the file index lists it under Start here
-#    for anyone who wants them.
+#    Nothing else is here. The second-opinion profiles MetaPhlAn and mOTUs
+#    wrote, and the diversity table behind the plot the reader is already
+#    looking at, are files a run produces rather than files a run is read
+#    through - the file index lists every one of them, under the heading that
+#    says what it is for.
 if ! dashboard_button "taxpasta/bracken_*.tsv" "Species abundance table"; then
+    #    "|| true" because a glob that names nothing is a false return, and a
+    #    run whose bracken step did not produce a table has nothing left to fall
+    #    back to
     dashboard_button "taxpasta/kraken2_*.tsv" "Taxonomic profile table" || true
 fi
 
-#    "|| true" because a glob that names nothing is a false return, which is
-#    what the fallback above reads - and here there is nothing to fall back to
-dashboard_button "metaphlan/metaphlan_*_combined_reports.txt" "MetaPhlAn profiles" || true
-dashboard_button "motus/motus_*_combined_reports.txt" "mOTUs profiles" || true
 dashboard_bundle "Raw sequencing data" "$FASTQ_URL"
 dashboard_bundle "All result files" "$(globus_run_url "$RUN_ID" "$DASHBOARD_ZIP_NAME")"
 
@@ -248,18 +248,6 @@ if state_has "$RUN_MANIFEST_KEY"; then
     PIPELINE=$(state_get "$RUN_MANIFEST_KEY.pipeline")
 else
     warn "This run recorded no manifest; the page will not name the pipeline."
-fi
-
-HOST_REMOVAL=$(form_answer hostremoval_reference)
-: "${HOST_REMOVAL:=PhiX}"
-
-#    Read as the label on the reads that came through depletion rather than as a
-#    line of its own, so what survived is named by what it survived. A run that
-#    depleted nothing has no such reading to report, and no bar for it.
-HOST_LABEL=""
-
-if [[ "${HOST_REMOVAL,,}" != "none" ]]; then
-    HOST_LABEL="Excluding $HOST_REMOVAL"
 fi
 
 #    What the run measured, as the sidebar reports it. The counts are whole
@@ -309,19 +297,20 @@ TOTAL_READS=${STATS[qc_total]:-${STATS[host_total]:-${STATS[reads_total]:-}}}
 #    What reached the classifier, which is what a classification share is a
 #    share of: by then quality filtering and depletion have taken their cut, and
 #    reading those bars against the reads the run started with would report the
-#    classifier as having missed what it was never given.
+#    classifier as having missed what it was never given. It is also what came
+#    through the run as a whole, so it is the second of the read totals.
 RETAINED_READS=${STATS[reads_total]:-$TOTAL_READS}
 
 if [[ "$TOTAL_READS" =~ ^[0-9]+$ ]] && (( TOTAL_READS > 0 )); then
+    #    What went in and what was left, on one scale, so the survival rate is
+    #    the second bar by eye - the same two readings the amplicon dashboard
+    #    reports. What each step in between took is that step's own accounting
+    #    and is in the Technical Report; a sidebar carrying all of it is a funnel
+    #    nobody reads.
     dashboard_stat_group "READ TOTALS" "${STATS[platform]:-}"
     dashboard_stat_bar "Total reads" "$(human_count "$TOTAL_READS")" 100
 
-    stat_share "High quality reads" "${STATS[qc_passed]:-}" "$TOTAL_READS"
-
-    if [[ -n "$HOST_LABEL" && "${STATS[host_total]:-}" =~ ^[0-9]+$ ]]; then
-        stat_share "$HOST_LABEL" \
-            "$(( ${STATS[host_total]} - ${STATS[host_removed]:-0} ))" "$TOTAL_READS"
-    fi
+    stat_share "Retained reads" "$RETAINED_READS" "$TOTAL_READS"
 
     dashboard_stat_group "READS PER SAMPLE"
     dashboard_stat_chips "$(human_count "${STATS[reads_min]:-0}")|Min" \
@@ -395,5 +384,5 @@ if ! UPLOAD_OUTPUT=$(publish_results "$S3_RESULTS_DIR"); then
     fail "The results could not be uploaded to S3:"$'\n'"$UPLOAD_OUTPUT"
 fi
 
-update_wrike_custom_field "$WRIKE_DASHBOARD_URL_CFID" "$S3_RESULTS_URL"
+set_wrike_custom_field "$WRIKE_DASHBOARD_URL_CFID" "$S3_RESULTS_URL"
 log "Upload successful: $S3_RESULTS_URL"

@@ -108,8 +108,8 @@ flowchart TD
    pre-process → nextflow → post-process. It never comments on Wrike itself; it
    records progress in the state file's `.status`, any user-facing explanation in
    its `.message`, and anything a stage wants said on a successful run in its
-   `.notes`. Moving the Wrike task on is a separate call, `update_wrike_task_status`,
-   that each stage makes alongside `report_status`.
+   `.notes`. Moving the Wrike task on is a separate call, `set_wrike_status`,
+   that each stage makes alongside `set_run_status`.
 
    **The params file is written between the first two stages**, not by the
    pipeline file, so that a pre-process step which measures the data can

@@ -35,7 +35,7 @@ fi
 MESSAGE_BODY="$1"
 EVENT_TYPE="$2"
 
-# TASK_ID is read by the add_wrike_task_comment helper.
+# TASK_ID is read by the add_wrike_comment helper.
 # "// empty" matters: without it jq prints "null" for a missing key, which looks
 # like a perfectly good Wrike ID to the check below.
 TASK_ID=$(echo "$MESSAGE_BODY" | jq -r '.[0].taskId // empty')
@@ -103,7 +103,7 @@ if [[ "$EVENT_TYPE" == "TaskParentsRemoved" ]]; then
     fi
     REPLY+="."
 
-    add_wrike_task_comment "$REPLY"
+    add_wrike_comment "$REPLY"
     log "Cleanup comment posted for orphaned task $TASK_ID."
 else
     log "Task $TASK_ID deleted. Cleanup finished. No comment posted."

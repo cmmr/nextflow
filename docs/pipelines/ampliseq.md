@@ -71,6 +71,25 @@ which is a real batch variable rather than a placeholder. Two columns is also th
 least ampliseq can read: its `metadata_all.r` loops from column 2, and an ID-only
 sheet makes that count backwards.
 
+**Most runs come off one directory**, so `run` holds one value and there is
+nothing to compare. `METADATA_ALL` and `METADATA_PAIRWISE` return nothing in that
+case, which ampliseq handles — but `QIIME2_DIVERSITY_ALPHA` does not read what
+they found. The subworkflow hands it the metadata file itself, once per alpha
+metric, and `alpha-group-significance` treats a column of one value as an error
+rather than as nothing to test. There is no parameter that turns it off, so
+[`config/slurm.config`](../../config/slurm.config) gives that process
+`errorStrategy = 'ignore'`: a run with two sequencing runs in it still gets the
+test, and a run with one does not fail.
+
+What that costs is the per-sample alpha values. `QIIME2_DIVERSITY_CORE` publishes
+the beta distance matrices as TSV, but its alpha vectors are `.qza` and go
+unpublished unless `--save_intermediates` is set, and the only thing that exported
+them was the visualiser now being ignored. **So `qiime2/diversity/` carries the
+UniFrac and Jaccard matrices, the ordinations and the rarefaction curves, but no
+Faith's PD.** The unrarefied per-sample metrics in `alpha_diversity.tsv` are
+computed by [`ampliseq_composition.sh`](../results/composition.md) and do not
+include it either.
+
 **A line with no `fastq_2` is single-end** — a MinION run, or single-end
 Illumina — and the `fastq_2` column is left off the generated sheet entirely
 rather than left empty. ampliseq requires only `sample` and `fastq_1`, but it

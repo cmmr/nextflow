@@ -213,6 +213,35 @@ longer than another's, and a primer left on one end when only one was trimmed;
 what it does not cover is an unmerged read pair or a chimera, which are off by
 hundreds of bases.
 
+Both halves of that were measured against SILVA 138.2's expected amplicons. The
+coordinates predict the observed median within 8 bases in every region, and the
+window keeps between 98.8% and 99.7% of the references:
+
+| Region | Predicted | SILVA median | Window | Drops | Below | Above |
+| --- | --- | --- | --- | --- | --- | --- |
+| `16SV1V3` | 490 | 482 | 416–564 | 0.558% | 298 | 418 |
+| `16SV3V5` | 551 | 543 | 468–634 | 0.446% | 80 | 1163 |
+| `16SV4` | 253 | 253 | 215–291 | 1.177% | 100 | 2473 |
+| `16SV5V6` | 246 | 247 | 209–283 | 0.334% | 330 | 405 |
+
+**Widening the tolerance does not recover those.** Sweeping V4 from ±10% to ±40%
+moves the loss only from 1.32% to 0.93%: two thirds of the references are exactly
+253 bases and 91% are 252–256, and what sits outside the window is not a tail but
+separate populations near 400 and near 550, which no usable window admits. Going
+past ±25% does have a cost — it starts to admit host mitochondrial product, which
+came off one real V4 run at 322 bases as 60% of its ASVs.
+
+The asymmetry is real but not general: `16SV3V5` and `16SV4` lose an order of
+magnitude more above the window than below, while `16SV1V3` and `16SV5V6` are
+close to even. One symmetric tolerance is the right shape for all four.
+
+**`16SFULL` is not covered by any of this.** Its window is derived the same way,
+but the only reference to hand is SILVA's full-length database rather than a
+27F/1492R extraction, and that database is truncated at the bottom and runs past
+the primer sites at the top — so it can neither confirm nor set the constant. On
+that database the window would drop somewhere between 10% and 25%, against about
+1% for the four measured regions, so the number to distrust is this one.
+
 Up to eight samples are read end to end, and a reservoir keeps a uniform sample
 of each file's reads rather than its head — an ONT run writes its shortest reads
 first, and they are not the library. Of that sample, 2 000 reads go to the

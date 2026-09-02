@@ -141,9 +141,11 @@ readonly MAX_DRIFT_ONE_END=30
 readonly MIN_MARGIN=120
 
 # How far an ASV may sit from the length the chosen region's coordinates predict
-# before ampliseq drops it. Wide enough for the indels that make one taxon's copy
-# of a variable region longer than another's, and for a primer left on one end;
-# narrow enough to catch an unmerged read pair, which is off by hundreds.
+# before ampliseq drops it. Measured against SILVA 138.2's expected amplicons,
+# this drops 0.33% to 1.18% of the references for the four short regions.
+# Widening it recovers almost none of that: what falls outside is a separate
+# population hundreds of bases out, not a tail tens of bases out. 16SFULL was not
+# covered by that measurement.
 readonly ASV_LENGTH_TOLERANCE=0.15
 
 readonly SAMPLESHEET="${1:-ampliseq_samplesheet.tsv}"

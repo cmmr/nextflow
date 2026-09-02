@@ -27,7 +27,9 @@
 # A sequence the classifier placed nowhere and one it placed in Bacteria and no
 # deeper are one taxon here, "Unassigned". The domain is the one every sequence
 # in a 16S run is expected to land in, so naming it says nothing a reader can
-# use, and the two shares compete for the top of the chart when they are apart.
+# use. It is written out with the rest, so the file records what the run
+# actually found, but the Overview does not draw it: its share is what the
+# columns there fall short of 100% by.
 #
 # A run publishes agglomerated tables only for the ranks tax_agglom_min..
 # tax_agglom_max covered, which stops at genus by default. Species is read out of

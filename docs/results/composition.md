@@ -64,8 +64,8 @@ template. No parameter adds figures to what a metadata-free run publishes.
 
 The panel is the same for both pipelines.
 
-**Taxonomic composition** — one column per sample, stacked to 100%, under a
-legend naming every taxon in it, with the panel's own control for the taxonomic
+**Taxonomic composition** — one column per sample, under a legend naming every
+taxon in it, with the panel's own control for the taxonomic
 rank and one for the order the samples are in (by name, by the share of the most
 abundant taxon, by read depth, or by whichever index the run leads with). The axis is labelled, and
 what the chart is, how the numbers in it were made, and how it is ordered are
@@ -73,10 +73,20 @@ written under it. Hovering a column names the sample and gives its full
 breakdown; hovering a legend entry gives that taxon's mean share, how many
 samples it was found in, and its lineage.
 
-**One order, in all three.** The columns are stacked in the order the legend
-reads — most abundant at the top, `Other` at the bottom — which is also the order
-the tooltip lists them in. A reader who finds a taxon in one finds it in the same
-place in the other two.
+**One order, in all three.** The columns stand on the axis and are stacked in the
+order the legend reads — most abundant at the top, `Other` at the bottom — which
+is also the order the tooltip lists them in. A reader who finds a taxon in one
+finds it in the same place in the other two.
+
+**The columns do not reach 100%, and are not meant to.** What the classifier
+named nothing — a shotgun run's `Unclassified`, a 16S run's `Unassigned` — is
+left out of the chart entirely: it is not a taxon anybody can act on, and it was
+routinely the tallest band on the column, burying everything that was found
+under one slab saying only how much of the run went unnamed. Every share is
+still a share of the whole sample, so a column stops short of the top by exactly
+that much, and the caption under the chart says so. The share itself is not lost:
+it is in `composition_data.json`, and the sidebar reports how far down the
+taxonomy the classifier did get.
 
 **Alpha diversity** — one index at a time, chosen from the panel's own `Index`
 select and drawn in the same sample order as the composition above it. Which
@@ -126,14 +136,14 @@ Per sample, from the **unrarefied** counts:
 | Simpson | `1 − Σ p²` |
 | Pielou's evenness | `H / ln S`, and 0 for a sample holding one ASV |
 
-**A sequence classified only to `Bacteria` is drawn as `Unassigned`.** Silva
-writes it as `Bacteria;;;;;`, which is a rank short of a classification at every
-rank the chart offers, and the domain it names is the one every sequence in a 16S
-run is expected to land in — so the band said only that the run had worked, while
-routinely being the largest one on the chart. Its counts are summed into the
-`Unassigned` share and the two are drawn as one taxon, which also frees a colour
-for a genus somebody can act on. Everything else keeps its own row: `Unclassified
-Pseudomonadota` names a phylum the sequence really did reach.
+**A sequence classified only to `Bacteria` counts as `Unassigned`.** Silva writes
+it as `Bacteria;;;;;`, which is a rank short of a classification at every rank
+the chart offers, and the domain it names is the one every sequence in a 16S run
+is expected to land in — so it says only that the run worked. Its counts are
+summed into the `Unassigned` share, and since the chart does not draw that share
+at all, both are what a 16S column falls short of 100% by. Everything else keeps
+its own row: `Unclassified Pseudomonadota` names a phylum the sequence really did
+reach, and is drawn like any other taxon.
 
 **No Chao1.** It estimates the species that were missed from the ones seen
 exactly once and twice, and DADA2 has already dropped most of the singletons —
@@ -178,10 +188,11 @@ reads are counted, since Bracken drops that line and renormalises over what it
 placed, and the only honest account of how far the classifier got. So:
 
 - the stacks are shares of **every read that reached the classifier**, with the
-  unclassified reads entered as a taxon of their own — drawn in a grey rather
-  than in a colour, see [Colour](#colour). On a shotgun run they are routinely
-  the largest share of a sample, and a chart that left them out would say the
-  opposite of what it means;
+  unclassified reads counted as a taxon of their own and written into
+  `composition_data.json` with the rest. The chart does not draw that taxon —
+  see [above](#what-is-in-the-panel) — but it is what the denominator counts, so
+  a column falls short of 100% by exactly the share of that sample the
+  classifier could not name;
 - the sidebar's rank bars are read off Kraken2 rather than Bracken, which would
   otherwise report that ~100% of reads reached species level.
 
@@ -297,21 +308,15 @@ for its sample count and nothing else.
 
 ## Colour
 
-Only the **eleven most abundant taxa** of each rank are drawn in their own
-colour; everything rarer is summed into `Other`, which wears a neutral. A rank's
-eleven are usually nine or ten named taxa plus the share of the sample nothing
-was named in. Past that many fills, a reader cannot reliably tell one from the next —
-least of all a colour-blind one — so a twelfth taxon is not given a twelfth hue.
+Only the **eleven most abundant taxa** of each rank are kept, the rest summed
+into `Other`, which wears a neutral. Past that many fills, a reader cannot
+reliably tell one from the next — least of all a colour-blind one — so a twelfth
+taxon is not given a twelfth hue. The eleven are chosen before the unnamed share
+is dropped, so a rank whose unnamed share was among them draws ten.
 
-**What was named nothing wears a grey too, and takes no colour with it.** A
-shotgun run's `Unclassified` and a 16S run's `Unassigned` are the absence of a
-taxon rather than a taxon, and on most samples they are the largest band on the
-chart — so drawing them in the first and brightest step of the set gave the
-loudest colour to the one band that says nothing about what was in the sample.
-They are drawn in a grey of their own, a shade off the one `Other` wears, and the
-categorical steps go to the named taxa under them. On a 16S run `Unassigned`
-already carries the sequences classified no deeper than `Bacteria`, which is
-where that chart's biggest, brightest band used to come from.
+`Other` is the one grey, and the only band that is not a taxon. What was named
+nothing is not drawn at all — see [above](#what-is-in-the-panel) — so a second
+neutral would be a second thing the reader has to learn is not a finding.
 
 The eleven are a categorical set whose *order* keeps neighbouring fills apart under
 colour vision deficiency, so they are assigned in that order and never cycled.

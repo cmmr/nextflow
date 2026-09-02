@@ -25,11 +25,15 @@
 #
 # The kraken2 reports are read whichever of the two is plotted. They are the only
 # place the unclassified reads are counted, and the only honest account of how
-# far the classifier got, since bracken renormalises over what it placed. So the
-# plots stack over every read that reached the classifier - unclassified
-# included, as a taxon of its own, because on a shotgun run it is often the
-# largest share of the sample - and the sidebar reports the share of them
-# resolved to phylum, genus and species.
+# far the classifier got, since bracken renormalises over what it placed. So
+# every share here is a share of every read that reached the classifier, and the
+# sidebar reports how many of them were resolved to phylum, genus and species.
+#
+# The unclassified reads are counted as a taxon of their own and written out
+# with the rest, so the file records what the run actually found. The Overview
+# does not draw that taxon: on a shotgun run it is routinely the largest share of
+# the sample, and a slab that says only how much went unnamed buried the taxa
+# under it. Its share is what the columns there fall short of 100% by.
 #
 # The rest of the sidebar's read funnel is counted in the same pass, out of the
 # reports each step of the run wrote about itself: fastp's say how many reads
@@ -929,7 +933,9 @@ read_depth_stats() {
 
 # How the composition numbers were made, as the caption under the chart drawn
 # from them. Which classifier and which database produced a bar is a run's own,
-# and a reader is owed it beside the bar rather than three pages away.
+# and a reader is owed it beside the bar rather than three pages away. That the
+# unclassified reads are left out of the chart is not said here: it is true of
+# both pipelines, so the page says it once, above this line.
 composition_method() {
     local database
 
@@ -943,7 +949,7 @@ composition_method() {
         printf ", and each bar is that report's own clade counts"
     fi
 
-    printf '. Reads no taxon was found for are stacked as "Unclassified".'
+    printf '.'
 }
 
 # The run's headline numbers, keyed for the dashboard's sidebar. Each is left out

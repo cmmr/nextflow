@@ -41,8 +41,9 @@
 # Requires:  pigz and md5sum from PATH; $NEXTFLOW_DIR/bin/lbzip2 additionally
 #            for .bz2 inputs
 # Env:       the log and fail helpers and the run state helpers, sourced from .env
-# Outputs:   ./ampliseq_samplesheet.tsv, ./raw-sequences/, and the sample count
-#            and any explanation of a failure in ./run_state.json
+# Outputs:   ./ampliseq_samplesheet.tsv, ./ampliseq_metadata.tsv, ./raw-sequences/,
+#            and the sample count and any explanation of a failure in
+#            ./run_state.json
 #
 # Because the samplesheet is whitespace-delimited, FASTQ paths cannot contain spaces.
 
@@ -52,6 +53,7 @@ source /data/prod/nextflow/.env
 
 INPUT_SAMPLESHEET="${1:-original_samplesheet.tsv}"
 OUT_TSV="ampliseq_samplesheet.tsv"
+OUT_METADATA="ampliseq_metadata.tsv"
 
 # Client-facing archive directory. ampliseq_upload.sh zips this by the same name.
 FASTQ_DIR="raw-sequences"
@@ -208,6 +210,14 @@ else
     printf "sample\tfastq_1\trun\n" > "$OUT_TSV"
 fi
 
+# ampliseq skips every QIIME2 diversity step, and the phylogeny with them, unless
+# it is given a metadata sheet, and it analyses only the samples that sheet lists.
+# The request form collects no sample metadata, so the sheet carries the one
+# variable this pipeline does know: which sequencing run each sample came off.
+# Two columns is also the least ampliseq's metadata_all.r can read - it loops from
+# column 2, and an ID-only sheet makes that count backwards instead.
+printf "ID\trun\n" > "$OUT_METADATA"
+
 for clean_sample in "${SAMPLE_ORDER[@]}"; do
     read -ra fq1_list <<< "${SAMPLE_FQ1_MAP[$clean_sample]}"
 
@@ -252,6 +262,8 @@ for clean_sample in "${SAMPLE_ORDER[@]}"; do
     else
         printf "%s\t%s\t%s\n" "$clean_sample" "$final_fq1" "run_$run_hash" >> "$OUT_TSV"
     fi
+
+    printf "%s\t%s\n" "$clean_sample" "run_$run_hash" >> "$OUT_METADATA"
 done
 
 # The count after merging, which is the number of samples the run actually
@@ -259,4 +271,4 @@ done
 # page simply omits the figure when it was never recorded.
 state_set_number samples.count "${#SAMPLE_ORDER[@]}"
 
-log "Successfully generated ampliseq samplesheet: $OUT_TSV (${#SAMPLE_ORDER[@]} $READ_LAYOUT-end samples)"
+log "Successfully generated ampliseq samplesheet: $OUT_TSV and $OUT_METADATA (${#SAMPLE_ORDER[@]} $READ_LAYOUT-end samples)"

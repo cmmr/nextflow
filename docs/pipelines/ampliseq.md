@@ -62,6 +62,15 @@ directory, which groups samples that were sequenced together for error-model
 training, and records the post-merge sample count as `.samples.count` in the
 run's state file.
 
+It writes a second sheet beside it, `ampliseq_metadata.tsv`. ampliseq analyses
+only the samples its metadata names, and skips every QIIME2 diversity step when
+it has none at all, so without one the run publishes no `qiime2/diversity/` and
+no rarefaction curves. The request form collects no sample metadata, so the sheet
+carries the one variable this pipeline knows — the `run` each sample came off,
+which is a real batch variable rather than a placeholder. Two columns is also the
+least ampliseq can read: its `metadata_all.r` loops from column 2, and an ID-only
+sheet makes that count backwards.
+
 **A line with no `fastq_2` is single-end** — a MinION run, or single-end
 Illumina — and the `fastq_2` column is left off the generated sheet entirely
 rather than left empty. ampliseq requires only `sample` and `fastq_1`, but it
@@ -99,7 +108,7 @@ that little of this is about storage; it is about a file index a reader can read
 | `multiqc/multiqc_data/multiqc_data.json`, `multiqc.parquet`, `llms-full.txt`, `multiqc.log` | The whole report encoded again — as JSON, as parquet, as a prompt, and as its debug trace. The per-plot `.txt` files, which are the numbers behind each figure, stay. |
 | `multiqc/multiqc_plots/` | Each of the report's figures rendered again as PNG, SVG and PDF. |
 | `fastqc/*_fastqc.zip` | The same measurements as the `_fastqc.html` published beside it. |
-| `pplace/gappa/*.newick`, `*.tree.svg` | gappa writes every tree into its own directory as well as into `pplace/`. These two are the grafted tree and the heat tree already published there. |
+| `pplace/*.tree.svg`, `pplace/gappa/` | The heat tree — the whole 54 322-tip reference shaded by how many of the run's ASVs landed on each branch, rendered as SVG, NEXUS and phyloXML. Nothing can open a figure with 54 322 tips, and the three come to 280 MB, more than every other file the run publishes put together. Where the ASVs landed is in the `.jplace`; what came of it is `asv_tree.newick`. |
 | `pplace/clustalo/`, `pplace/epang/*{reference,query}.fasta.gz` | The 54 322-sequence reference alignment with this run's ASVs in it, published once by Clustal Omega and again as the halves EPA-NG splits it into. What was derived from them is the `.jplace.gz` kept beside them. |
 
 The per-sample FastQC reports themselves are **kept**: MultiQC summarises them
@@ -332,11 +341,26 @@ sets:
 | `pplace_alnmethod` | `clustalo` |
 | `pplace_name` | `gtdb_bac16s`, which names the output files |
 
-The grafted tree is published as `pplace/gtdb_bac16s.graft.newick`, and ampliseq
-attaches it to `phyloseq/dada2_phyloseq.rds` and to the TreeSummarizedExperiment
-beside it, so neither needs a tree read in separately. Branch lengths and the
+What gappa writes is the *whole* reference with the run's ASVs grafted into it —
+54 322 reference tips and a few dozen ASVs among them. Branch lengths and the
 root come from the reference rather than from the run, which is what makes two
-runs' trees comparable: they are the same tree with different tips added.
+runs' trees comparable: they are the same tree with different tips added. But
+nothing reads a tree with 54 322 tips it has no counts for, and no reader can
+open one.
+
+So [`ampliseq_prune_tree.sh`](../../scripts/ampliseq_prune_tree.sh) cuts the
+reference back out, publishing `pplace/asv_tree.newick` — tips named with the
+same ASV ids as the abundance table, the sequences and the taxonomy. `gotree`
+adds together the branch lengths of the two branches it merges at each removal,
+so the distance between any two ASVs is the distance the placement gave them, and
+the root survives. Which tips are reference is not guessed from their names: the
+reference tree itself is handed to `gotree -c`, and what the two trees share is
+what goes. The script refuses to publish a tree whose tip count is not exactly
+the grafted count less the reference count.
+
+The full grafted tree stays in `pplace/` as the placement's record, and ampliseq
+attaches its own copy to `phyloseq/dada2_phyloseq.rds` and the
+TreeSummarizedExperiment beside it.
 
 **`pplace_taxonomy` is left unset**, though the same reference bundle carries
 one. ampliseq takes an EPA-NG taxonomy in preference to DADA2's, so setting it

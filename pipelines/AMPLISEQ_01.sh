@@ -58,6 +58,12 @@ params_set pplace_aln            "$NEXTFLOW_DIR/db/pplace/bac16s.alnfna"
 params_set pplace_model          "GTR+F+I+G4"
 params_set pplace_alnmethod      "clustalo"
 
+# ampliseq analyses only the samples its metadata sheet lists, and skips every
+# QIIME2 diversity step - the de novo phylogeny among them - when it has none.
+# ampliseq_samplesheet.sh writes this one beside the samplesheet, from the same
+# samples.
+params_set metadata              "ampliseq_metadata.tsv"
+
 # The report keeps its own styling; what is replaced is what it says - a title,
 # and an opening section naming who produced the analysis and where the rest of
 # it is.
@@ -82,7 +88,7 @@ fi
 
 # Changing either would leave ampliseq reading a samplesheet nothing wrote, or
 # publishing where ampliseq_upload.sh does not look
-PARAMS_LOCKED=(input outdir)
+PARAMS_LOCKED=(input outdir metadata)
 
 PRE_PROCESS_CMDS=(
     "$NEXTFLOW_DIR/scripts/ampliseq_samplesheet.sh"
@@ -90,5 +96,6 @@ PRE_PROCESS_CMDS=(
 )
 
 POST_PROCESS_CMDS=(
+    "$NEXTFLOW_DIR/scripts/ampliseq_prune_tree.sh"
     "$NEXTFLOW_DIR/scripts/ampliseq_upload.sh"
 )

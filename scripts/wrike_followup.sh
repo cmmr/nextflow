@@ -105,7 +105,6 @@ if [[ "$STATUS" == "Completed" ]]; then
     cd /
     rm -rf "$RUN_DIR"
 
-    add_wrike_comment "$REPLY"
     exit 0
 fi
 

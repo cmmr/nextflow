@@ -65,8 +65,8 @@ template. No parameter adds figures to what a metadata-free run publishes.
 The panel is the same for both pipelines.
 
 **Taxonomic composition** — one column per sample, under a legend naming every
-taxon in it, with the panel's own control for the taxonomic
-rank and one for the order the samples are in (by name, by the share of the most
+taxon in it, on an axis scaled to the tallest of them, with the panel's own
+control for the taxonomic rank and one for the order the samples are in (by name, by the share of the most
 abundant taxon, by read depth, or by whichever index the run leads with). The axis is labelled, and
 what the chart is, how the numbers in it were made, and how it is ordered are
 written under it. Hovering a column names the sample and gives its full
@@ -78,15 +78,22 @@ order the legend reads — most abundant at the top, `Other` at the bottom — w
 is also the order the tooltip lists them in. A reader who finds a taxon in one
 finds it in the same place in the other two.
 
-**The columns do not reach 100%, and are not meant to.** What the classifier
+**The columns do not add up to 100%, and are not meant to.** What the classifier
 named nothing — a shotgun run's `Unclassified`, a 16S run's `Unassigned` — is
 left out of the chart entirely: it is not a taxon anybody can act on, and it was
 routinely the tallest band on the column, burying everything that was found
 under one slab saying only how much of the run went unnamed. Every share is
-still a share of the whole sample, so a column stops short of the top by exactly
-that much, and the caption under the chart says so. The share itself is not lost:
-it is in `composition_data.json`, and the sidebar reports how far down the
-taxonomy the classifier did get.
+still a share of the whole sample, so a column adds up to less than 100% by
+exactly that much, and the caption under the chart says so. The share itself is
+not lost: it is in `composition_data.json`, and the sidebar reports how far down
+the taxonomy the classifier did get.
+
+**So the axis is cut to the run rather than fixed at 100%.** It runs from zero
+to the tallest column, rounded up to a step whole percentages can be read off —
+5%, 10%, 20% or 25% — which lands back on the familiar `0 · 25 · 50 · 75 · 100`
+for a run that named most of what it sequenced, and fills the panel for a run
+that named a tenth of it. The top is worked out per rank, since a rank the
+classifier reached more often reaches higher.
 
 **Alpha diversity** — one index at a time, chosen from the panel's own `Index`
 select and drawn in the same sample order as the composition above it. Which
@@ -308,11 +315,13 @@ for its sample count and nothing else.
 
 ## Colour
 
-Only the **eleven most abundant taxa** of each rank are kept, the rest summed
-into `Other`, which wears a neutral. Past that many fills, a reader cannot
+Only the **eleven most abundant named taxa** of each rank are kept, the rest
+summed into `Other`, which wears a neutral. Past that many fills, a reader cannot
 reliably tell one from the next — least of all a colour-blind one — so a twelfth
-taxon is not given a twelfth hue. The eleven are chosen before the unnamed share
-is dropped, so a rank whose unnamed share was among them draws ten.
+taxon is not given a twelfth hue. The unnamed share does not compete for one of
+the eleven: it is ranked out of the way and appended, so a rank is written out as
+eleven taxa, that share, and `Other`, and the chart draws eleven colours whether
+or not the classifier had a good day.
 
 `Other` is the one grey, and the only band that is not a taxon. What was named
 nothing is not drawn at all — see [above](#what-is-in-the-panel) — so a second

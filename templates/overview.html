@@ -36,8 +36,9 @@
   most abundant at the top, "Other" at the bottom - so a taxon is in the same
   place in the legend, in the column and in the tooltip. What the classifier
   named nothing is not drawn at all, so a column reaches only as far as the
-  reads that were named. Under the chart, the caption says so, and names the
-  tools and the database the numbers came from for the data that carries it.
+  reads that were named and the axis is cut to the tallest of them rather than
+  fixed at 100%. Under the chart, the caption says so, and names the tools and
+  the database the numbers came from for the data that carries it.
 
   "Download everything" is the archives this run published to the guest
   collection, which the script at the foot of this page fetches one after
@@ -213,10 +214,11 @@ canvas { display: block; width: 100%; }
 <div class="flex-1 min-h-0 overflow-hidden" id="bars-box"><canvas id="bars"></canvas></div>
 <div class="shrink-0 max-w-3xl mt-4 space-y-1">
 <p class="font-body-sm text-body-sm text-on-surface">One column per sample, out of that
-sample&rsquo;s reads, most abundant taxon at the top. The most abundant taxa at this rank
-are drawn in their own colour; everything rarer is grouped as &ldquo;Other&rdquo;.
-Reads the classifier could not name are left out, so a column stops short of 100%
-by however much of that sample went unclassified.</p>
+sample&rsquo;s reads, most abundant taxon at the top. The eleven most abundant taxa at
+this rank are drawn in their own colour; everything rarer is grouped as
+&ldquo;Other&rdquo;. Reads the classifier could not name are left out, so a column adds
+up to less than 100% of its sample &mdash; the axis is scaled to the tallest of
+them.</p>
 <p class="font-body-sm text-body-sm text-on-surface-variant" id="composition-method" style="display: none"></p>
 <p class="font-body-sm text-body-sm text-outline" id="axis-note"></p>
 </div>
@@ -561,10 +563,20 @@ __STATS__
   var plotted = [];
   var shares = [];
 
+  // What each sample adds up to over those taxa, and the most any of them does,
+  // both in ten-thousandths. Worked out once when the rank is chosen: the chart
+  // needs the tallest column before it can draw a gridline, and every column
+  // again as it draws them, and a run of a few thousand samples should not be
+  // summed twice on every resize.
+  var totals = [];
+  var tallest = 0;
+
   function useLevel(index) {
     level = levels[index];
     plotted = [];
     shares = [];
+    totals = [];
+    tallest = 0;
 
     level.taxa.forEach(function (taxon, t) {
       if (unnamed(taxon.label)) return;
@@ -572,6 +584,33 @@ __STATS__
       plotted.push(taxon);
       shares.push(level.values[t]);
     });
+
+    for (var i = 0; i < count; i++) {
+      var sum = 0;
+
+      for (var t = 0; t < shares.length; t++) sum += Math.max(shares[t][i], 0);
+
+      totals.push(sum);
+      if (sum > tallest) tallest = sum;
+    }
+  }
+
+  // The scale the columns are read against, as the top of the axis and the step
+  // its gridlines are drawn at, both in ten-thousandths. A fixed 0-100% axis was
+  // right while every column filled it; now that what the classifier could not
+  // name is left out, a run that named a tenth of its reads drew a tenth of a
+  // chart. So the axis is cut to the tallest column and rounded up to a step a
+  // reader can read whole percentages off - which lands back on the familiar
+  // 0-25-50-75-100 for a run that named most of what it sequenced.
+  function scale(highest) {
+    var steps = [100, 200, 500, 1000, 2000, 2500];
+    var step = steps[steps.length - 1];
+
+    for (var i = 0; i < steps.length; i++) {
+      if (highest <= steps[i] * 4) { step = steps[i]; break; }
+    }
+
+    return { step: step, top: Math.max(step, Math.ceil(highest / step) * step) };
   }
 
   function drawComposition() {
@@ -586,6 +625,7 @@ __STATS__
     var geometry = columns(view.width, COMPOSITION_LEFT, PLOT_RIGHT);
     var colors = palette(plotted);
     var floor = TOP + plotHeight;
+    var axis = scale(tallest);
 
     // The scale first, one hairline a shade off the page
     ctx.strokeStyle = ink("--border");
@@ -595,30 +635,26 @@ __STATS__
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
 
-    for (var mark = 0; mark <= 100; mark += 25) {
-      var y = Math.round(floor - (mark / 100) * plotHeight) + 0.5;
+    for (var mark = 0; mark <= axis.top; mark += axis.step) {
+      var y = Math.round(floor - (mark / axis.top) * plotHeight) + 0.5;
 
       ctx.beginPath();
       ctx.moveTo(geometry.left, y);
       ctx.lineTo(view.width - 8, y);
       ctx.stroke();
-      ctx.fillText(mark + "%", geometry.left - 8, y);
+      ctx.fillText(mark / 100 + "%", geometry.left - 8, y);
     }
 
     for (var slot = 0; slot < count; slot++) {
       var sample = order[slot];
       var x = geometry.left + slot * geometry.step + geometry.inset;
-      var found = 0;
       var t;
 
-      for (t = 0; t < shares.length; t++) found += Math.max(shares[t][sample], 0);
-
       // The column stands on the axis and reaches as far as the reads that were
-      // named, which is short of the top by whatever was dropped. From there it
-      // is stacked downwards, so a taxon sits in the same place in the column as
-      // it does in the legend above it and in the tooltip beside it: the most
-      // abundant first, "Other" last.
-      var column = (found / 10000) * plotHeight;
+      // named. From there it is stacked downwards, so a taxon sits in the same
+      // place in the column as it does in the legend above it and in the tooltip
+      // beside it: the most abundant first, "Other" last.
+      var column = (totals[sample] / axis.top) * plotHeight;
       var stacked = floor - column;
 
       // A column narrow enough to be a hairline gets no rounding to lose
@@ -631,7 +667,7 @@ __STATS__
       }
 
       for (t = 0; t < shares.length; t++) {
-        var share = shares[t][sample] / 10000;
+        var share = shares[t][sample] / axis.top;
 
         if (share <= 0) continue;
 
@@ -655,7 +691,7 @@ __STATS__
       + " Hover a column for the sample it belongs to, or a taxon above for what"
       + " it is and how much of the run it accounts for.";
 
-    return { geometry: geometry, height: plotHeight };
+    return { geometry: geometry, height: plotHeight, top: axis.top };
   }
 
   // The sample names, on their side under the columns they belong to
@@ -683,19 +719,15 @@ __STATS__
   // the pointer even where two bands are a pixel apart. A dozen additions on a
   // pointer move, and nothing kept between them.
   function bandAt(sample, y, state) {
-    var found = 0;
-    var t;
-
-    for (t = 0; t < shares.length; t++) found += Math.max(shares[t][sample], 0);
-
-    var edge = TOP + state.height - (found / 10000) * state.height;
+    var edge = TOP + state.height
+             - (totals[sample] / state.top) * state.height;
 
     if (y < edge) return -1;
 
-    for (t = 0; t < shares.length; t++) {
+    for (var t = 0; t < shares.length; t++) {
       if (shares[t][sample] <= 0) continue;
 
-      edge += (shares[t][sample] / 10000) * state.height;
+      edge += (shares[t][sample] / state.top) * state.height;
 
       if (y <= edge) return t;
     }

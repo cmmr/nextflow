@@ -98,9 +98,10 @@ readonly OVERALL_SUMMARY="$RESULTS_DIR/overall_summary.tsv"
 # the results: they are the dashboard's sidebar, not an output of the analysis
 readonly STATS_KEY="statistics"
 
-# How many taxa of each rank are drawn in their own colour before the tail is
-# summed into "Other". Eleven is what the palette carries, and a rank's list is
-# usually nine or ten named taxa plus the unassigned share.
+# How many named taxa of each rank are drawn in their own colour before the tail
+# is summed into "Other". Eleven is what the palette carries. The unassigned
+# share is not one of them - the page does not draw it - so a rank is written out
+# as these eleven, that share, and "Other".
 readonly TOP_TAXA=11
 
 # The rank each rank-<n> table is agglomerated to, indexed by that number
@@ -295,7 +296,9 @@ level_json() {
         function bin(taxon,   name) {
             name = label(taxon)
 
-            if (name == "Unassigned" || name == "Unclassified Bacteria") return ""
+            if (name == "Unassigned" || name == "Unclassified Bacteria") {
+                return UNASSIGNED
+            }
 
             return taxon
         }
@@ -314,8 +317,15 @@ level_json() {
         # The head of the taxa ranked by that mean, kept by insertion so the
         # tail never has to be sorted. Ties go to the name that sorts first, or
         # the page would come out differently on two runs of the same data.
+        #
+        # The unassigned share never competes for one of the places. The page
+        # does not draw it, so a rank where it ranked high came out a taxon
+        # short. It is appended after them instead, which keeps it out of the
+        # colours and still leaves "Other" as what is left once it is counted.
         function choose(   name, place) {
             for (name in total) {
+                if (name == UNASSIGNED) continue
+
                 place = drawn < top ? drawn + 1 : top + 1
 
                 while (place > 1 && (total[taxon[place - 1]] < total[name] || \
@@ -330,6 +340,8 @@ level_json() {
                 if (drawn < top) drawn++
             }
 
+            if (UNASSIGNED in total) taxon[++drawn] = UNASSIGNED
+
             for (place = 1; place <= drawn; place++) chosen[taxon[place]] = place
         }
 
@@ -337,6 +349,10 @@ level_json() {
             # Where the genus and species sit in a Silva-style taxonomy string
             GENUS = 6
             SPECIES = 7
+
+            # The row every taxonomy that named nothing is counted under. Empty
+            # because no taxonomy is, and because label() writes it "Unassigned".
+            UNASSIGNED = ""
 
             while ((getline line < orderfile) > 0) position[line] = ++samples
         }

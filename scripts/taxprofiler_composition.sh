@@ -114,8 +114,10 @@ readonly PLOT_DATA="composition_data.json"
 # the results: they are the dashboard's sidebar, not an output of the analysis
 readonly STATS_KEY="statistics"
 
-# How many taxa of each rank are drawn in their own colour before the tail is
-# summed into "Other". Eleven is what the palette carries.
+# How many named taxa of each rank are drawn in their own colour before the tail
+# is summed into "Other". Eleven is what the palette carries. The unclassified
+# share is not one of them - the page does not draw it - so a rank is written out
+# as these eleven, that share, and "Other".
 readonly TOP_TAXA=11
 
 # The ranks a stacked bar is offered at, as the letter a kraken2-style report
@@ -721,6 +723,12 @@ levels_json() {
         # The head of the taxa of one rank, ranked by that mean and kept by
         # insertion so the tail is never sorted. Ties go to the key that sorts
         # first, or the page would come out differently on two runs of the same data.
+        #
+        # The unclassified share never competes for one of the places. The page
+        # does not draw it, so a rank where it ranked high - which on a shotgun
+        # run is every rank - came out a taxon short. It is appended after them
+        # instead, which keeps it out of the colours and still leaves "Other" as
+        # what is left once it is counted.
         function choose(rank,   combined, part, key, place) {
             for (combined in total) {
                 split(combined, part, SUBSEP)
@@ -728,6 +736,9 @@ levels_json() {
                 if (part[1] != rank) continue
 
                 key = part[2]
+
+                if (key == UNCLASSIFIED) continue
+
                 place = drawn[rank] < top ? drawn[rank] + 1 : top + 1
 
                 while (place > 1 && \
@@ -742,6 +753,10 @@ levels_json() {
 
                 taxon[rank, place] = key
                 if (drawn[rank] < top) drawn[rank]++
+            }
+
+            if ((rank, UNCLASSIFIED) in total) {
+                taxon[rank, ++drawn[rank]] = UNCLASSIFIED
             }
 
             for (place = 1; place <= drawn[rank]; place++)

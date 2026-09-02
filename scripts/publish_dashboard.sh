@@ -81,7 +81,7 @@
 # Extensions uploaded as text rather than left for aws to type from the name.
 # Without this a browser is handed a table as an application/octet-stream and
 # saves it instead of showing it.
-TEXT_EXTENSIONS=(txt tsv csv log yaml yml gff fasta fa fna nwk sh)
+TEXT_EXTENSIONS=(txt tsv csv log yaml yml gff fasta fa fna nwk newick sh)
 
 # Extensions that download when clicked. Everything else opens in a new tab,
 # which the content types above are what make possible.

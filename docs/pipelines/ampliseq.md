@@ -70,8 +70,9 @@ sheet that mixes the two is refused with a message naming the offending line.
 
 [`ampliseq_detect_region.sh`](../../scripts/ampliseq_detect_region.sh) then measures
 what was sequenced and writes `detected_params.yaml` — `sequencing_type`,
-`primer_fwd`, `primer_rev`, `skip_cutadapt`, and for ONT `asv_calling` and
-`savont_options` — which `wrike_job.sh` layers over the pipeline's defaults.
+`primer_fwd`, `primer_rev`, `skip_cutadapt`, the `min_len_asv`/`max_len_asv`
+window the region implies, and for ONT `asv_calling` and `savont_options` —
+which `wrike_job.sh` layers over the pipeline's defaults.
 
 [`ampliseq_upload.sh`](../../scripts/ampliseq_upload.sh) zips `raw-sequences/`
 into the run's directory on [the Globus collection](../operations/globus.md)
@@ -98,6 +99,8 @@ that little of this is about storage; it is about a file index a reader can read
 | `multiqc/multiqc_data/multiqc_data.json`, `multiqc.parquet`, `llms-full.txt`, `multiqc.log` | The whole report encoded again — as JSON, as parquet, as a prompt, and as its debug trace. The per-plot `.txt` files, which are the numbers behind each figure, stay. |
 | `multiqc/multiqc_plots/` | Each of the report's figures rendered again as PNG, SVG and PDF. |
 | `fastqc/*_fastqc.zip` | The same measurements as the `_fastqc.html` published beside it. |
+| `pplace/gappa/*.newick`, `*.tree.svg` | gappa writes every tree into its own directory as well as into `pplace/`. These two are the grafted tree and the heat tree already published there. |
+| `pplace/clustalo/`, `pplace/epang/*{reference,query}.fasta.gz` | The 54 322-sequence reference alignment with this run's ASVs in it, published once by Clustal Omega and again as the halves EPA-NG splits it into. What was derived from them is the `.jplace.gz` kept beside them. |
 
 The per-sample FastQC reports themselves are **kept**: MultiQC summarises them
 but does not carry each file's own duplication and overrepresented-sequence
@@ -193,13 +196,22 @@ than relying on a default holding still.
 
 The five regions the system supports, in *E. coli* K-12 MG1655 16S numbering:
 
-| Region | Primers | Amplicon |
-| --- | --- | --- |
-| `16SV1V3` | 27F / 534R | 8–534 |
-| `16SV3V5` | 357F / 926R | 341–926 |
-| `16SV4` | 515F / 806R | 515–806 |
-| `16SV5V6` | 806F / 1053R | 785–1073 |
-| `16SFULL` | 27F / 1492R | 8–1513 |
+| Region | Primers | Amplicon | ASVs kept |
+| --- | --- | --- | --- |
+| `16SV1V3` | 27F / 534R | 8–534 | 416–564 |
+| `16SV3V5` | 357F / 926R | 341–926 | 468–634 |
+| `16SV4` | 515F / 806R | 515–806 | 215–291 |
+| `16SV5V6` | 806F / 1053R | 785–1073 | 209–283 |
+| `16SFULL` | 27F / 1492R | 8–1513 | 1244–1684 |
+
+The last column is not a table of its own: it is the span between the two primer
+binding sites, less the primers that occupy them — the length an ASV has once
+cutadapt has been over it — plus or minus 15%. The detector writes it out as
+`min_len_asv` and `max_len_asv`, and ampliseq drops anything outside it. The
+tolerance covers the indels that make one taxon's copy of a variable region
+longer than another's, and a primer left on one end when only one was trimmed;
+what it does not cover is an unmerged read pair or a chimera, which are off by
+hundreds of bases.
 
 Up to eight samples are read end to end, and a reservoir keeps a uniform sample
 of each file's reads rather than its head — an ONT run writes its shortest reads
@@ -263,6 +275,86 @@ ends.
 run it reproduces. There is no other way past it: a library the detector cannot
 place is a failed run, since the form has no free-text parameter field.
 
+## The phylogeny
+
+UniFrac and Faith's PD are computed over a tree, and ampliseq will build one two
+ways.
+
+Its default is de novo: MAFFT aligns the ASVs to each other, `qiime alignment
+mask` trims that alignment, FastTree infers a tree from it, and the result is
+midpoint-rooted. **That route is unreachable here.** ampliseq builds that tree
+inside its QIIME2 diversity subworkflow, and skips the subworkflow whenever no
+`--metadata` sheet is given — which is always, since the request form collects no
+sample metadata to give it. Left at ampliseq's defaults, a run publishes neither
+`qiime2/phylogenetic_tree/` nor `qiime2/diversity/`.
+
+The other route is phylogenetic placement, and it runs on `--pplace_tree` alone,
+outside that subworkflow. Clustal Omega aligns the ASVs into a reference
+alignment, [EPA-NG](https://doi.org/10.1093/sysbio/syy054) works out where on the
+reference tree each one belongs, and `gappa examine graft` writes that tree back
+out with the ASVs attached. It is what [`AMPLISEQ_01.sh`](../../pipelines/AMPLISEQ_01.sh)
+sets:
+
+| Parameter | Set to |
+|---|---|
+| `pplace_tree` | `db/pplace/bac16s.newick` |
+| `pplace_aln` | `db/pplace/bac16s.alnfna` |
+| `pplace_model` | `GTR+F+I+G4`, the model the reference tree was fitted under |
+| `pplace_alnmethod` | `clustalo` |
+| `pplace_name` | `gtdb_bac16s`, which names the output files |
+
+The grafted tree is published as `pplace/gtdb_bac16s.graft.newick`, and ampliseq
+attaches it to `phyloseq/dada2_phyloseq.rds` and to the TreeSummarizedExperiment
+beside it, so neither needs a tree read in separately. Branch lengths and the
+root come from the reference rather than from the run, which is what makes two
+runs' trees comparable: they are the same tree with different tips added.
+
+**`pplace_taxonomy` is left unset**, though the same reference bundle carries
+one. ampliseq takes an EPA-NG taxonomy in preference to DADA2's, so setting it
+would replace SILVA 138.2 with GTDB in every abundance table, every collapsed
+level and every barplot — a change to what the requester reads, as a side effect
+of asking for a tree. Leaving it unset also means `GAPPA_ASSIGN` never runs,
+since its `ext.when` is that file.
+
+### What reaches the tree
+
+Both metrics that need a phylogeny count a branch once whether one read or a
+million sit on it, so a single off-target ASV that aligns nowhere becomes a long
+branch of its own and is weighed like a real lineage. Two filters run before the
+placement:
+
+- **`--filter_ssu bac,arc`.** Barrnap classifies each ASV's small-subunit gene,
+  and anything that is neither bacterial nor archaeal is dropped. A 16S primer
+  pair also amplifies host and organellar DNA, and those products carry no SSU at
+  all. What went is recorded in `barrnap/`.
+- **`--min_len_asv` / `--max_len_asv`**, the window the detected region implies,
+  as in the table above. What went is recorded in `asv_length_filter/`.
+
+`exclude_taxa` still removes mitochondria, chloroplast and Francisella by name
+after both, and neither filter catches everything the others do.
+
+**Archaea are kept, and the reference tree is bacterial.** SBDI publishes
+`arc16s` and `bac16s` as separate trees and `--pplace_tree` takes one. Archaeal
+ASVs therefore survive into the abundance tables and the taxonomy — where a
+requester expects to see *Methanobrevibacter* — and are then placed near the root
+of a bacterial tree on long pendant branches. They are a small share of a human
+16S survey, but they are the part of the tree to distrust.
+
+### What it costs
+
+The reference is 54 322 sequences across about 1 550 alignment columns, which is
+larger than the modules that touch it were sized for: `CLUSTALO_ALIGN` is
+`process_medium` (6 CPUs, 6 GB, 8 h), and `EPANG_PLACE` carries only
+`process_medium_memory`, so it inherits the pipeline default of **one CPU and one
+hour** to place onto a 54 322-tip tree.
+[`config/slurm.config`](../../config/slurm.config) overrides both: 16 CPUs each,
+64 GB and 128 GB, 12 hours.
+
+Most of what the placement writes is that alignment, published twice — Clustal
+Omega's copy of it, and the two halves EPA-NG splits it back into.
+[`prune.conf`](../../templates/ampliseq/prune.conf) removes both and keeps the
+`.jplace.gz`, which is the placement itself.
+
 ## Building the landmark reference
 
 One-time cluster setup, run once rather than as part of any pipeline:
@@ -292,3 +384,38 @@ It writes into `db/16s/`:
 The build refuses to write anything if the *E. coli* 16S it fetched is not 1 542
 bases with the 515F site at position 515 — every coordinate in the region table
 above assumes that numbering.
+
+## Building the placement reference
+
+The second one-time cluster setup:
+
+```bash
+sbatch --cpus-per-task=2 --mem=8G --time=01:00:00 scripts/build_pplace_reference.sh
+```
+
+[`build_pplace_reference.sh`](../../scripts/build_pplace_reference.sh) downloads
+SBDI's GTDB bacterial 16S reference — `sbdi-gtdb-sativa R11-RS232-1 bac120`: one
+16S sequence per GTDB species representative, aligned, and the tree fitted to
+that alignment. It takes them from the two figshare files ampliseq itself pins
+for `sbdi-gtdb` at the revision above, so the tree a run is placed onto is the
+one that revision would have used. **Bumping `AMPLISEQ_REVISION` means checking
+that `conf/ref_databases.config` still names the same two file ids.**
+
+It writes into `db/pplace/`:
+
+| File | |
+| --- | --- |
+| `bac16s.alnfna` | the reference alignment, one row per species representative |
+| `bac16s.newick` | the tree built from it, one tip for each of those |
+| `manifest.json` | what went in, from where, and how |
+
+Nothing is put in place until the two check out against each other: the alignment
+has to be rectangular, it has to hold more than 10 000 sequences, and every tip
+of the tree has to name a sequence in the alignment and every sequence a tip.
+EPA-NG refuses a mismatched pair as well — but it refuses after a run has already
+paid for cutadapt and DADA2.
+
+The alignment is **RNA**: SBDI writes it with `U` rather than `T`, which is why
+`pplace_alnmethod` is left at `clustalo` rather than moved to `hmmer`. Clustal
+Omega reads both as nucleotides; the HMMER route would build its profile from the
+RNA reference and then align DNA ASVs to it.

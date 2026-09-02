@@ -46,8 +46,8 @@
 # of a single region within 39, so the variants never blur the choice of region.
 #
 # Writes ./detected_params.yaml, which wrike_job.sh layers over the pipeline's
-# defaults: sequencing_type, the two primers, skip_cutadapt, and for ONT the
-# Savont settings that go with it.
+# defaults: sequencing_type, the two primers, skip_cutadapt, the ASV length
+# window the region implies, and for ONT the Savont settings that go with it.
 #
 # Does nothing when PIPELINE_RERUN_UID is set. A rerun's parameters come from the
 # run it reproduces, so measuring this run's reads could only disagree with them.
@@ -139,6 +139,12 @@ readonly MAX_POSITION_SNAP=25
 readonly MAX_DRIFT=60
 readonly MAX_DRIFT_ONE_END=30
 readonly MIN_MARGIN=120
+
+# How far an ASV may sit from the length the chosen region's coordinates predict
+# before ampliseq drops it. Wide enough for the indels that make one taxon's copy
+# of a variable region longer than another's, and for a primer left on one end;
+# narrow enough to catch an unmerged read pair, which is off by hundreds.
+readonly ASV_LENGTH_TOLERANCE=0.15
 
 readonly SAMPLESHEET="${1:-ampliseq_samplesheet.tsv}"
 readonly SAMPLE_FASTA="detect_sample.fasta"
@@ -596,6 +602,8 @@ for entry in "${REGIONS[@]}"; do
         BEST_LABEL=$label
         BEST_FW_PRIMER=$fw_primer
         BEST_RV_PRIMER=$rv_primer
+        BEST_FW_POSITION=$fw_position
+        BEST_RV_POSITION=$rv_position
         BEST_DISTANCE=$region_distance
         BEST_FW_PRESENT=$region_fw
         BEST_RV_PRESENT=$region_rv
@@ -659,6 +667,19 @@ else
     warn "Only one of the two primers appears to have been trimmed from these reads."
 fi
 
+# 9. The ASV length window the region implies. An ASV reaches ampliseq's length
+#    filter with its primers already gone - cut here by cutadapt, or removed
+#    before the reads arrived - so the length to expect is the span between the
+#    two binding sites less the primers that occupy them.
+EXPECTED_ASV_LENGTH=$((BEST_RV_POSITION - BEST_FW_POSITION + 1 \
+    - ${#BEST_FW_PRIMER} - ${#BEST_RV_PRIMER}))
+
+read -r MIN_LEN_ASV MAX_LEN_ASV < <(awk \
+    -v length_of="$EXPECTED_ASV_LENGTH" -v tolerance="$ASV_LENGTH_TOLERANCE" \
+    'BEGIN { printf "%d %d\n", length_of * (1 - tolerance), length_of * (1 + tolerance) + 0.5 }')
+
+log "Expecting ASVs of $EXPECTED_ASV_LENGTH bases; keeping $MIN_LEN_ASV to $MAX_LEN_ASV."
+
 state_set region "$BEST_REGION"
 
 {
@@ -666,6 +687,8 @@ state_set region "$BEST_REGION"
     printf 'primer_fwd: "%s"\n' "$BEST_FW_PRIMER"
     printf 'primer_rev: "%s"\n' "$BEST_RV_PRIMER"
     printf 'skip_cutadapt: %s\n' "$SKIP_CUTADAPT"
+    printf 'min_len_asv: %s\n' "$MIN_LEN_ASV"
+    printf 'max_len_asv: %s\n' "$MAX_LEN_ASV"
 
     # ampliseq would reach both of these from sequencing_type alone, since
     # asv_calling defaults to auto and savont_options to --fl-16s. Written out so
@@ -686,6 +709,8 @@ state_set region "$BEST_REGION"
     printf '  Primers:    %s\n' "$PRIMER_STATE"
     printf '  primer_fwd: %s\n' "$BEST_FW_PRIMER"
     printf '  primer_rev: %s\n' "$BEST_RV_PRIMER"
+    printf '  ASV length: %s to %s bases kept, around the %s the region predicts\n' \
+        "$MIN_LEN_ASV" "$MAX_LEN_ASV" "$EXPECTED_ASV_LENGTH"
     printf '\n'
     printf '  Reads scanned: %s across %s samples\n' "$SCANNED_READS" "${#CHOSEN[@]}"
     printf '  Reads sampled: %s, of which %s aligned to the 16S landmarks\n' \

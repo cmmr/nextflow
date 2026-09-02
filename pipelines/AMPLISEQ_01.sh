@@ -29,9 +29,34 @@ params_set cut_dada_ref_taxonomy true
 params_set ref_taxonomy_storage  "$NEXTFLOW_DIR/db/ampliseq"
 params_set exclude_taxa          "mitochondria,chloroplast,Francisella"
 
+# Barrnap classifies each ASV's small-subunit gene, and anything that is neither
+# bacterial nor archaeal is dropped. A 16S primer pair also amplifies host and
+# organellar DNA, and those products carry no SSU at all; left in, each becomes a
+# long branch of its own that unweighted UniFrac and Faith's PD weigh like any
+# other. Archaea are kept, so they stay in the abundance tables and the taxonomy
+# - the tree below is bacterial, and places them near its root.
+params_set filter_ssu            "bac,arc"
+
 # Pinned because this revision changed its default from "independent", and
 # because Savont rejects the third value, "pseudo"
 params_set sample_inference      "pooled"
+
+# Phylogenetic placement in place of the de novo MAFFT/FastTree phylogeny. EPA-NG
+# grafts the ASVs onto the GTDB bacterial 16S tree build_pplace_reference.sh
+# fetched, and ampliseq puts the grafted tree into the phyloseq and
+# TreeSummarizedExperiment objects, where UniFrac and Faith's PD can read it.
+#
+# This is the only tree the run produces: ampliseq builds its de novo one inside
+# the QIIME2 diversity subworkflow, which it skips when no --metadata sheet is
+# given, and this pipeline gives none.
+#
+# --pplace_taxonomy is left unset. ampliseq takes it in preference to DADA2,
+# which would replace SILVA with GTDB in every abundance table and barplot.
+params_set pplace_name           "gtdb_bac16s"
+params_set pplace_tree           "$NEXTFLOW_DIR/db/pplace/bac16s.newick"
+params_set pplace_aln            "$NEXTFLOW_DIR/db/pplace/bac16s.alnfna"
+params_set pplace_model          "GTR+F+I+G4"
+params_set pplace_alnmethod      "clustalo"
 
 # The report keeps its own styling; what is replaced is what it says - a title,
 # and an opening section naming who produced the analysis and where the rest of

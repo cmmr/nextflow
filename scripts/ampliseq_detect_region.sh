@@ -161,6 +161,22 @@ if [[ -n "${PIPELINE_RERUN_UID:-}" ]]; then
     exit 0
 fi
 
+# A share of something, as a reader reads it. The shares here are computed as
+# fractions, and a fraction printed as it stands reads as a count of things -
+# "1 of them" for every read agreeing on a strand, which is the opposite of what
+# that says. A share that is not whole keeps a decimal, so a run that just
+# cleared a threshold is not reported as having met it exactly.
+as_percent() {
+    LC_ALL=C awk -v value="$1" 'BEGIN {
+        share = value * 100
+        text = sprintf("%.0f", share)
+
+        if (text != share) text = sprintf("%.1f", share)
+
+        printf "%s%%", text
+    }'
+}
+
 # The regions a requester's reads could have turned out to be, for the messages
 # that report not finding one
 supported_regions() {
@@ -296,7 +312,7 @@ fi
 
 if [[ "$READ_LAYOUT" == "paired" && "$READ_SPAN" == "long" ]]; then
     REASON="What this run sequenced could not be determined: its reads are paired,"
-    REASON+=" but $LONG_FRACTION of them are longer than $LONG_READ_THRESHOLD bases,"
+    REASON+=" but $(as_percent "$LONG_FRACTION") of them are longer than $LONG_READ_THRESHOLD bases,"
     REASON+=" which no paired-end instrument produces."
     fail "$REASON"
 fi
@@ -309,7 +325,7 @@ else
     SEQUENCING_TYPE="nanopore"
 fi
 
-log "Reads are $READ_LAYOUT-end, median $MEDIAN_LENGTH bases, $LONG_FRACTION of them over $LONG_READ_THRESHOLD; calling them $SEQUENCING_TYPE."
+log "Reads are $READ_LAYOUT-end, median $MEDIAN_LENGTH bases, $(as_percent "$LONG_FRACTION") of them over $LONG_READ_THRESHOLD; calling them $SEQUENCING_TYPE."
 
 #    Cut the aligner's queries out of that sample. A paired mate is cut to its
 #    5' PROBE_LENGTH bases, since the 5' end is set by where the primer bound
@@ -510,7 +526,7 @@ if [[ "$READ_LAYOUT" == "paired" ]]; then
         if ! awk -v f="${M[strand_fraction_$mate]}" -v m="$MIN_STRAND_FRACTION" \
                 'BEGIN { exit !(f >= m) }'; then
             REASON="The 16S region of this run's reads could not be determined:"
-            REASON+=" only ${M[strand_fraction_$mate]} of the R$mate reads agree on a strand,"
+            REASON+=" only $(as_percent "${M[strand_fraction_$mate]}") of the R$mate reads agree on a strand,"
             REASON+=" so this looks like more than one library mixed together."
             fail "$REASON"
         fi
@@ -705,7 +721,7 @@ state_set region "$BEST_REGION"
     printf 'What this run sequenced\n\n'
     printf '  Platform:   %s (%s-end, median read %s bases, %s of them over %s)\n' \
         "$SEQUENCING_TYPE" "$READ_LAYOUT" "$MEDIAN_LENGTH" \
-        "$LONG_FRACTION" "$LONG_READ_THRESHOLD"
+        "$(as_percent "$LONG_FRACTION")" "$LONG_READ_THRESHOLD"
     printf '  Region:     %s (%s)\n' "$BEST_LABEL" "$BEST_REGION"
     printf '  Amplicon:   E. coli 16S, %s\n' "$MEASURED"
     printf '  Primers:    %s\n' "$PRIMER_STATE"
@@ -717,10 +733,12 @@ state_set region "$BEST_REGION"
     printf '  Reads scanned: %s across %s samples\n' "$SCANNED_READS" "${#CHOSEN[@]}"
     printf '  Reads sampled: %s, of which %s aligned to the 16S landmarks\n' \
         "$SAMPLED_READS" "$ALIGNED_TOTAL"
-    printf '  R1 on the %s strand: %s of them\n' "${M[orientation_1]}" "${M[strand_fraction_1]}"
+    printf '  R1 on the %s strand: %s of them\n' "${M[orientation_1]}" \
+        "$(as_percent "${M[strand_fraction_1]}")"
 
     if [[ "$READ_LAYOUT" == "paired" ]]; then
-        printf '  R2 on the %s strand: %s of them\n' "${M[orientation_2]}" "${M[strand_fraction_2]}"
+        printf '  R2 on the %s strand: %s of them\n' "${M[orientation_2]}" \
+            "$(as_percent "${M[strand_fraction_2]}")"
     fi
 
     printf '\n'

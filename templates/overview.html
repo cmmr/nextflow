@@ -314,6 +314,35 @@ __STATS__
   });
 })();
 
+// The "details" link a statistics bar can carry, which shows and hides the
+// stages behind that bar's reading. Both are written hidden - the link because
+// a reader without scripting cannot work it, the stages because they are an
+// aside until asked for - so this reveals the link and then answers it.
+//
+// The stages are laid out by a display utility, which outranks the hidden
+// attribute, so what is toggled is the property behind it.
+(function () {
+  var links = [].slice.call(document.querySelectorAll("[data-stat-details]"));
+
+  links.forEach(function (link) {
+    var group = link.getAttribute("data-stat-details");
+    var rows = [].slice.call(
+      document.querySelectorAll('[data-stat-detail="' + group + '"]'));
+
+    if (!rows.length) return;
+
+    link.style.display = "";
+
+    link.addEventListener("click", function () {
+      var open = link.getAttribute("aria-expanded") !== "true";
+
+      rows.forEach(function (row) { row.style.display = open ? "" : "none"; });
+      link.setAttribute("aria-expanded", open ? "true" : "false");
+      link.textContent = open ? "hide" : "details";
+    });
+  });
+})();
+
 (function () {
   var DATA = __PLOT_DATA__;
 

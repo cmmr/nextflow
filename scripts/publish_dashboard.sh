@@ -38,9 +38,18 @@
 #   dashboard_stat_row   <label> <value>          a reading with no bar under it
 #   dashboard_stat_tiles <value|label|tone> ...   a row of counts
 #   dashboard_stat_chips <value|label> ...        the same row, set small
-#   dashboard_stat_bar   <label> <reading> <percent> [tone]
+#   dashboard_stat_bar   <label> <reading> <percent> [tone] [details]
 #                        tone: growth for a share of the reads that were kept;
 #                        a total is left toneless and wears the navy
+#                        details: the group of dashboard_stat_detail bars this
+#                        bar's "details" link shows and hides
+#   dashboard_stat_detail <group> <label> <reading> <percent> [href]
+#                        one step behind a bar's "details" link, hidden until
+#                        the reader asks for it; href makes the label a link to
+#                        where the pipeline's own report accounts for that step
+#   dashboard_report_section <report> <href> <anchors>
+#                        the address of a section of a published report, for
+#                        that href, or nothing when it carries no such section
 #   render_dashboard  <run_id> <task_name> <subtitle> <pipeline> \
 #                     <run_date> <sample_count> <expires> [plot_data]
 #   publish_results   <s3_dir>
@@ -71,7 +80,8 @@
 # Defines: dashboard_reset, dashboard_view, dashboard_index_view,
 #          dashboard_button, dashboard_link_button, dashboard_bundle,
 #          dashboard_stat_group, dashboard_stat_row, dashboard_stat_tiles,
-#          dashboard_stat_chips, dashboard_stat_bar, render_dashboard,
+#          dashboard_stat_chips, dashboard_stat_bar, dashboard_stat_detail,
+#          dashboard_report_section, render_dashboard,
 #          publish_results, DASHBOARD_PAGES, TEXT_EXTENSIONS,
 #          DOWNLOAD_EXTENSIONS
 # Requires: aws, GNU find; the escape_html/escape_url/human_size/render_template
@@ -395,15 +405,9 @@ dashboard_stat_chips() {
         "text-[10px] leading-3 font-label-caps text-on-surface-variant" "$@"
 }
 
-# One measurement as a labelled bar. The reading is written out for a reader -
-# "14.8k", "12.7%" - and the percentage is only how far the bar is filled.
-dashboard_stat_bar() {
-    local label="$1" reading="$2" percent="$3" tone="${4:-}"
-
-    case "$tone" in
-        growth)    tone="bg-bio-growth" ;;
-        *)         tone="bg-primary-container" ;;
-    esac
+# How far a bar is filled, as a percentage a style rule can take
+dashboard_bar_fill() {
+    local percent="$1"
 
     [[ "$percent" =~ ^[0-9]+(\.[0-9]+)?$ ]] || percent=0
 
@@ -412,13 +416,105 @@ dashboard_stat_bar() {
         percent=100
     fi
 
+    printf '%s' "$percent"
+}
+
+# One measurement as a labelled bar. The reading is written out for a reader -
+# "14.8k", "12.7%" - and the percentage is only how far the bar is filled.
+#
+# Naming a group of detail bars puts a "details" link beside the label, which
+# shows and hides them. The link is written hidden and the page's script reveals
+# it, so a reader without scripting is not offered a control that does nothing.
+dashboard_stat_bar() {
+    local label="$1" reading="$2" percent="$3" tone="${4:-}" details="${5:-}"
+
+    case "$tone" in
+        growth)    tone="bg-bio-growth" ;;
+        *)         tone="bg-primary-container" ;;
+    esac
+
+    percent=$(dashboard_bar_fill "$percent")
+
     DASHBOARD_STATS+="<div class=\"mb-2.5 last:mb-0\"><div class=\"flex justify-between items-baseline gap-2 mb-1\">"
-    DASHBOARD_STATS+="<span class=\"font-body-sm text-body-sm font-medium text-on-surface\">$(escape_html "$label")</span>"
+    DASHBOARD_STATS+="<span class=\"font-body-sm text-body-sm font-medium text-on-surface\">$(escape_html "$label")"
+
+    if [[ -n "$details" ]]; then
+        DASHBOARD_STATS+="<button type=\"button\" data-stat-details=\"$(escape_html "$details")\""
+        DASHBOARD_STATS+=" aria-expanded=\"false\" style=\"display: none\""
+        DASHBOARD_STATS+=" class=\"ml-1.5 font-body-sm text-body-sm font-normal text-primary underline"
+        DASHBOARD_STATS+=" decoration-dotted underline-offset-2 hover:no-underline\">details</button>"
+    fi
+
+    DASHBOARD_STATS+="</span>"
     DASHBOARD_STATS+="<span class=\"font-code-sm text-code-sm text-on-surface-variant\">$(escape_html "$reading")</span></div>"
     DASHBOARD_STATS+="<div class=\"h-1.5 w-full bg-surface-variant rounded-full overflow-hidden\">"
     DASHBOARD_STATS+="<div class=\"h-full $tone rounded-full\" style=\"width: $percent%;\"></div></div></div>"
 
     return 0
+}
+
+# One step behind a bar's "details" link. Set smaller and indented under the
+# reading it breaks down, since these support that number rather than being one
+# of the run's own headline counts.
+#
+# A step that the pipeline's own report accounts for somewhere carries the
+# address of that section, and its label is the link there. The report is one of
+# the dashboard's own views rather than a file to take away, so this opens in
+# the frame the reader is already in and the navigation bar follows it there -
+# unlike the file index, whose links are to files and open in a tab of their
+# own.
+dashboard_stat_detail() {
+    local group="$1" label="$2" reading="$3" percent="$4" href="${5:-}"
+    local style="font-body-sm text-[11px] leading-4 text-on-surface-variant"
+    local open="<span class=\"$style\">" close="</span>"
+
+    percent=$(dashboard_bar_fill "$percent")
+
+    #    The address carries a fragment, which escape_url would encode away, and
+    #    it is built from a fixed path and an anchor the report itself declared
+    style+=" underline decoration-dotted underline-offset-2"
+    style+=" hover:text-on-surface hover:decoration-solid"
+
+    if [[ -n "$href" ]]; then
+        open="<a class=\"$style\" href=\"$(escape_html "$href")\">"
+        close="</a>"
+    fi
+
+    DASHBOARD_STATS+="<div class=\"mb-2 last:mb-0 pl-3 border-l-2 border-outline-variant/40\""
+    DASHBOARD_STATS+=" data-stat-detail=\"$(escape_html "$group")\" style=\"display: none\">"
+    DASHBOARD_STATS+="<div class=\"flex justify-between items-baseline gap-2 mb-1\">"
+    DASHBOARD_STATS+="$open$(escape_html "$label")$close"
+    DASHBOARD_STATS+="<span class=\"font-code-sm text-code-sm text-outline shrink-0\">"
+    DASHBOARD_STATS+="$(escape_html "$reading")</span></div>"
+    DASHBOARD_STATS+="<div class=\"h-1 w-full bg-surface-variant rounded-full overflow-hidden\">"
+    DASHBOARD_STATS+="<div class=\"h-full bg-primary-container/60 rounded-full\" style=\"width: $percent%;\"></div>"
+    DASHBOARD_STATS+="</div></div>"
+
+    return 0
+}
+
+# The address of a section of a report the run published, named as the anchors
+# that could carry it, most specific first. Both reports this system publishes
+# give their sections stable ids - pandoc slugifies a heading into one, MultiQC
+# names a section after the tool that wrote it - so an anchor follows what a
+# section is rather than where it fell, and the numbering that shifts when a run
+# skips a step does not come into it.
+#
+# A section a report does not have is not linked to at all: the anchors are
+# checked against the report this run actually produced, and nothing is printed
+# when it carries none of them, which leaves the label as plain text rather than
+# a link that lands nowhere.
+dashboard_report_section() {
+    local report="$1" href="$2" anchor
+
+    [[ -r "$report" ]] || return 0
+
+    for anchor in $3; do
+        if grep -qF "id=\"$anchor\"" "$report"; then
+            printf '%s#%s' "$href" "$anchor"
+            return 0
+        fi
+    done
 }
 
 # The statistics card, or nothing when the run has neither a setting to name nor

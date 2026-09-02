@@ -94,6 +94,30 @@ readonly PLOT_DATA="composition_data.json"
 # only place the reads that went in are counted
 readonly OVERALL_SUMMARY="$RESULTS_DIR/overall_summary.tsv"
 
+# The columns of that summary the sidebar breaks the read total down by. Which
+# of them a run wrote depends on the path it took - chopper and savont are the
+# nanopore route, DADA2's four the Illumina one, cutadapt either - so a stage a
+# run never reached simply has no column and is left out.
+#
+# They are reported in the order the summary's own header lists them, which is
+# the order they ran, rather than in the order named here: the two paths do not
+# run their steps in the same order, and a funnel whose bars rise partway down
+# is not a funnel. Quality filtering comes before primer removal on the nanopore
+# route and after it on the Illumina one.
+#
+# The chain stops at the length filter: what follows it is the taxon removal the
+# "Retained reads" bar already reports.
+readonly READ_STAGE_COLUMNS=(
+    chopper_output
+    cutadapt_passing_filters
+    filtered
+    merged
+    nonchim
+    savont_output
+    ssufilter_output
+    lenfilter_output
+)
+
 # Where the run's headline numbers go, in the run's state file rather than in
 # the results: they are the dashboard's sidebar, not an output of the analysis
 readonly STATS_KEY="statistics"
@@ -435,20 +459,20 @@ count_asvs() {
     LC_ALL=C awk -F'\t' '!/^#/ && NF > 1 { n++ } END { print n + 0 }' "$FEATURE_TABLE"
 }
 
-# Reads as they arrived, summed over every sample. Which column counts them
-# depends on what the run did, so the earliest stage the summary carries is the
-# one taken: chopper opens a nanopore run, cutadapt an Illumina one that trimmed
-# primers, and DADA2 one that did not.
+# Reads at one stage of the run, summed over every sample. The stage is named as
+# the columns that could carry it, earliest first, and the first of them the
+# summary has is the one taken - which column counts a stage depends on what the
+# run did. Prints nothing when the summary carries none of them, so a caller can
+# leave out a stage this run never reached.
 #
 # cutadapt writes its counts with thousands separators, so everything that is
 # not part of the number is stripped before it is read as one.
-total_input_reads() {
-    LC_ALL=C awk -F'\t' '
+summary_reads() {
+    LC_ALL=C awk -F'\t' -v candidates="$1" '
         NR == 1 {
             for (i = 1; i <= NF; i++) at[$i] = i
 
-            split("chopper_input cutadapt_total_processed DADA2_input input_reads input",
-                  want, " ")
+            split(candidates, want, " ")
 
             for (i = 1; i in want; i++) {
                 if (want[i] in at) { pick = at[want[i]]; break }
@@ -462,7 +486,30 @@ total_input_reads() {
             total += reads + 0
         }
 
-        END { print total + 0 }
+        END { if (pick) print total + 0 }
+    ' "$OVERALL_SUMMARY"
+}
+
+# Reads as they arrived: chopper opens a nanopore run, cutadapt an Illumina one
+# that trimmed primers, and DADA2 one that did not.
+total_input_reads() {
+    summary_reads "chopper_input cutadapt_total_processed DADA2_input input_reads input"
+}
+
+# The stages this run's summary actually carries, in the order its header lists
+# them - which is the order the pipeline ran them in.
+summary_stages() {
+    LC_ALL=C awk -F'\t' -v known="${READ_STAGE_COLUMNS[*]}" '
+        BEGIN { split(known, list, " "); for (i in list) wanted[list[i]] = 1 }
+
+        NR == 1 {
+            for (i = 1; i <= NF; i++) {
+                if ($i in wanted) printf "%s%s", (found++ ? " " : ""), $i
+            }
+
+            printf "\n"
+            exit
+        }
     ' "$OVERALL_SUMMARY"
 }
 
@@ -539,6 +586,42 @@ asv_taxonomy_table() {
     done
 
     return 1
+}
+
+# The database the run classified against, as ampliseq names it in the record it
+# writes beside the assignments - "Silva 138.2 prokaryotic SSU". Fails for a run
+# that wrote no such record, or one whose record does not name a title, which
+# leaves the method line off rather than naming a database that may not be the
+# one used.
+taxonomy_database() {
+    local path title
+
+    for path in "$TAXONOMY_DIR"/ref_taxonomy.*.txt; do
+        [[ -r "$path" ]] || continue
+
+        title=$(LC_ALL=C awk '/^Title: / { sub(/^Title:[ \t]*/, ""); print; exit }' "$path")
+
+        [[ -n "$title" ]] || continue
+
+        printf '%s' "$title"
+        return 0
+    done
+
+    return 1
+}
+
+# What produced the composition below, in the words of the script that read the
+# tables it was drawn from. Which classifier named a bar's taxa, and what it
+# named them against, is a run's own and a reader is owed it beside the bar
+# rather than three pages away. That the unnamed reads are left out of the chart
+# is not said here: it is true of both pipelines, so the page says it once,
+# above this line.
+composition_method() {
+    local database
+
+    database=$(taxonomy_database) || return 1
+
+    printf 'ASVs were inferred with DADA2 and classified against %s.' "$database"
 }
 
 # How many of the run's ASVs the classifier named at one rank, which is what
@@ -618,6 +701,19 @@ write_run_statistics() {
 
         if [[ -r "$OVERALL_SUMMARY" ]]; then
             printf 'reads_total\t%s\n' "$(total_input_reads)"
+
+            #    The order is the sidebar's to follow, and only this script has
+            #    read the header it comes from, so it is recorded beside the
+            #    counts rather than left to be guessed at from them
+            READ_STAGES=$(summary_stages)
+
+            if [[ -n "$READ_STAGES" ]]; then
+                printf 'read_stages\t%s\n' "$READ_STAGES"
+
+                for READ_STAGE in $READ_STAGES; do
+                    printf 'reads_%s\t%s\n' "$READ_STAGE" "$(summary_reads "$READ_STAGE")"
+                done
+            fi
         fi
 
         if [[ -n "$taxonomy" ]]; then
@@ -673,6 +769,15 @@ if [[ -n "$DATA" ]]; then
     fi
 
     DATA+=",\"levels\":[$LEVELS]"
+
+    # How those numbers were made, for the caption under the composition chart.
+    # jq encodes it, since it is a sentence being written into JSON. A run whose
+    # record does not name a database leaves the line off rather than guessing.
+    if METHOD=$(composition_method); then
+        DATA="\"method\":$(printf '%s' "$METHOD" | jq -R -s .),$DATA"
+    else
+        warn "The classification database could not be named; the Overview will not state it."
+    fi
 fi
 
 # 3. The same tables, counted for the dashboard's sidebar

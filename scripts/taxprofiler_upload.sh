@@ -90,6 +90,11 @@ RUN_MANIFEST_KEY="manifest"
 # What the page calls the analysis, under the task's own name
 SUBTITLE="Shotgun metagenomic taxonomic profiling"
 
+# Every tool's own account of what it did, which is where the read totals send a
+# reader who wants a step's own numbers, and where it is read from
+MULTIQC_REPORT="$RESULTS_DIR/multiqc/multiqc_report.html"
+readonly MULTIQC_REPORT_HREF="multiqc/multiqc_report.html"
+
 # What the landing page's "All output files" view lists, in the order it lists it
 readonly OUTPUT_CATALOG="$NEXTFLOW_DIR/templates/taxprofiler/outputs.conf"
 
@@ -214,7 +219,7 @@ dashboard_reset "$RESULTS_DIR" "$OUTPUT_CATALOG" "$(globus_run_url "$RUN_ID")"
 
 #    The navigation bar, after the Overview every run opens on
 dashboard_view krona   "Taxonomy Explorer" "$KRONA_CHART"
-dashboard_view quality "Technical Report"  "multiqc/multiqc_report.html"
+dashboard_view quality "Technical Report"  "$MULTIQC_REPORT_HREF"
 dashboard_index_view   "File Explorer"
 
 #    The one table a requester opens first, named for what it holds rather than
@@ -259,21 +264,22 @@ while IFS=$'\t' read -r STAT_KEY STAT_VALUE; do
     STATS["$STAT_KEY"]="$STAT_VALUE"
 done < <(state_get_tsv "$STATS_KEY")
 
-# One reading as a bar: what it is, how many reads it was, and what share of the
-# total it was taken against. Green is for the reads that came through; what was
-# taken out is left in the navy every total wears.
+# A count against the total it was taken against, as the fill a bar takes and
+# the reading written beside it.
 #
 # The share is written whole, except where rounding it whole would read 100% for
 # a step that did drop reads: quality filtering keeps 99.5% of a good run, and a
 # sidebar calling that 100% tells the reader nothing happened.
-stat_share() {
-    local label="$1" count="$2" total="$3" tone="${4:-growth}"
-    local percent reading
+#
+# Nothing at all when either is not a count, which is how a step the run did not
+# take leaves out its bar rather than reporting a share of nothing.
+share_reading() {
+    local count="$1" total="$2"
 
-    [[ "$count" =~ ^[0-9]+$ && "$total" =~ ^[0-9]+$ ]] || return 0
-    (( total > 0 )) || return 0
+    [[ "$count" =~ ^[0-9]+$ && "$total" =~ ^[0-9]+$ ]] || return 1
+    (( total > 0 )) || return 1
 
-    read -r percent reading < <(LC_ALL=C awk -v c="$count" -v t="$total" 'BEGIN {
+    LC_ALL=C awk -v c="$count" -v t="$total" 'BEGIN {
         share = c * 100 / t
         text = sprintf("%.0f", share)
 
@@ -283,9 +289,31 @@ stat_share() {
         }
 
         printf "%.4f %s\n", share, text
-    }')
+    }'
+}
 
-    dashboard_stat_bar "$label" "$reading% · $(human_count "$count")" "$percent" "$tone"
+# One reading as a bar: what it is, how many reads it was, and what share of the
+# total. Green is for the reads that came through; what was taken out is left in
+# the navy every total wears.
+stat_share() {
+    local label="$1" count="$2" total="$3" tone="${4:-growth}" details="${5:-}"
+    local percent reading
+
+    read -r percent reading < <(share_reading "$count" "$total") || return 0
+
+    dashboard_stat_bar "$label" "$reading% · $(human_count "$count")" "$percent" \
+        "$tone" "$details"
+}
+
+# The same reading as one of the steps behind a bar's "details" link
+stat_share_detail() {
+    local group="$1" label="$2" count="$3" total="$4" href="${5:-}"
+    local percent reading
+
+    read -r percent reading < <(share_reading "$count" "$total") || return 0
+
+    dashboard_stat_detail "$group" "$label" "$reading% · $(human_count "$count")" \
+        "$percent" "$href"
 }
 
 #    Reads as they reached the pipeline, and what was still in hand at each step
@@ -304,13 +332,30 @@ RETAINED_READS=${STATS[reads_total]:-$TOTAL_READS}
 if [[ "$TOTAL_READS" =~ ^[0-9]+$ ]] && (( TOTAL_READS > 0 )); then
     #    What went in and what was left, on one scale, so the survival rate is
     #    the second bar by eye - the same two readings the amplicon dashboard
-    #    reports. What each step in between took is that step's own accounting
-    #    and is in the Technical Report; a sidebar carrying all of it is a funnel
-    #    nobody reads.
+    #    reports. What each step in between took sits behind the "details" link
+    #    on the second of them, out of the way of a reader who only wants the
+    #    two, and each of those labels leads to that step's own accounting in the
+    #    Technical Report.
     dashboard_stat_group "READ TOTALS" "${STATS[platform]:-}"
     dashboard_stat_bar "Total reads" "$(human_count "$TOTAL_READS")" 100
 
-    stat_share "Retained reads" "$RETAINED_READS" "$TOTAL_READS"
+    #    Host depletion counts what bowtie2 was given rather than what quality
+    #    filtering passed, so what is left is worked out from its own two
+    #    numbers rather than by subtracting from the bar above.
+    HOST_KEPT=""
+    if [[ "${STATS[host_total]:-}" =~ ^[0-9]+$ && "${STATS[host_removed]:-}" =~ ^[0-9]+$ ]]; then
+        HOST_KEPT=$(( STATS[host_total] - STATS[host_removed] ))
+    fi
+
+    stat_share_detail reads "After quality filter" "${STATS[qc_passed]:-}" "$TOTAL_READS" \
+        "$(dashboard_report_section "$MULTIQC_REPORT" "$MULTIQC_REPORT_HREF" \
+            "fastp-filtered-reads-chart fastp general_stats")"
+
+    stat_share_detail reads "After host depletion" "$HOST_KEPT" "$TOTAL_READS" \
+        "$(dashboard_report_section "$MULTIQC_REPORT" "$MULTIQC_REPORT_HREF" \
+            "bowtie2 general_stats")"
+
+    stat_share "Retained reads" "$RETAINED_READS" "$TOTAL_READS" growth reads
 
     dashboard_stat_group "READS PER SAMPLE"
     dashboard_stat_chips "$(human_count "${STATS[reads_min]:-0}")|Min" \

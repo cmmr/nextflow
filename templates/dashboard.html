@@ -15,11 +15,18 @@
   the pipeline's own reports as they were written, files.html for the index.
 
   The links carry target="view", so they load into that frame with or without
-  scripting; the script only remembers which one is open in the fragment, so
-  #quality is a link straight to the Technical Report with the bar still
-  around it. A view costs one history entry - the fragment - and the frame is
-  sent to its page by replacing the address it is on, so the browser's back
+  scripting; the script remembers which one the bar was asked for in the
+  fragment, so #quality is a link straight to the Technical Report with the bar
+  still around it. A view costs one history entry - the fragment - and the frame
+  is sent to its page by replacing the address it is on, so the browser's back
   button walks the views the bar shows rather than the loads behind them.
+
+  The bar also follows the frame where the bar did not send it, since a page
+  inside it can link to another: the file index and the Overview's read-count
+  bars both link into the report. That is read back off the frame on each load
+  and only marks the view active - the fragment stays the record of what the
+  reader last asked the bar for, so reloading or sharing the address returns to
+  that rather than to wherever the frame had been browsed to.
 
   Every link is relative, because this page is served from S3 next to the
   objects it points at. The head is shared with the other two pages and is
@@ -104,7 +111,14 @@ __COMMON_HEAD__
   // A page opened off disk rather than out of the bucket - the copy in the zip
   // this run publishes - gives the frame an origin of its own, so the fallback
   // is the attribute and the entry that comes with it.
+  // The view the bar has asked for and is still waiting on, so that the frame
+  // arriving at the page it is being sent away from does not mark that one
+  // active on the way past
+  var pending = null;
+
   function load(url) {
+    pending = url;
+
     try {
       frame.contentWindow.location.replace(url);
     } catch (error) {
@@ -112,18 +126,92 @@ __COMMON_HEAD__
     }
   }
 
-  function show(view) {
+  function mark(view) {
     links.forEach(function (link) {
-      var on = link.getAttribute("data-view") === view;
+      link.className = link.getAttribute("data-view") === view ? ON : OFF;
+    });
+  }
 
-      link.className = on ? ON : OFF;
+  function show(view) {
+    mark(view);
 
-      if (on && loaded !== link.getAttribute("href")) {
+    links.forEach(function (link) {
+      if (link.getAttribute("data-view") === view
+          && loaded !== link.getAttribute("href")) {
         loaded = link.getAttribute("href");
         load(loaded);
       }
     });
   }
+
+  // Where the frame actually is, as this page would write the address: every
+  // view is a relative link from here, so the answer is comparable to one.
+  //
+  // A dashboard opened off disk rather than out of the bucket gives the frame
+  // an origin of its own and reading it throws, which is the one case the bar
+  // cannot follow the frame and goes on naming the view it last sent it to.
+  function frameHref() {
+    var here;
+
+    try {
+      here = frame.contentWindow.location.href;
+    } catch (error) {
+      return null;
+    }
+
+    var root = location.href.replace(/[?#].*$/, "").replace(/[^/]*$/, "");
+
+    return here.indexOf(root) === 0 ? here.slice(root.length) : null;
+  }
+
+  // The view a page belongs to: the view it is, or the one whose folder holds
+  // it. The report's own plots and the listings under the file index are pages
+  // of a view rather than views of their own, so the longest match wins and a
+  // page under no view's folder - a listing in the results tree - leaves the
+  // bar naming whichever view led there.
+  function viewFor(href) {
+    var page = href.replace(/[?#].*$/, "");
+    var view = null;
+    var reach = 0;
+
+    links.forEach(function (link) {
+      var target = link.getAttribute("href");
+      var folder = target.replace(/[^/]*$/, "");
+      var match = 0;
+
+      if (page === target) match = target.length + 1;
+      else if (folder && page.indexOf(folder) === 0) match = folder.length;
+
+      if (match > reach) {
+        reach = match;
+        view = link.getAttribute("data-view");
+      }
+    });
+
+    return view;
+  }
+
+  // A page inside the frame can send it somewhere the bar did not: the file
+  // index and the Overview's read-count bars both link into the report. Reading
+  // the frame back on every load is what lets the bar follow it there, and it
+  // keeps "loaded" true to where the frame is, so a click on any view still
+  // sends it home from wherever it has wandered.
+  frame.addEventListener("load", function () {
+    var href = frameHref();
+
+    if (href === null) return;
+
+    // Ignore the pages the frame passes through on its way to a view the bar is
+    // still waiting on; once that view lands, the frame is its own record again
+    if (pending !== null && viewFor(href) !== viewFor(pending)) return;
+
+    pending = null;
+    loaded = href;
+
+    var view = viewFor(href);
+
+    if (view) mark(view);
+  });
 
   function fromHash() {
     var hash = location.hash.replace("#", "");

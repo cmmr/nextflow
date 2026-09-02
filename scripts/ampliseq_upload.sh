@@ -96,6 +96,9 @@ SUBTITLE="16S rRNA amplicon sequencing analysis"
 # ampliseq's own account of the run, and the first thing the dashboard shows
 SUMMARY_REPORT="$RESULTS_DIR/summary_report/summary_report.html"
 
+# Where that report is read from, relative to the pages that link into it
+readonly SUMMARY_REPORT_HREF="summary_report/summary_report.html"
+
 # What the landing page's "All output files" view lists, in the order it lists it
 readonly OUTPUT_CATALOG="$NEXTFLOW_DIR/templates/ampliseq/outputs.conf"
 
@@ -258,10 +261,50 @@ fi
 #    What the run measured, as the sidebar reports it. The counts are whole
 #    numbers written out in the units a sidebar has room for; the bars are only
 #    how far each reading got.
+# What one stage of the read totals is called on the page, and where ampliseq's
+# own report accounts for it, as "<label>|<anchors>". Named for what the stage
+# did rather than for the tool that did it, since a reader is being told where
+# their reads went rather than which program took them.
+#
+# The anchors are the subsection first and the section holding it second: a
+# report only carries the subsections for the steps its own run took, so a
+# nanopore run has no cutadapt section for an Illumina one's anchor to land on
+# and vice versa, and either falls back to Preprocessing.
+read_stage_reading() {
+    case "$1" in
+        chopper_output)
+            printf 'After read filtering|read-filtering-with-chopper preprocessing' ;;
+        cutadapt_passing_filters)
+            printf 'After primer removal|primer-removal-with-cutadapt preprocessing' ;;
+        filtered)
+            printf 'After quality filter|quality-filtering-using-dada2 preprocessing' ;;
+        merged)
+            printf 'After pair merging|read-counts-per-sample asv-inference-using-dada2' ;;
+        nonchim)
+            printf 'After chimera removal|read-counts-per-sample asv-inference-using-dada2' ;;
+        savont_output)
+            printf 'After ASV calling|asv-inference-using-savont read-counts-per-sample' ;;
+        ssufilter_output)
+            printf 'After rRNA filter|rrna-detection post-processing-of-asvs' ;;
+        lenfilter_output)
+            printf 'After length filter|sequence-length post-processing-of-asvs' ;;
+        *)
+            printf '%s|' "$1" ;;
+    esac
+}
+
 declare -A STATS=()
 
+#    Which stages the read totals break down into, and in which order, is the
+#    one reading here that is not a number: ampliseq_composition.sh took it off
+#    the summary's own header, since the two sequencing paths do not run their
+#    steps in the same order.
+READ_STAGES=""
+
 while IFS=$'\t' read -r STAT_KEY STAT_VALUE; do
-    if [[ "$STAT_VALUE" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+    if [[ "$STAT_KEY" == "read_stages" ]]; then
+        READ_STAGES="$STAT_VALUE"
+    elif [[ "$STAT_VALUE" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
         STATS["$STAT_KEY"]="$STAT_VALUE"
     fi
 done < <(state_get_tsv "$STATS_KEY")
@@ -281,7 +324,37 @@ if [[ -n "${STATS[reads_retained]:-}" ]]; then
 
     dashboard_stat_group "READ TOTALS" "$SEQUENCED"
     dashboard_stat_bar "Total reads"    "$(human_count "$TOTAL_READS")" 100
-    dashboard_stat_bar "Retained reads" "$RETAINED_READING" "$RETAINED_PCT" growth
+
+    #    Every stage between those two, on the same scale, so the step that
+    #    thinned the run is the one whose bar drops. Named for what the stage
+    #    did rather than for the tool that did it, and skipped when the run
+    #    carries no count for it.
+    #
+    #    Each label links to where ampliseq's own report accounts for that step.
+    #    The anchors are the subsection first and the section holding it second,
+    #    since a report only carries the subsections for the steps its run
+    #    actually took - a run whose primers arrived trimmed writes no cutadapt
+    #    section, and one that merged nothing writes no read-count table.
+    for STAGE in $READ_STAGES; do
+        STAGE_READS=${STATS[reads_$STAGE]:-}
+
+        [[ -n "$STAGE_READS" ]] || continue
+
+        STAGE_PCT=0
+        if (( TOTAL_READS > 0 )); then
+            STAGE_PCT=$(( (STAGE_READS * 100 + TOTAL_READS / 2) / TOTAL_READS ))
+        fi
+
+        STAGE_READING=$(read_stage_reading "$STAGE")
+
+        STAGE_LINK=$(dashboard_report_section \
+            "$SUMMARY_REPORT" "$SUMMARY_REPORT_HREF" "${STAGE_READING#*|}")
+
+        dashboard_stat_detail reads "${STAGE_READING%%|*}" \
+            "$STAGE_PCT% · $(human_count "$STAGE_READS")" "$STAGE_PCT" "$STAGE_LINK"
+    done
+
+    dashboard_stat_bar "Retained reads" "$RETAINED_READING" "$RETAINED_PCT" growth reads
 
     dashboard_stat_group "READS PER SAMPLE"
     dashboard_stat_chips "$(human_count "${STATS[reads_min]:-0}")|Min" \

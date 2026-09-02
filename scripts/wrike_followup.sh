@@ -89,10 +89,8 @@ if [[ "$STATUS" == "Completed" ]]; then
     set_wrike_status "Completed"
 
     RESULTS_URL=$(run_results_url "$RUN_ID")
-
-    REPLY="Complete: $RESULTS_URL"
-    REPLY+="$(run_report)"
-    add_wrike_comment "$REPLY"
+    
+    add_wrike_comment "Complete: $RESULTS_URL"
 
     # The last word on the run, published beside its results before the working
     # copy goes with the directory. Every earlier state reached S3 through

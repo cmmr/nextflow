@@ -62,6 +62,13 @@
 # is regenerated per nixpkgs revision, so a revision carries exactly one version
 # of each package - which is the point, and also the thing to check before
 # moving it.
+#
+# Being in that set is not a promise that a package builds. It is generated from
+# CRAN and Bioconductor metadata rather than from anything that compiled, so a
+# package needing a patch needs it written here - see hdf5lib below. Check any
+# such patch still applies after moving the pin: substituteInPlace's
+# --replace-fail turns a string that no longer matches into a build failure
+# rather than a silent no-op, which is what you want.
 
 let
 
@@ -91,11 +98,36 @@ let
 
   pkgs = import nixpkgs { system = "x86_64-linux"; };
 
+  # hdf5lib does not build unpatched. Its configure copies R's own headers into
+  # its build tree with file.copy(), which defaults to copy.mode = TRUE, so the
+  # copies inherit whatever the source had - and R's headers live in the nix
+  # store, where directories are read-only. The script's own "rm -rf build" then
+  # cannot unlink anything under build/lib/R_ext, and configure fails.
+  #
+  # Copying without the mode is the fix. The same one belongs upstream in
+  # cmmr/hdf5lib, since any read-only R installation hits this, not just nix.
+  #
+  # It goes in the set's own overrides rather than being applied to the
+  # attribute from outside: h5lite resolves hdf5lib from within the R package
+  # set, and r-modules/default.nix merges `overrides` into that set's fixed
+  # point. Overriding pkgs.rPackages.hdf5lib on its own would leave h5lite
+  # building against the unpatched one.
+  rPkgs = pkgs.rPackages.override {
+    overrides = {
+      hdf5lib = pkgs.rPackages.hdf5lib.overrideAttrs (old: {
+        postPatch = (old.postPatch or "") + ''
+          substituteInPlace configure \
+            --replace-fail "recursive = TRUE))" "recursive = TRUE, copy.mode = FALSE))"
+        '';
+      });
+    };
+  };
+
   # rWrapper wraps every binary in R/bin - Rscript among them - with
   # R_LIBS_SITE pointing at these packages, so nothing has to be installed at
   # run time and nothing reads a user library.
   rEnv = pkgs.rWrapper.override {
-    packages = with pkgs.rPackages; [
+    packages = with rPkgs; [
       rbiom
       h5lite
       phyloseq

@@ -157,7 +157,29 @@ pkgs/development/r-modules/bioc-packages.json
 **Build the OCI tarball, not a SIF.** nixpkgs has `singularity-tools.buildImage`,
 but it runs the build inside a QEMU VM with a disk size given up front, and an R
 closure overruns the default. `dockerTools.buildLayeredImage` and then
-`apptainer build` is the route with fewer moving parts.
+`apptainer build` is the route with fewer moving parts. Note it takes
+`contents`, a plain list of derivations — `copyToRoot` belongs to
+`dockerTools.buildImage`, and the layered builder rejects it.
+
+**Being in nixpkgs is not a promise that it builds.** The R sets are generated
+from CRAN and Bioconductor metadata rather than from anything that compiled, so
+a package needing a patch needs it written into the `.nix` file.
+[`rbiom.nix`](../../nix/rbiom.nix) carries one for `hdf5lib`, which copies R's
+headers out of the read-only store with their permissions attached and then
+cannot clean up after itself.
+
+Where a patched package is a *dependency* of something else in the set — as
+`hdf5lib` is of `h5lite` — the override has to go through the set rather than
+round it:
+
+```nix
+rPkgs = pkgs.rPackages.override { overrides = { hdf5lib = ...; }; };
+```
+
+`r-modules/default.nix` merges `overrides` into the set's fixed point, so
+everything that depends on the patched package picks it up. Overriding
+`pkgs.rPackages.hdf5lib` on its own changes only what *you* reference, and
+`h5lite` would go on building against the unpatched one.
 
 ## Keeping the cache in hand
 

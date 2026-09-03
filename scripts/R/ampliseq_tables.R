@@ -34,11 +34,11 @@
 #   <plot data>                             what the Overview's charts draw
 #   <statistics>                            counts for the Overview's sidebar
 #
-# Every rank is collapsed by rbiom's own taxa_matrix(), with unc = "grouped":
-# an ASV the classifier stopped short on is named for the deepest rank it did
-# reach - "Unc. Bacillota" at genus for one placed no further than its phylum -
-# rather than being pooled into a bucket of its own. So every ASV is drawn
-# somewhere at every rank, and a column adds up to the whole sample.
+# Every rank is collapsed by rbiom's own taxa_matrix(). The published tables
+# take unc = "grouped", which names an ASV the classifier stopped short on for
+# the deepest rank it did reach, so every ASV has a row at every rank; the chart
+# takes unc = "drop", so it draws what was found and a column stands short of
+# the whole sample by what was not.
 #
 # Taxa named in exclude_taxa are dropped before any of that, so every file here
 # describes the same set of ASVs. The match is a case-insensitive substring
@@ -297,30 +297,39 @@ for (spec in list(
 
 # -- Counts collapsed to each rank -------------------------------------------
 
-# One row per taxon, one column per sample, at one rank. Both tables and the
-# chart come out of taxa_matrix(), with unc = "grouped": an ASV the classifier
-# stopped short on is named for the deepest rank it did reach, so it is counted
-# at every rank rather than set aside at the ones it never got to.
-rank_matrix <- function (rank, ...)
-    rbiom::taxa_matrix(biom, rank = rank, unc = "grouped", ...)
-
-# What sits above each of those names, for the line under it in the legend.
-# taxa_map() groups the ASVs exactly as taxa_matrix() does, so the two agree on
-# what a row is called; asking it for the lineage as well gives the path above.
+# One row per taxon, one column per sample, at one rank. Both the tables and the
+# chart come out of taxa_matrix(), and the two differ only in how they take an
+# ASV the classifier stopped short on:
 #
-# A rank the classifier never reached carries the name of the last one it did,
-# repeated the rest of the way down, so the path is read off the runs of that
-# lineage rather than off its ranks - and the taxon's own name comes off the end
-# of it, since the legend has that on the line above.
+#   unc = "grouped"  names it for the deepest rank it did reach - "Unc.
+#                    Bacillota" at genus for one placed no further than its
+#                    phylum - so every ASV has a row at every rank. This is what
+#                    the published tables collapse with: a table that quietly
+#                    dropped rows would not add up to the feature table beside
+#                    it.
+#
+#   unc = "drop"     leaves it out. This is what the chart draws: a band is a
+#                    taxon that was actually found, and a column falls short of
+#                    the whole sample by exactly what was not. rbiom counts
+#                    "uncultured" and "incertae sedis" as unreached here, which
+#                    is what they are.
+#
+# transform = "percent" takes each share against the sample's whole read total
+# before either of those runs, so dropping a taxon does not redistribute it.
+
+# What sits above a drawn name, for the line under it in the legend. taxa_map()
+# groups the ASVs exactly as taxa_matrix() does, so the two agree on what a row
+# is called; asking it for the lineage as well gives the path, and the taxon's
+# own name comes off the end since the legend has that on the line above.
 rank_lineages <- function (rank) {
-    labels <- as.character(rbiom::taxa_map(biom, rank = rank, unc = "grouped"))
+    labels <- as.character(rbiom::taxa_map(biom, rank = rank, unc = "drop"))
     paths  <- strsplit(
-        rbiom::taxa_map(biom, rank = rank, unc = "grouped", lineage = TRUE),
+        rbiom::taxa_map(biom, rank = rank, unc = "drop", lineage = TRUE),
         "; ", fixed = TRUE)
 
     above <- vapply(
         paths,
-        function (path) paste(head(rle(path)$values, -1), collapse = "; "),
+        function (path) paste(head(path, -1), collapse = "; "),
         character(1))
 
     stats::setNames(above, labels)[!duplicated(labels)]
@@ -340,8 +349,9 @@ if (length(ranks) > 0) {
         #    Published for anyone who wants every row, at every rank the
         #    classifier reached
         stem      <- sprintf("L%d-%s", depth, tolower(rank))
-        collapsed <- rank_matrix(rank)
-        shares    <- rank_matrix(rank, transform = "percent")
+        collapsed <- rbiom::taxa_matrix(biom, rank = rank, unc = "grouped")
+        shares    <- rbiom::taxa_matrix(biom, rank = rank, unc = "grouped",
+                                        transform = "percent")
 
         utils::write.table(
             data.frame(taxon = rownames(collapsed), collapsed,
@@ -359,13 +369,26 @@ if (length(ranks) > 0) {
         #    chart: every sequence in a 16S run is expected to land in one
         if (depth < 2) next
 
+        #    A rank no ASV reached has no chart, and taxa_matrix() will not be
+        #    asked for one: it has no taxa to rank
+        if (length(rbiom::taxa_map(biom, rank = rank, unc = "drop")) == 0) next
+
         #    And the eleven the chart draws, most abundant first, with
-        #    everything rarer summed into "Other", in the ten-thousandths of a
-        #    sample the chart is drawn in
-        drawn   <- round(10000 * rank_matrix(rank, taxa = TOP_TAXA,
-                                             other = TRUE,
-                                             transform = "percent"))
+        #    everything rarer that was reached summed into "Other", in the
+        #    ten-thousandths of a sample the chart is drawn in
+        drawn   <- round(10000 * rbiom::taxa_matrix(
+                                     biom, rank = rank, unc = "drop",
+                                     taxa = TOP_TAXA, other = TRUE,
+                                     transform = "percent"))
         lineage <- c(rank_lineages(rank), Other = "")
+
+        #    taxa_matrix() ranks a taxon by its share of what it kept; the chart
+        #    stacks and reports shares of the whole sample, and the two orders
+        #    part company when samples differ in how much was classified. The
+        #    drawn rows go back into the order the legend prints, "Other" last.
+        body  <- rownames(drawn)[-nrow(drawn)]
+        body  <- body[order(rowMeans(drawn[body, , drop = FALSE]), decreasing = TRUE)]
+        drawn <- drawn[c(body, "Other"), , drop = FALSE]
 
         levels[[length(levels) + 1]] <- list(
             rank = depth,

@@ -236,12 +236,11 @@ __ZIP_BUTTON__
 <div class="grid grid-cols-3 gap-x-8 gap-y-2.5 shrink-0 max-h-[34%] overflow-y-auto pb-5" id="legend"></div>
 <div class="flex-1 min-h-0 overflow-hidden" id="bars-box"><canvas id="bars"></canvas></div>
 <div class="shrink-0 max-w-3xl mt-4 space-y-1">
-<p class="font-body-sm text-body-sm text-on-surface">One column per sample, out of that
-sample&rsquo;s reads, most abundant taxon at the top. The eleven most abundant taxa at
-this rank are drawn in their own colour; everything rarer is grouped as
-&ldquo;Other&rdquo;. Reads the classifier could not name are left out, so a column adds
-up to less than 100% of its sample &mdash; the axis is scaled to the tallest of
-them.</p>
+<p class="font-body-sm text-body-sm text-on-surface">One column per sample, most abundant
+taxon at the top. Each band is that taxon&rsquo;s share of the sample&rsquo;s reads; the
+eleven most abundant at this rank are drawn in their own colour and everything
+rarer is grouped as &ldquo;Other&rdquo;. A column reaches as far as the reads the
+classifier placed at this rank, and the axis is scaled to the tallest of them.</p>
 <p class="font-body-sm text-body-sm text-on-surface-variant" id="composition-method" style="display: none"></p>
 <p class="font-body-sm text-body-sm text-outline" id="axis-note"></p>
 </div>
@@ -1144,9 +1143,14 @@ __STATS__
 
       // What is missing from the lines above: the reads of this sample the
       // classifier placed nowhere, which is the height its column is short of
-      // the axis and is not drawn as a band of its own
-      html += '<div class="row unnamed">(Unclassified <b>'
-        + percent(Math.max(10000 - totals[sample], 0)) + "</b>)</div>";
+      // the axis and is not drawn as a band of its own. A run whose every read
+      // is named leaves the column whole and this line off.
+      var unplaced = 10000 - totals[sample];
+
+      if (unplaced > 0) {
+        html += '<div class="row unnamed">(Unclassified <b>'
+          + percent(unplaced) + "</b>)</div>";
+      }
 
       return html;
     });

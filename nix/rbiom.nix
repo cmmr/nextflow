@@ -16,11 +16,16 @@
 #
 # nix is not installed on the cluster. It runs out of an apptainer sandbox
 # instead, which also gives the build a package cache that survives between
-# images - see docs/operations/nix.md for the whole of it. Once that sandbox
-# exists:
+# images - see docs/operations/nix.md for the whole of it, including the
+# mkdir the /data bind needs, which --writable will not do for you. Once that
+# sandbox exists:
 #
 #     cd "$NEXTFLOW_DIR/nix"
 #     apptainer exec -B /data --writable "$NIX_DIR" nix-build rbiom.nix
+#
+# The warnings about passwd, group and /etc/localtime not existing in the
+# container are expected: the nixos/nix image carries none of them, and nothing
+# here needs them.
 #
 # nix-build leaves a ./result symlink pointing at the image tarball. That path
 # is a /nix/store path *inside* the sandbox, so it has to be read against the
@@ -106,19 +111,15 @@ pkgs.dockerTools.buildLayeredImage {
   name = "rbiom";
   tag = "latest";
 
-  copyToRoot = pkgs.buildEnv {
-    name = "image-root";
-    paths = [
-      rEnv
-      pkgs.bashInteractive
-      pkgs.coreutils
-    ];
-    pathsToLink = [
-      "/bin"
-      "/lib"
-      "/share"
-    ];
-  };
+  # "contents", not "copyToRoot" - the layered builder symlink-joins these into
+  # the image root itself, so /bin ends up holding R, Rscript, bash and
+  # coreutils. copyToRoot belongs to dockerTools.buildImage, and this one
+  # rejects it.
+  contents = [
+    rEnv
+    pkgs.bashInteractive
+    pkgs.coreutils
+  ];
 
   config = {
     Env = [

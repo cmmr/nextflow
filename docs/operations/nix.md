@@ -35,11 +35,8 @@ apptainer build --sandbox "$NIX_DIR" docker://nixos/nix
 ```
 
 ```bash
-mkdir -p "$NIX_DIR/etc/nix"
-```
-
-```bash
-echo "sandbox = false" >> "$NIX_DIR/etc/nix/nix.conf"
+rm "$NIX_DIR/etc/nix/nix.conf"
+echo "sandbox = false" > "$NIX_DIR/etc/nix/nix.conf"
 ```
 
 **`sandbox = false` is what makes it work at all.** Nix's own build sandbox
@@ -47,6 +44,30 @@ wants to create user namespaces, and it is already inside one — apptainer's.
 Nesting them fails, so nix is told not to try. It costs the build isolation nix
 would otherwise give itself, which does not matter here: the sandbox is a
 throwaway directory that only ever builds our own images.
+
+Then make a mount point for the bind the builds use:
+
+```bash
+mkdir -p "$NIX_DIR/data"
+```
+
+**`--writable` will not create that for you.** Apptainer normally conjures a
+missing bind destination in an overlay laid over the image, but `--writable`
+turns that layer off — the whole point of it is that writes land in the sandbox
+directory itself. So a bind destination has to be a real directory in the
+sandbox before it can be mounted over, and without this one the build fails at
+startup rather than part way through:
+
+```
+WARNING: By using --writable, Apptainer can't create /data destination
+         automatically without overlay or underlay
+FATAL:   container creation failed: mount hook function failure:
+         destination /data doesn't exist in container
+```
+
+Since `$NEXTFLOW_DIR` lives under `/data`, this is also what makes the current
+working directory resolve inside the container — apptainer binds the CWD by
+default, and that bind needs the same destination to exist.
 
 `$NIX_DIR` is a working directory, not a deliverable. It is a few gigabytes
 after the first R build and it is excluded from git along with the rest of
@@ -144,7 +165,7 @@ The sandbox's store grows with every build and never shrinks on its own. To
 reclaim what nothing points at:
 
 ```bash
-apptainer exec --writable "$NIX_DIR" nix-collect-garbage -d
+apptainer exec -B /data --writable "$NIX_DIR" nix-collect-garbage -d
 ```
 
 Anything still needed is re-downloaded from the nixpkgs binary cache next time,

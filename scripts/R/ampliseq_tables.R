@@ -10,8 +10,9 @@
 # itself and everything derived from it, so the file a requester downloads and
 # the numbers the Overview plots are the same object read twice.
 #
-# The run's ASVs are assembled from what DADA2 published - counts, taxonomy and
-# sequences - plus the phylogeny EPA-NG placed them on, into one rbiom object.
+# The run's ASVs are assembled from what the pipeline published - the counts and
+# sequences as its last filter left them, DADA2's taxonomy, and the phylogeny
+# EPA-NG placed them on - into one rbiom object.
 # That object is then written out three ways, and summarised two ways:
 #
 #   feature_table/feature-table.tsv         counts and taxonomy, classic tabular
@@ -101,10 +102,40 @@ read_seqs <- function (path) {
     seqs
 }
 
-counts_file <- first_file("dada2", "ASV_table.tsv")
+# The ASV set the run actually settled on. Every filter ampliseq applies
+# republishes the table and the sequences under its own name, so the last one
+# that ran is the run's answer - and the one EPA-NG placed on the tree. DADA2's
+# own table is the fallback and still holds everything barrnap and the length
+# window removed, so reading it would publish ASVs the pipeline had thrown out
+# and leave the phylogeny covering only some of them.
+#
+# Most filtered first, and the table and the sequences are taken from the same
+# stage so they cannot describe different ASVs.
+ASV_SOURCES <- list(
+    list(dir = "asv_length_filter", table = "ASV_table.len.tsv",
+         fasta = "ASV_seqs.len.fasta", step = "the ASV length filter"),
+    list(dir = "barrnap",           table = "ASV_table.ssu.tsv",
+         fasta = "ASV_seqs.ssu.fasta", step = "the rRNA filter"),
+    list(dir = "dada2",             table = "ASV_table.tsv",
+         fasta = "ASV_seqs.fasta",    step = "DADA2"))
 
-if (is.null(counts_file))
-    stop("no dada2/ASV_table.tsv under ", results_dir)
+source      <- NULL
+counts_file <- NULL
+
+for (candidate in ASV_SOURCES) {
+    counts_file <- first_file(candidate$dir, candidate$table)
+
+    if (!is.null(counts_file)) {
+        source <- candidate
+        break
+    }
+}
+
+if (is.null(source))
+    stop("no ASV table under ", results_dir)
+
+message("Reading the ASVs as ", source$step, " left them: ",
+        sub(paste0("^", results_dir, "/"), "", counts_file))
 
 counts_df <- read_tsv(counts_file)
 
@@ -149,9 +180,15 @@ if (!is.null(tax_file)) {
 
     taxonomy <- taxonomy[match(otus, taxonomy[[".otu"]]), , drop = FALSE]
     taxonomy[[".otu"]] <- otus
+
+    # Reordering by a permutation turns R's automatic row names into explicit
+    # ones, and rbiom refuses a taxonomy that carries both row names and an
+    # .otu column. DADA2 does not publish its taxonomy in the table's order, so
+    # this is the ordinary case rather than an edge of one.
+    rownames(taxonomy) <- NULL
 }
 
-seqs_file <- first_file("dada2", "ASV_seqs.fasta")
+seqs_file <- first_file(source$dir, source$fasta)
 sequences <- if (is.null(seqs_file)) NULL else read_seqs(seqs_file)
 
 if (!is.null(sequences)) {
@@ -168,8 +205,15 @@ tree      <- NULL
 if (!is.null(tree_file)) {
     tree <- try(rbiom::read_tree(tree_file), silent = TRUE)
 
-    if (inherits(tree, "try-error") || !all(otus %in% tree$tip.label)) {
-        message("NOTE: the phylogeny does not cover every ASV; leaving it out.")
+    if (inherits(tree, "try-error")) {
+        message("NOTE: the phylogeny could not be read; leaving it out.")
+        tree <- NULL
+    } else if (!all(otus %in% tree$tip.label)) {
+        #    Faith's PD needs every ASV on the tree, and rbiom will not take a
+        #    tree that covers only some of them. Reaching here means the tree
+        #    and the table came from different stages of the run.
+        message("NOTE: the phylogeny covers ", sum(otus %in% tree$tip.label),
+                " of ", length(otus), " ASVs; leaving it out.")
         tree <- NULL
     }
 }

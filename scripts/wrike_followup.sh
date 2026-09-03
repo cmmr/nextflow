@@ -23,15 +23,16 @@
 #             such as the 16S region ampliseq_detect_region.sh measured
 #
 # A run that succeeded has that file published to its S3 prefix here, since it is
-# the last thing to read it before the run directory goes. A failed run's is
+# the last thing to read it before the run directory goes - though see the
+# TEMPORARY note below, which is currently keeping it. A failed run's is
 # published by the progress page this republishes below.
 #
 # A failed run also gets its results page republished as the failure, since that
 # is the link the requester was given and the logs it carries are what they are
 # going to be asked about.
 #
-# A successful run has already published to S3, so its run directory is removed.
-# A failed one is kept for inspection.
+# Both outcomes currently keep their run directory for inspection - see the
+# TEMPORARY note in the success branch.
 #
 # --output and --error name the same file, so both streams land in one
 # log/followup_<uid>_<jobid>.out.
@@ -99,9 +100,19 @@ if [[ "$STATUS" == "Completed" ]]; then
     publish_run_state "$RUN_ID" \
         || warn "Could not publish the final $RUN_STATE_FILE for run $RUN_ID."
 
-    # Results are already in S3; the working files are no longer needed
-    cd /
-    rm -rf "$RUN_DIR"
+    # TEMPORARY: the run directory is kept so a finished run can be re-processed
+    # by hand while the R feature-table step is being shaken out. Without this it
+    # goes here, and the only way to reproduce a post-processing failure is to
+    # run the whole pipeline again.
+    #
+    # wrike_delete_handler.sh still removes it when the task is deleted or its
+    # Dashboards tag is taken off, and wrike_expiration.sh still clears S3 and
+    # Globus on the expiration date - so nothing outlives its dashboard. What
+    # this leaves behind is the working copy under tmp/, which nothing else
+    # cleans up on a schedule.
+    #
+    # Put back to "cd / && rm -rf $RUN_DIR" once the post-processing is trusted.
+    log "Keeping $RUN_DIR for inspection; delete the Wrike task to remove it."
 
     exit 0
 fi

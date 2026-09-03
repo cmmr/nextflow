@@ -129,7 +129,7 @@ flowchart TD
 6. **Teardown.** Removing the "Dashboards" tag from a task, or deleting the task,
    fires the same webhook. [`wrike_delete_handler.sh`](../scripts/wrike_delete_handler.sh)
    cancels any Slurm jobs for that task, purges its S3 prefix, deletes the
-   archives it published to [the Globus collection](operations/globus.md), and
+   archive it published to [the Globus collection](operations/globus.md), and
    removes the run directory. Every step is best-effort, because a run may never
    have created the thing being removed.
 
@@ -143,7 +143,7 @@ flowchart TD
    [`wrike_expiration.sh`](../scripts/wrike_expiration.sh) reads those dates once
    a day: two weeks out it comments on the task, mentioning whoever raised it and
    anyone following it; on the
-   date it deletes the published results and the Globus archives, leaves an
+   date it deletes the published results and the Globus archive, leaves an
    expired page in their place,
    and sets the Status to `Expired`. The run's own records — `run_state.json`
    above all — are kept, so an expired run can still be repeated. It is the one

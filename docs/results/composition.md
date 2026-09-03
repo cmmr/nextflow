@@ -10,7 +10,7 @@ panel with a tab-link for each of those two questions.
 
 | Pipeline | Script | Reads |
 |---|---|---|
-| ampliseq | [`ampliseq_composition.sh`](../../scripts/ampliseq_composition.sh) | the QIIME 2 abundance tables |
+| ampliseq | [`ampliseq_composition.sh`](../../scripts/ampliseq_composition.sh), which runs [`ampliseq_tables.R`](../../scripts/R/ampliseq_tables.R) | DADA2's own tables, assembled into one feature table by rbiom |
 | taxprofiler | [`taxprofiler_composition.sh`](../../scripts/taxprofiler_composition.sh) | the per-sample Bracken and Kraken2 reports for composition, nonpareil and mOTUs for diversity |
 
 Both write the same file in the same shape, so there is one Overview rather than
@@ -28,37 +28,26 @@ sections on the sidebar and on colour apply to both.
 
 ## Why ampliseq's own answers were not enough
 
-**The barplot.** `qiime2/barplot/index.html` is a QIIME 2 visualisation: QIIME's
-own page furniture, and a stacked chart drawn as one SVG rectangle per sample per
-taxon. At six samples that is fine. At a few thousand it is hundreds of thousands
-of elements, and the browser stops being able to draw it — which matters here
-because a single request can carry that many samples. It is still published, and
-the file index still lists it under `Taxonomy`, for a reader who wants QIIME's
-own controls and its per-rank CSVs. It is not what the Overview plots.
+**The barplot** was a QIIME 2 visualisation: QIIME's own page furniture, and a
+stacked chart drawn as one SVG rectangle per sample per taxon. At six samples
+that is fine. At a few thousand it is hundreds of thousands of elements and the
+browser stops being able to draw it — which matters here because a single
+request can carry that many samples.
 
-**Alpha diversity.** ampliseq does not compute it at all for these runs. The
-gate in the dev workflow is:
+**Alpha diversity** it did not compute at all for these runs. The gate was
+`params.metadata && (!params.skip_alpha_rarefaction || !params.skip_diversity_indices)`,
+and `--metadata` is a sheet of grouping variables a Wrike request does not
+carry: nobody has told us which samples are cases and which are controls.
+Supplying a synthetic sheet to unlock the subworkflow also unlocks the
+group-comparison steps behind it, which have nothing real to compare.
 
-```groovy
-if ( params.metadata && (!params.skip_alpha_rarefaction || !params.skip_diversity_indices) ) {
-    QIIME2_DIVERSITY ( ... )
-}
-```
+**And its tables were a second feature table.** Whatever the Overview drew from
+QIIME 2's exports was a different object from whatever a requester downloaded,
+free to drift apart as either changed.
 
-`--metadata` is a sample sheet of grouping variables, and a run submitted through
-Wrike has none: nobody has told us which samples are cases and which are
-controls. Without it there is no `qiime2/diversity/`, no
-`qiime2/alpha-rarefaction/`, and nothing under `Diversity` in the file index but
-the entries that never matched. Supplying a synthetic metadata file to unlock the
-subworkflow would also unlock the group-comparison steps behind it, which have
-nothing real to compare — so the indices are computed here instead, where they
-need no grouping to be meaningful.
-
-**There is no other switch to throw.** The dev revision this system pins exposes
-`--report_css`, `--report_abstract`, `--report_logo`, `--report_title` and
-`--report_template` for the summary report, and `--metadata_category_barplot` for
-averaged barplots — all of which need metadata or replace the whole report
-template. No parameter adds figures to what a metadata-free run publishes.
+All three are now moot: `--skip_qiime_downstream` turns the whole of it off, and
+one rbiom object answers all of it. See [the section
+below](#the-feature-table-everything-is-read-from).
 
 ## What is in the panel
 
@@ -77,6 +66,21 @@ samples it was found in, and its lineage.
 order the legend reads — most abundant at the top, `Other` at the bottom — which
 is also the order the tooltip lists them in. A reader who finds a taxon in one
 finds it in the same place in the other two.
+
+**And the band under the pointer is marked in its own colour.** A column at
+genus is a dozen slivers, several of them a pixel or two tall, so which one the
+pointer is actually inside is not something the chart can be read for. The
+tooltip row for that band is filled with that band's colour washed out to 28%
+alpha — light enough to read black text over, and unmistakably the colour of the
+sliver it belongs to. The eleven are chosen to be told apart from each other,
+which is what makes the colour the fastest way back from a line of the tooltip
+to the part of the column it names.
+
+**The last line is what was left out.** `(Unclassified 12.4%)`, set apart under
+the taxa, is the share of that sample the classifier placed nowhere — the height
+its column is short of the axis. It is what the paragraph below is about, said
+per sample rather than in general, at the moment a reader is looking at a column
+that does not reach the top.
 
 **The columns do not add up to 100%, and are not meant to.** What the classifier
 named nothing — a shotgun run's `Unclassified`, a 16S run's `Unassigned` — is
@@ -98,9 +102,11 @@ classifier reached more often reaches higher.
 **Alpha diversity** — one index at a time, chosen from the panel's own `Index`
 select and drawn in the same sample order as the composition above it. Which
 indices those are is the run's own: an amplicon run offers the Shannon index
-first, then observed ASVs, read depth, the Simpson index and Pielou's evenness; a
-shotgun run offers what nonpareil and mOTUs measured, none of which needs a
-classification database, and opens on estimated coverage. Under it, the caption
+first and then every other index rbiom computes on a denoised table — observed
+ASVs, read depth, Simpson, inverse Simpson, Faith's PD, Berger-Parker,
+Brillouin, Fisher's alpha, Margalef, Menhinick and McIntosh; a shotgun run
+offers what nonpareil and mOTUs measured, none of which needs a classification
+database, and opens on estimated coverage. Under it, the caption
 says what the index is and — where the run's data names one — which tool
 measured it, and a table gives the lowest, median and highest value **of that
 index**. The other indices are a select away, and three numbers for an index the
@@ -126,12 +132,91 @@ whether there are six or six thousand; nothing is added to the document, so
 there is no number of samples at which the page stops rendering. A 1,500-sample
 run comes out as a 300 KB page that draws instantly.
 
+## The feature table everything is read from
+
+**QIIME 2's downstream no longer runs.** `--skip_qiime_downstream` turns off its
+abundance tables, its barplot, its diversity indices, its alpha rarefaction and
+its taxon filter in one switch. What replaces all of it is
+[`scripts/R/ampliseq_tables.R`](../../scripts/R/ampliseq_tables.R), run in a
+container by `ampliseq_composition.sh`.
+
+That script assembles one [rbiom](https://cmmr.github.io/rbiom/) object out of
+what DADA2 published — the ASV counts, the taxonomy, the sequences — plus the
+phylogeny [EPA-NG placed those ASVs on](../pipelines/ampliseq.md). Everything
+else is read off that one object, which is the point: **the file a requester
+downloads and the numbers on the Overview are the same table read twice**, not
+two renderings that can drift apart.
+
+It writes:
+
+| | |
+|---|---|
+| `feature_table/feature-table.tsv` | classic tabular BIOM — one row per ASV, one column per sample, taxonomy in the last column |
+| `feature_table/feature-table.json.biom` | BIOM 1.0 |
+| `feature_table/feature-table.hdf5.biom` | BIOM 2.1 |
+| `abundance_tables/L<n>-<rank>-counts.tsv` | counts collapsed to each rank |
+| `abundance_tables/L<n>-<rank>-relative.tsv` | the same as a share of each sample |
+| `alpha_diversity.tsv` | per-sample diversity |
+| `composition_data.json` | what the Overview's two charts draw |
+
+**The HDF5 file is the complete one.** BIOM 2.1 has a defined place for a
+phylogeny — `observation/group-metadata/phylogeny` with `data_type = "newick"`
+is the spec's own worked example — and rbiom writes it exactly there, with
+sequences at `observation/metadata/sequences` and taxonomy at
+`observation/metadata/taxonomy`. So counts, taxonomy, sequences and tree travel
+in one conforming file. The JSON file carries the tree too, but BIOM 1.0 has no
+slot for one, so it goes in an rbiom extension that other readers ignore. The
+newick and the FASTA are published separately as well, since
+`phyloseq::import_biom()` takes them as separate arguments and will not look
+inside a BIOM for either.
+
+**The taxon filter moved with it.** `--exclude_taxa` was a QIIME 2 step. The R
+script now applies it, matching the way QIIME 2 did — a case-insensitive
+substring against the whole lineage — before anything is written, so every file
+above describes the same set of ASVs. The setting is still declared in
+[`AMPLISEQ_01.sh`](../../pipelines/AMPLISEQ_01.sh) so that it lands in
+`ampliseq_args.yaml` and in the run's manifest, which is where the script reads
+it from.
+
+**ampliseq's phyloseq and TreeSummarizedExperiment objects are skipped.** With
+QIIME 2's downstream off, ampliseq would build them from the unfiltered DADA2
+table — a different set of ASVs from the feature table the run publishes, and
+two feature tables per run is the confusion this whole page exists to avoid.
+`rbiom::convert_to_phyloseq()` rebuilds one from the published BIOM whenever it
+is wanted; that needs `bioconductor-phyloseq` added to the image below.
+
+### The container
+
+[`nix/rbiom.nix`](../../nix/rbiom.nix) builds it: R with rbiom, h5lite and
+phyloseq, every version in the closure fixed by one pinned nixpkgs revision.
+[Nix](../operations/nix.md) covers the whole of how that is built without nix
+being installed on the cluster, and how to add another image beside it.
+
+**ecodive is not in that list, and does not need to be.** rbiom Imports it, so
+it arrives as a dependency whether or not it is asked for. h5lite is the
+opposite case — rbiom only *Suggests* it, so nothing pulls it in on its own,
+and without it `write_biom(format = "hdf5")` fails and the run publishes two of
+the three feature tables. That is the one thing to check on a rebuilt image.
+
+phyloseq is in there ahead of needing it, so that
+`rbiom::convert_to_phyloseq()` is available whenever the phyloseq object is
+wanted back.
+
+Set `RBIOM_CONTAINER` in [`.env`](../configuration.md) to the built `.sif`.
+Anything apptainer can pull works — a path, a `docker://` URI — so a
+[Seqera Containers](https://seqera.io/containers/) build from the conda-forge
+packages `r-rbiom` and `r-h5lite` is a working alternative if nix is not
+wanted. It is re-pullable rather than rebuildable, which is the trade.
+
+A run whose feature table cannot be assembled warns and carries on: the
+pipeline's own reports are still worth publishing, and the Overview falls back
+to its empty state.
+
 ## How the 16S numbers are worked out
 
-| From | Gives |
-|---|---|
-| `qiime2/rel_abundance_tables/rel-table-<rank>.tsv` | the composition of each sample at each rank the run agglomerated to |
-| `qiime2/abundance_tables/feature-table.tsv` | the ASV counts every diversity index is computed from |
+Both halves come off the one rbiom object described above — the composition
+from counts collapsed to each rank, the diversity from `rbiom::adiv_matrix()`
+over the same counts.
 
 Per sample, from the **unrarefied** counts:
 
@@ -139,9 +224,21 @@ Per sample, from the **unrarefied** counts:
 |---|---|
 | Read depth | reads assigned to ASVs after filtering |
 | Observed ASVs | distinct ASVs with a non-zero count |
-| Shannon | `−Σ p ln p` |
-| Simpson | `1 − Σ p²` |
-| Pielou's evenness | `H / ln S`, and 0 for a sample holding one ASV |
+| Shannon, Simpson, inverse Simpson | the three a requester asks for by name |
+| Faith's PD | branch length of the phylogeny a sample covers — the one index that reads the EPA-NG tree |
+| Berger-Parker, Brillouin, Fisher's alpha, Margalef, Menhinick, McIntosh | everything else rbiom offers that a denoised table supports |
+
+**ace, chao1 and squares are left out.** All three estimate the richness a
+sample would have shown if it had been read deeper, and all three read that off
+the ASVs seen exactly once and twice — which is what DADA2's denoising is built
+to remove. On this data they collapse towards the observed count and describe
+the denoiser rather than the sample.
+
+**Nothing is rarefied**, and the read depth every index was computed at is the
+first column of the same table. These runs have no experimental grouping to
+compare, and choosing a sampling depth on a requester's behalf is analysis
+rather than delivery. The feature table is published in three formats precisely
+so that rarefying is theirs to do.
 
 **A sequence classified only to `Bacteria` counts as `Unassigned`.** Silva writes
 it as `Bacteria;;;;;`, which is a rank short of a classification at every rank

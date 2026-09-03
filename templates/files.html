@@ -11,6 +11,14 @@
   carry class names rather than utilities; the style block below is what those
   names mean, written in the design system's own values.
 
+  One row names a folder this copy of the page does not publish: the reads the
+  run was given, which are only inside the zip on the "Download everything"
+  button. It is written held - greyed, with a note saying where those files are
+  - and the script at the foot turns it into an ordinary row for the same page
+  read out of an unpacked copy of that download, where the reads are sitting
+  beside it. Held is how the row is written, so the published copy is right with
+  or without scripting.
+
   Placeholders are COMMON_HEAD, TASK_NAME, GROUP_NAV, SECTIONS, YEAR and
   FOOTER_NOTE, each wrapped in doubled underscores. They are deliberately not
   spelled that way in this comment - the renderer substitutes the whole file,
@@ -79,6 +87,24 @@ __COMMON_HEAD__
   color: var(--muted);
   overflow-wrap: break-word;
 }
+/* A row for files this copy of the page cannot hand over. The name, the count
+   and what it is are still worth reading - this is the record of what went into
+   the run - so only the link and its colour go. */
+.groups tr.held td.name a { color: var(--muted); }
+.groups tr.held .held-note {
+  display: block;
+  margin-top: 3px;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 12px;
+  line-height: 16px;
+  font-style: italic;
+  color: var(--muted);
+}
+
+/* The copy that came down with the files, where the folder is there to open */
+html.local .groups tr.held td.name a { color: var(--link); }
+html.local .groups tr.held .held-note { display: none; }
+
 /* Downloads land as files; everything else opens in a tab of its own */
 .groups .tag {
   display: inline-block;
@@ -135,6 +161,16 @@ __COMMON_HEAD__
 </footer>
 </main>
 </div>
+
+<script>
+// A page read off disk is the copy that came down inside this run's zip, where
+// the folder a published index has to hold back is sitting beside it. The rows
+// are written held, so the copy served from the bucket is right either way.
+if (location.protocol === "file:" || location.hostname === "localhost"
+    || location.hostname === "127.0.0.1") {
+  document.documentElement.className += " local";
+}
+</script>
 
 </body>
 </html>

@@ -17,10 +17,7 @@
 #
 # An upload script declares what its pipeline produced and then publishes:
 #
-#   dashboard_reset      <results_dir> <catalog> [run_url]
-#                                                 run_url being where the
-#                                                 archives it published to
-#                                                 Globus are served from
+#   dashboard_reset      <results_dir> <catalog>
 #   dashboard_view       <id> <label> <path>      once per report the bar offers
 #   dashboard_index_view [label]                  where the file index sits in it
 #   dashboard_button     <glob> [label]           once per file the sidebar
@@ -28,12 +25,18 @@
 #                                                 unless the label says
 #                                                 otherwise; false when the glob
 #                                                 named nothing
-#   dashboard_link_button <href> <label> [icon]   a link to data held elsewhere,
-#                                                 hidden while <href> is empty
-#   dashboard_bundle     <label> <url>            one of the archives the run
-#                                                 publishes to Globus: a quick
-#                                                 download of its own, and part
-#                                                 of "Download everything"
+#   dashboard_formats    <heading> <note> <label|path> ...
+#                                                 one file offered in several
+#                                                 formats, as a row of boxes
+#                                                 under one heading; a format
+#                                                 the run did not write is left
+#                                                 out, and a heading whose
+#                                                 formats are all missing is
+#                                                 not drawn
+#   dashboard_bundle     <url> [bytes]            the one archive the run
+#                                                 publishes to Globus, which is
+#                                                 what "Download everything"
+#                                                 takes and how big it says it is
 #   dashboard_stat_group <heading> [note]         opens a block of the statistics
 #   dashboard_stat_row   <label> <value>          a reading with no bar under it
 #   dashboard_stat_tiles <value|label|tone> ...   a row of counts
@@ -57,8 +60,15 @@
 # Each of those skips a file the run did not produce, so the pages describe the
 # run rather than the pipeline. Overview is always the first link and the one a
 # reader lands on; the file index is appended to the bar when the pipeline did
-# not say where it goes. "Download everything" takes whatever bundles the run
-# declared, and a run that declared none has no such button.
+# not say where it goes.
+#
+# "Download everything" is the one archive the run published to Globus - the
+# reads it was given and this whole dashboard in a single zip - and a run that
+# published none has no such button. One file rather than two, and no separate
+# link to either half of it, because two downloads let a reader take one and
+# believe their data was safe before the dashboard expired. Beside the button is
+# a control that copies its address, for pasting into a shell on some other
+# machine.
 #
 # render_dashboard writes the three pages into the results folder rather than
 # straight to S3, so the zip a run publishes to Globus holds the same dashboard
@@ -72,13 +82,18 @@
 # under headings. A folder is listed as one row pointing at the
 # directory_listing.html index_directories.sh wrote into it. A path that is an
 # absolute address instead is written as one row leading there, which is how the
-# archives served from Globus are listed among the files they hold.
+# archive served from Globus is listed among the files it holds.
+#
+# A path marked HELD is a folder listed but not published: the reads the run was
+# given, which are only inside that archive. Its row leads to the listing
+# index_directories.sh wrote for them and is greyed, and so is every name in
+# that listing, until the page is read out of an unpacked copy of the download.
 #
 # Icons are Material Symbols names, from the font the design system loads:
 # biotech, database, filter_alt, science, folder_zip, data_object and so on.
 #
 # Defines: dashboard_reset, dashboard_view, dashboard_index_view,
-#          dashboard_button, dashboard_link_button, dashboard_bundle,
+#          dashboard_button, dashboard_formats, dashboard_bundle,
 #          dashboard_stat_group, dashboard_stat_row, dashboard_stat_tiles,
 #          dashboard_stat_chips, dashboard_stat_bar, dashboard_stat_detail,
 #          dashboard_report_section, render_dashboard,
@@ -114,24 +129,23 @@ DASHBOARD_DOWNLOADS=""
 DASHBOARD_STATS=""
 DASHBOARD_STAT_GROUP_OPEN=""
 
-# The archives this run published to Globus, as "<label>|<url>" - the two
-# downloads "Download everything" starts, and a quick download each
-DASHBOARD_BUNDLES=()
-
-# Where this run's archives are served from, which is what a catalog entry
-# beginning __RUN_URL__ is read against. Empty for a run that published none,
-# which leaves those entries naming nothing and so out of the index.
-DASHBOARD_RUN_URL=""
+# The one archive this run published to Globus: where it is served from, and
+# how big it came out. The address is what "Download everything" takes and what
+# a catalog entry of __BUNDLE_URL__ is read as; both are empty for a run that
+# published none, which leaves the button off the page and that entry out of the
+# index.
+DASHBOARD_BUNDLE_URL=""
+DASHBOARD_BUNDLE_SIZE=""
 
 dashboard_reset() {
     DASHBOARD_RESULTS_DIR="${1%/}"
     DASHBOARD_CATALOG="$2"
-    DASHBOARD_RUN_URL="${3:-}"
     DASHBOARD_VIEWS=()
     DASHBOARD_DOWNLOADS=""
     DASHBOARD_STATS=""
     DASHBOARD_STAT_GROUP_OPEN=""
-    DASHBOARD_BUNDLES=()
+    DASHBOARD_BUNDLE_URL=""
+    DASHBOARD_BUNDLE_SIZE=""
 }
 
 # True when a path is one a browser should be told to save
@@ -236,84 +250,118 @@ dashboard_button() {
     return $offered
 }
 
-# One quick download pointing at a whole address of its own rather than at a file
-# in the results folder, for data published somewhere else. An empty address
-# leaves the row in the page but hidden, so filling the address in is the whole
-# of turning the link on. Hidden inline rather than by class, since the row's
-# own "flex" would win over a utility class.
+# One file the run wrote in several formats, as a row of boxes under a heading
+# of its own. Each box names the format the same way - the thing itself set
+# large, the encoding under it - so the row reads as one file offered three ways
+# rather than as three files.
 #
-# An address the collection answers as an attachment - anything ending in
-# "?download" - is left to download in place; anything else opens outside the
-# frame the page is read in.
-dashboard_link_button() {
-    local href="$1" label="$2" icon="${3:-folder_zip}"
-    local attributes trailing="open_in_new"
+# Every box downloads. These are the same table whichever one is taken, and a
+# browser asked to render a hundred megabytes of it helps nobody.
+#
+# A format the run did not write is left out rather than offered and broken, and
+# a heading whose formats are all missing is not drawn at all.
+dashboard_formats() {
+    local heading="$1" note="$2"
+    local entry label name boxes=""
+    shift 2
 
-    if [[ -n "$href" ]]; then
-        attributes=" href=\"$(escape_html "$href")\""
+    for entry in "$@"; do
+        label=${entry%%|*}
+        name=${entry#*|}
 
-        if [[ "$href" == *"?download" ]]; then
-            trailing="file_download"
-        else
-            attributes+=" target=\"_blank\" rel=\"noopener\""
-        fi
-    else
-        attributes=' hidden style="display: none;"'
+        [[ -r "$DASHBOARD_RESULTS_DIR/$name" ]] || continue
+
+        boxes+="<a class=\"flex flex-col items-center justify-center gap-0.5 py-2 px-1 rounded-lg"
+        boxes+=" border border-outline-variant bg-surface-container-lowest"
+        boxes+=" hover:border-primary hover:bg-surface-container transition-colors group\""
+        boxes+=" href=\"$(escape_url "$name")\" download"
+        boxes+=" title=\"$(escape_html "$name")\">"
+        boxes+="<span class=\"font-bold text-body-md leading-5 text-primary\">BIOM</span>"
+        boxes+="<span class=\"font-label-caps text-[10px] leading-3 tracking-[0.06em]"
+        boxes+=" text-secondary group-hover:text-primary transition-colors\">"
+        boxes+="$(escape_html "$label")</span></a>"
+    done
+
+    [[ -n "$boxes" ]] || return 1
+
+    DASHBOARD_DOWNLOADS+="<div class=\"px-2 pt-2 pb-1\">"
+    DASHBOARD_DOWNLOADS+="<span class=\"block font-label-caps text-label-caps text-on-surface-variant mb-1.5\">"
+    DASHBOARD_DOWNLOADS+="$(escape_html "$heading")</span>"
+    DASHBOARD_DOWNLOADS+="<div class=\"grid grid-cols-3 gap-1.5\">$boxes</div>"
+
+    if [[ -n "$note" ]]; then
+        DASHBOARD_DOWNLOADS+="<p class=\"mt-1.5 font-body-sm text-[11px] leading-4 text-outline\">"
+        DASHBOARD_DOWNLOADS+="$(escape_html "$note")</p>"
     fi
 
-    DASHBOARD_DOWNLOADS+="<a class=\"flex items-center justify-between gap-2 px-2 py-1.5 rounded hover:bg-surface-container transition-colors group\""
-    DASHBOARD_DOWNLOADS+="$attributes>"
-    DASHBOARD_DOWNLOADS+="<span class=\"flex items-center gap-2 min-w-0\">"
-    DASHBOARD_DOWNLOADS+="<span class=\"material-symbols-outlined text-[20px] text-on-surface-variant group-hover:text-primary transition-colors\">"
-    DASHBOARD_DOWNLOADS+="$(escape_html "$icon")</span>"
-    DASHBOARD_DOWNLOADS+="<span class=\"text-[13px] leading-5 text-on-surface truncate\">$(escape_html "$label")</span></span>"
-    DASHBOARD_DOWNLOADS+="<span class=\"material-symbols-outlined text-[18px] shrink-0 text-on-surface-variant opacity-0 group-hover:opacity-100 transition-opacity\">"
-    DASHBOARD_DOWNLOADS+="$trailing</span></a>"
+    DASHBOARD_DOWNLOADS+="</div>"
+
+    return 0
 }
 
-# One archive the run published to the guest collection: the reads it was given,
-# and the whole of this dashboard. Each is a quick download of its own and one
-# of the files "Download everything" starts, so the button and the rows beside
-# it cannot come to name different things.
+# The one archive the run published to the guest collection: the reads it was
+# given and the whole of this dashboard, in a single zip. Declared before the
+# pages are rendered, since the button, the file index and the address the copy
+# control hands out are all read off it.
+#
+# The size is the archive as it stands on the collection, in bytes, and is what
+# the button says a reader is about to start. It is left off for a run that
+# could not be measured, which only drops the figure from the label.
 dashboard_bundle() {
-    local label="$1" url="$2"
+    local url="$1" bytes="${2:-}"
 
     [[ -n "$url" ]] || return 0
 
-    DASHBOARD_BUNDLES+=("$label|$url")
-    dashboard_link_button "$url" "$label"
+    DASHBOARD_BUNDLE_URL="$url"
+
+    [[ "$bytes" =~ ^[0-9]+$ ]] && DASHBOARD_BUNDLE_SIZE="$bytes"
+
+    return 0
 }
 
-# The button for everything the run published as archives, or nothing at all
-# when it published none. Its addresses are the only absolute links on the page:
-# the archives are served from the guest collection rather than sitting beside
-# the page, so they are also the links that do not resolve in an unpacked copy.
+# The button that takes everything this run published, and the control that
+# copies its address instead - for a reader who would rather fetch it from a
+# shell on the machine the data is going to than through the browser they are
+# reading this in. Nothing at all for a run that published no archive.
 #
-# The href is the first of them, which is what everything that cannot run a
-# script follows - a middle-click, a shared link, a reader without scripting.
-# The rest are carried in data-download, and the page's own script starts them
-# one after another.
+# The address is the only absolute link on the page: the archive is served from
+# the guest collection rather than sitting beside the page, so it is also the
+# link that does not resolve in an unpacked copy.
+#
+# The button is a plain link, so a middle-click or a shared address still starts
+# the download with no script involved. The copy control is written hidden and
+# the page's own script reveals it, since a clipboard is the one thing here that
+# a reader without scripting cannot be offered.
 dashboard_zip_button() {
-    local entry url first="" rest=""
+    local plain="$DASHBOARD_BUNDLE_URL"
 
-    for entry in ${DASHBOARD_BUNDLES[@]+"${DASHBOARD_BUNDLES[@]}"}; do
-        url=${entry#*|}
+    [[ -n "$DASHBOARD_BUNDLE_URL" ]] || return 0
 
-        if [[ -z "$first" ]]; then
-            first="$url"
-        else
-            rest+="${rest:+ }$url"
-        fi
-    done
+    #    What is copied is the address without the "?download" the button uses:
+    #    the collection answers either way, and what goes into a shell should be
+    #    the file's own address rather than the browser's way of asking for it
+    plain=${plain%\?download}
 
-    [[ -n "$first" ]] || return 0
+    printf '<div class="flex items-stretch gap-1.5">'
+    printf '<a class="flex-1 min-w-0 bg-primary text-on-primary px-2.5 py-2 rounded-lg text-[13px] font-semibold hover:bg-primary-container transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap"'
+    printf ' id="download-all" href="%s"' "$(escape_html "$DASHBOARD_BUNDLE_URL")"
+    printf '><span class="material-symbols-outlined text-[18px]">archive</span>Download everything'
 
-    printf '<a class="w-full bg-primary text-on-primary px-3 py-2 rounded-lg text-[13px] font-semibold hover:bg-primary-container transition-colors flex items-center justify-center gap-2"'
-    printf ' id="download-all" href="%s"' "$(escape_html "$first")"
+    #    How big it is, set lighter than the label: it qualifies the button
+    #    rather than naming it, and a reader deciding whether to start a
+    #    forty-gigabyte download reads it after the verb, not instead of it
+    [[ -n "$DASHBOARD_BUNDLE_SIZE" ]] \
+        && printf '<span class="font-normal text-[12px] opacity-80">(%s)</span>' \
+               "$(escape_html "$(human_size "$DASHBOARD_BUNDLE_SIZE")")"
 
-    [[ -n "$rest" ]] && printf ' data-download="%s"' "$(escape_html "$rest")"
+    printf '</a>'
 
-    printf '><span class="material-symbols-outlined text-[18px]">archive</span>Download everything</a>'
+    printf '<button type="button" id="copy-link" style="display: none"'
+    printf ' data-url="%s"' "$(escape_html "$plain")"
+    printf ' class="shrink-0 border border-outline-variant text-on-surface-variant px-2 rounded-lg'
+    printf ' hover:bg-surface-container hover:text-primary transition-colors flex items-center"'
+    printf ' title="Copy the download address" aria-label="Copy the download address">'
+    printf '<span class="material-symbols-outlined text-[18px]">content_copy</span></button></div>'
 }
 
 # Close whichever block of the statistics is open, so the next heading starts
@@ -637,11 +685,16 @@ dashboard_trim() {
 
 # One row of the file index: what it is called, what it holds, and how big it is.
 # An href that is already a whole address is written as it stands - it was built
-# here, not read off a disk - and always downloads, since the only such rows are
-# the archives the collection serves as attachments.
+# here, not read off a disk - and always downloads, since the only such row is
+# the archive the collection serves as an attachment.
+#
+# A held row names a folder this copy of the page does not publish: the reads,
+# which are only inside that archive. It is greyed and carries the note saying
+# so, and the page's own script turns it back into an ordinary row in the copy
+# read out of an unpacked download, where those files are there to open.
 dashboard_row() {
-    local href="$1" label="$2" description="$3" size="$4" tag="$5"
-    local link attributes
+    local href="$1" label="$2" description="$3" size="$4" tag="$5" held="${6:-}"
+    local link attributes row="<tr>"
 
     if [[ "$href" == http://* || "$href" == https://* ]]; then
         link="$href"
@@ -651,25 +704,59 @@ dashboard_row() {
         attributes="$(dashboard_link_attributes "$href")"
     fi
 
-    printf '<tr><td class="name"><a href="%s"%s>%s</a>' \
-        "$link" "$attributes" "$(escape_html "$label")"
+    [[ -n "$held" ]] && row="<tr class=\"held\">"
+
+    printf '%s<td class="name"><a href="%s"%s>%s</a>' \
+        "$row" "$link" "$attributes" "$(escape_html "$label")"
 
     [[ -n "$tag" ]] && printf '<span class="tag">%s</span>' "$(escape_html "$tag")"
 
-    printf '<span class="desc">%s</span></td><td class="size">%s</td></tr>\n' \
-        "$(escape_html "$description")" "$(escape_html "$size")"
+    printf '<span class="desc">%s</span>' "$(escape_html "$description")"
+
+    #    Where those files actually are, since the row leading to them is the
+    #    one place a reader would look for them first
+    [[ -n "$held" ]] && printf '<span class="held-note">%s</span>' \
+        'Not published here — take these with the “Download everything” button on the Overview.'
+
+    printf '</td><td class="size">%s</td></tr>\n' "$(escape_html "$size")"
 }
 
 # Every row one catalog entry produces. A folder is one row naming its listing
 # page; a glob is one row per file it matches, in name order; an absolute address
-# is one row leading there, for an archive published to the guest collection
-# rather than into the results folder.
+# is one row leading there, for the archive published to the guest collection
+# rather than into the results folder - and that one row reports the size the
+# archive came out at, which is the only size here not read off a file that is
+# present.
+#
+# A path marked HELD is the folder listed but not published. It is counted where
+# the run staged it - beside the results rather than in them - and its row leads
+# to the listing index_directories.sh wrote for it inside them.
 dashboard_entry() {
     local path="$1" label="$2" description="$3"
     local full match name count size
 
     if [[ "$path" == http://* || "$path" == https://* ]]; then
-        dashboard_row "$path" "${label:-${path##*/}}" "$description" "" ""
+        size=""
+
+        if [[ "$path" == "$DASHBOARD_BUNDLE_URL" && -n "$DASHBOARD_BUNDLE_SIZE" ]]; then
+            size=$(human_size "$DASHBOARD_BUNDLE_SIZE")
+        fi
+
+        dashboard_row "$path" "${label:-${path##*/}}" "$description" "$size" ""
+        return 0
+    fi
+
+    if [[ "$path" == HELD:* ]]; then
+        path=${path#HELD:}
+        full="${path%/}"
+
+        [[ -d "$full" ]] || return 0
+
+        count=$(find -L "$full" -type f ! -name directory_listing.html | wc -l)
+        (( count > 0 )) || return 0
+
+        dashboard_row "${path}directory_listing.html" "${label:-$path}" "$description" \
+            "$count files" "folder" held
         return 0
     fi
 
@@ -751,11 +838,13 @@ dashboard_index() {
         label=$(dashboard_trim "$label")
         description=$(dashboard_trim "$description")
 
-        [[ -n "$group" && -n "$path" ]] || continue
+        # The one entry for something served from the guest collection rather
+        # than published into the results folder. Substituted before the entry
+        # is judged empty, so a run that published no archive drops the row
+        # rather than listing the results folder itself.
+        path=${path//__BUNDLE_URL__/$DASHBOARD_BUNDLE_URL}
 
-        # An entry for something served from the guest collection rather than
-        # published into the results folder
-        path=${path//__RUN_URL__/$DASHBOARD_RUN_URL}
+        [[ -n "$group" && -n "$path" ]] || continue
 
         if [[ "$group" != "$current" ]]; then
             dashboard_end_group "$current" "$group_rows"

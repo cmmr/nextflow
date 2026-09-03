@@ -63,32 +63,20 @@ training, and records the post-merge sample count as `.samples.count` in the
 run's state file.
 
 It writes a second sheet beside it, `ampliseq_metadata.tsv`. ampliseq analyses
-only the samples its metadata names, and skips every QIIME2 diversity step when
-it has none at all, so without one the run publishes no `qiime2/diversity/` and
-no rarefaction curves. The request form collects no sample metadata, so the sheet
-carries the one variable this pipeline knows — the `run` each sample came off,
-which is a real batch variable rather than a placeholder. Two columns is also the
-least ampliseq can read: its `metadata_all.r` loops from column 2, and an ID-only
-sheet makes that count backwards.
+only the samples its metadata names, so the sheet is what keeps the sample set
+explicit. The request form collects no sample metadata, so it carries the one
+variable this pipeline knows — the `run` each sample came off, which is a real
+batch variable rather than a placeholder. Two columns is also the least ampliseq
+can read: its `metadata_all.r` loops from column 2, and an ID-only sheet makes
+that count backwards.
 
-**Most runs come off one directory**, so `run` holds one value and there is
-nothing to compare. `METADATA_ALL` and `METADATA_PAIRWISE` return nothing in that
-case, which ampliseq handles — but `QIIME2_DIVERSITY_ALPHA` does not read what
-they found. The subworkflow hands it the metadata file itself, once per alpha
-metric, and `alpha-group-significance` treats a column of one value as an error
-rather than as nothing to test. There is no parameter that turns it off, so
-[`config/slurm.config`](../../config/slurm.config) gives that process
-`errorStrategy = 'ignore'`: a run with two sequencing runs in it still gets the
-test, and a run with one does not fail.
-
-What that costs is the per-sample alpha values. `QIIME2_DIVERSITY_CORE` publishes
-the beta distance matrices as TSV, but its alpha vectors are `.qza` and go
-unpublished unless `--save_intermediates` is set, and the only thing that exported
-them was the visualiser now being ignored. **So `qiime2/diversity/` carries the
-UniFrac and Jaccard matrices, the ordinations and the rarefaction curves, but no
-Faith's PD.** The unrarefied per-sample metrics in `alpha_diversity.tsv` are
-computed by [`ampliseq_composition.sh`](../results/composition.md) and do not
-include it either.
+**Nothing is compared against that column.** It used to unlock QIIME 2's
+diversity subworkflow, and with it a set of group-comparison tests that had
+nothing real to test — most runs come off one directory, so `run` holds one
+value. `--skip_qiime_downstream` now turns that whole subworkflow off, which
+takes the problem with it. Per-sample diversity is computed instead by
+[`ampliseq_tables.R`](../results/composition.md) from the run's own feature
+table, Faith's PD included.
 
 **A line with no `fastq_2` is single-end** — a MinION run, or single-end
 Illumina — and the `fastq_2` column is left off the generated sheet entirely
@@ -144,9 +132,9 @@ text file:
 dashboard_view report  "Analysis Report" "summary_report/summary_report.html"
 dashboard_view quality "Technical Report" "multiqc/multiqc_report.html"
 dashboard_index_view   "File Explorer"
-dashboard_button "qiime2/abundance_tables/feature-table.biom"
-dashboard_bundle "Raw sequencing data" "$FASTQ_URL"
-dashboard_bundle "All result files" "$(globus_run_url "$RUN_ID" dashboard.zip)"
+dashboard_formats "Feature table" "<note>"                  "Plain text|feature_table/feature-table.tsv"                  "JSON|feature_table/feature-table.json.biom"                  "HDF5|feature_table/feature-table.hdf5.biom"
+dashboard_bundle "$(globus_run_url "$RUN_ID" "$BUNDLE_NAME")" \
+                 "$(globus_archive_size "$RUN_ID" "$BUNDLE_NAME")"
 dashboard_stat_group "READ TOTALS"    "$SEQUENCED"
 dashboard_stat_group "CLASSIFICATION" "$REFERENCE"
 ```
@@ -158,9 +146,14 @@ up. Entries whose files a given run did not produce are skipped, so an ONT run
 lists `savont/` and no `dada2/` without a catalogue of its own.
 
 Those are the links of the navigation bar, after the Overview every run opens
-on. `$SEQUENCED` and `$REFERENCE` are read off the state file's `.manifest` —
-the region and instrument, and the reference database — and each is stated over
-the numbers it explains rather than in a row of its own. The numbers themselves,
+on, and the one archive under them — `$BUNDLE_NAME` being
+`<task title>_<uid>.zip`, built into [the Globus
+collection](../operations/globus.md) before these pages are rendered so that the
+button can say how big it is.
+
+`$SEQUENCED` and `$REFERENCE` are read off the state file's `.manifest` — the
+region and instrument, and the reference database — and each is stated over the
+numbers it explains rather than in a row of its own. The numbers themselves,
 and the Overview's plots, come from the `composition_data.json` and the
 `.statistics` that
 [`ampliseq_composition.sh`](../results/composition.md) works out of the ASV and
@@ -340,10 +333,8 @@ ways.
 Its default is de novo: MAFFT aligns the ASVs to each other, `qiime alignment
 mask` trims that alignment, FastTree infers a tree from it, and the result is
 midpoint-rooted. **That route is unreachable here.** ampliseq builds that tree
-inside its QIIME2 diversity subworkflow, and skips the subworkflow whenever no
-`--metadata` sheet is given — which is always, since the request form collects no
-sample metadata to give it. Left at ampliseq's defaults, a run publishes neither
-`qiime2/phylogenetic_tree/` nor `qiime2/diversity/`.
+inside its QIIME 2 diversity subworkflow, and `--skip_qiime_downstream` turns
+the subworkflow off, so a run publishes no `qiime2/phylogenetic_tree/` at all.
 
 The other route is phylogenetic placement, and it runs on `--pplace_tree` alone,
 outside that subworkflow. Clustal Omega aligns the ASVs into a reference
@@ -377,14 +368,15 @@ reference tree itself is handed to `gotree -c`, and what the two trees share is
 what goes. The script refuses to publish a tree whose tip count is not exactly
 the grafted count less the reference count.
 
-The full grafted tree stays in `pplace/` as the placement's record, and ampliseq
-attaches its own copy to `phyloseq/dada2_phyloseq.rds` and the
-TreeSummarizedExperiment beside it.
+The full grafted tree stays in `pplace/` as the placement's record. The pruned
+one is what [`ampliseq_tables.R`](../results/composition.md) writes into the
+HDF5 feature table and computes Faith's PD from — the first thing on the
+dashboard that reads it.
 
 **`pplace_taxonomy` is left unset**, though the same reference bundle carries
 one. ampliseq takes an EPA-NG taxonomy in preference to DADA2's, so setting it
-would replace SILVA 138.2 with GTDB in every abundance table, every collapsed
-level and every barplot — a change to what the requester reads, as a side effect
+would replace SILVA 138.2 with GTDB in every abundance table and every
+collapsed level — a change to what the requester reads, as a side effect
 of asking for a tree. Leaving it unset also means `GAPPA_ASSIGN` never runs,
 since its `ext.when` is that file.
 

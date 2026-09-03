@@ -27,7 +27,30 @@ params_set outdir                "results"
 params_set dada_ref_taxonomy     "silva=138.2"
 params_set cut_dada_ref_taxonomy true
 params_set ref_taxonomy_storage  "$NEXTFLOW_DIR/db/ampliseq"
+# Applied by scripts/R/ampliseq_tables.R rather than by the pipeline: the
+# filter was a QIIME 2 step, and QIIME 2's downstream no longer runs. Still
+# declared here so it lands in ampliseq_args.yaml and in the run's manifest,
+# which is where that script reads it from.
 params_set exclude_taxa          "mitochondria,chloroplast,Francisella"
+
+# QIIME 2's downstream is skipped whole: its abundance tables, its barplot, its
+# diversity indices, its alpha rarefaction and its taxon filter. Everything
+# those produced is now built from DADA2's own tables by
+# scripts/R/ampliseq_tables.R, which assembles one feature table and writes it
+# out three ways - so the file a requester downloads and the numbers the
+# Overview plots are the same object rather than two renderings of it.
+#
+# The QIIME 2 classifier is not affected: it sits outside this switch, so a
+# requester who asks for --qiime_ref_taxonomy as a second opinion still gets it.
+params_set skip_qiime_downstream true
+
+# ampliseq builds these from whichever table it has to hand, which is now the
+# unfiltered DADA2 one - a different set of ASVs from the feature table this run
+# publishes. One feature table per run, so these are left out; rbiom's
+# convert_to_phyloseq() can rebuild the phyloseq object from the published BIOM
+# whenever it is wanted.
+params_set skip_phyloseq         true
+params_set skip_tse              true
 
 # Barrnap classifies each ASV's small-subunit gene, and anything that is neither
 # bacterial nor archaeal is dropped. A 16S primer pair also amplifies host and
@@ -43,12 +66,12 @@ params_set sample_inference      "pooled"
 
 # Phylogenetic placement in place of the de novo MAFFT/FastTree phylogeny. EPA-NG
 # grafts the ASVs onto the GTDB bacterial 16S tree build_pplace_reference.sh
-# fetched, and ampliseq puts the grafted tree into the phyloseq and
-# TreeSummarizedExperiment objects, where UniFrac and Faith's PD can read it.
+# fetched, and ampliseq_prune_tree.sh cuts that back to this run's own ASVs.
+# scripts/R/ampliseq_tables.R writes it into the HDF5 feature table and computes
+# Faith's PD from it.
 #
 # This is the only tree the run produces: ampliseq builds its de novo one inside
-# the QIIME2 diversity subworkflow, which it skips when no --metadata sheet is
-# given, and this pipeline gives none.
+# the QIIME2 diversity subworkflow, which no longer runs.
 #
 # --pplace_taxonomy is left unset. ampliseq takes it in preference to DADA2,
 # which would replace SILVA with GTDB in every abundance table and barplot.
@@ -58,10 +81,11 @@ params_set pplace_aln            "$NEXTFLOW_DIR/db/pplace/bac16s.alnfna"
 params_set pplace_model          "GTR+F+I+G4"
 params_set pplace_alnmethod      "clustalo"
 
-# ampliseq analyses only the samples its metadata sheet lists, and skips every
-# QIIME2 diversity step - the de novo phylogeny among them - when it has none.
+# ampliseq analyses only the samples its metadata sheet lists.
 # ampliseq_samplesheet.sh writes this one beside the samplesheet, from the same
-# samples.
+# samples. It carries no experimental grouping - the request form collects none
+# - so nothing here is compared between groups; the sheet is what keeps the
+# sample set explicit.
 params_set metadata              "ampliseq_metadata.tsv"
 
 # The report keeps its own styling; what is replaced is what it says - a title,

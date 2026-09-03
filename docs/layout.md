@@ -10,8 +10,11 @@ run                   CLI entry point. Files a Wrike request, then gets out of t
 scripts/
   utilities.sh             log, warn, fail, the page renderer, and the uid helpers.
                            Sourced by .env.
-  globus.sh                Where a run's two bulky downloads are written and how
-                           they are addressed. Likewise sourced.
+  globus.sh                Where a run's one bulky download is written and how
+                           it is addressed. Likewise sourced.
+  R/ampliseq_tables.R      Assembles a run's feature table with rbiom and writes
+                           everything read off it. Runs in the nix/rbiom.nix
+                           image; see docs/results/composition.md.
   pipeline_params.sh       The parameter map a params file is built from. Likewise.
   wrike_api.sh             Wrike REST helpers and object IDs. Likewise sourced.
   publish_dashboard.sh     Builds the three pages a run is read through, and
@@ -39,6 +42,11 @@ scripts/
   fetch_taxprofiler_db.sh     Downloads a taxprofiler database. Likewise.
 
 pipelines/            One file per pipeline; see docs/pipelines/index.md.
+nix/                  Container images this system builds for itself, one .nix
+                      file per image; see docs/operations/nix.md. sandbox/ is the
+                      nix installation they are built in and is not tracked.
+  rbiom.nix           R with rbiom, h5lite and phyloseq, which
+                      scripts/R/ampliseq_tables.R runs in.
 config/               Nextflow config, passed to `nextflow run -c`.
   slurm.config        Executor + apptainer settings used by the pipelines.
   local.config        Same, for running off the scheduler.

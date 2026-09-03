@@ -34,15 +34,22 @@
   taxon beside its swatch, and carries its share and prevalence in a tooltip.
   The columns stand on the axis and are stacked in the order the legend reads -
   most abundant at the top, "Other" at the bottom - so a taxon is in the same
-  place in the legend, in the column and in the tooltip. What the classifier
-  named nothing is not drawn at all, so a column reaches only as far as the
-  reads that were named and the axis is cut to the tallest of them rather than
-  fixed at 100%. Under the chart, the caption says so, and names the tools and
-  the database the numbers came from for the data that carries it.
+  place in the legend, in the column and in the tooltip. The band the pointer is
+  actually inside is marked in a washed-out cast of that band's own colour, so
+  the row in the tooltip and the sliver in the column are read as one thing
+  without hunting for it. What the classifier named nothing is not drawn at all,
+  so a column reaches only as far as the reads that were named and the axis is
+  cut to the tallest of them rather than fixed at 100%; the last line of the
+  tooltip is what that came to for the sample under the pointer. Under the
+  chart, the caption says so, and names the tools and the database the numbers
+  came from for the data that carries it.
 
-  "Download everything" is the archives this run published to the guest
-  collection, which the script at the foot of this page fetches one after
-  another.
+  "Download everything" is the one archive this run published to the guest
+  collection - the reads it was given and this whole dashboard in a single zip.
+  Beside it is a control that copies that address instead, for a reader fetching
+  it from a shell on the machine the data is going to. It is written hidden and
+  the script at the foot of this page reveals it, since a clipboard is the one
+  thing here a reader without scripting cannot be offered.
 
   Placeholders are COMMON_HEAD, TASK_NAME, SUBTITLE, PLOT_DATA, DOWNLOADS,
   ZIP_BUTTON, STATS, YEAR and FOOTER_NOTE, each wrapped in doubled
@@ -156,7 +163,12 @@ canvas { display: block; width: 100%; }
 
 /* The band the pointer is actually inside. A column at genus is a dozen
    slivers, several of them a pixel or two tall, so which one is under the
-   pointer is not something a reader can tell from the chart. */
+   pointer is not something a reader can tell from the chart.
+
+   The fill is written on the row itself, as that band's own colour washed out
+   far enough to read black text over: the eleven are chosen to be told apart,
+   so the colour is the fastest way back from a line of the tooltip to the
+   sliver it belongs to. */
 .tip .row.here {
   margin: 0 -5px;
   padding: 0 5px;
@@ -164,6 +176,16 @@ canvas { display: block; width: 100%; }
   background: var(--row);
   color: var(--text);
   font-weight: 600;
+}
+
+/* What the classifier could not name, which is the height the column is short
+   of the axis. Set apart from the taxa above it: it is what is missing from
+   them rather than one of them. */
+.tip .unnamed {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
 }
 </style>
 </head>
@@ -273,44 +295,76 @@ __STATS__
 <div class="tip" hidden id="tip"></div>
 
 <script>
-// "Download everything" is the archives this run published to the guest
-// collection, fetched one after another. Each address ends in "?download", so
-// the collection answers with an attachment and the page the reader is on never
-// goes anywhere - which is why these are started from a link of their own
-// rather than by navigating.
+// The control beside "Download everything", which copies that archive's address
+// rather than starting it - for a reader who would rather pull it down on the
+// machine the data is going to than through the browser they are reading this
+// in. The button is written hidden and revealed here, so a reader whose browser
+// cannot run this is not offered a control that does nothing.
 //
-// The href is the first archive and the rest are in data-download, so anything
-// that cannot run this - a middle-click, a shared link, a reader without
-// scripting - still gets the largest of them.
+// The button itself is left alone: it is a plain link to a file the collection
+// answers as an attachment, so a click, a middle-click or a shared address all
+// start the same download with nothing scripted in the way.
 (function () {
-  var all = document.getElementById("download-all");
+  var copy = document.getElementById("copy-link");
 
-  if (!all) return;
+  if (!copy) return;
 
-  var extra = (all.getAttribute("data-download") || "").split(" ").filter(Boolean);
+  var url = copy.getAttribute("data-url") || "";
+  var icon = copy.querySelector(".material-symbols-outlined");
+  var restore = null;
 
-  if (!extra.length) return;
+  if (!url) return;
 
-  // A second navigation started in the same tick is dropped, so they are spaced
-  // out. A browser asked for several files at once may ask the reader to allow
-  // it, which is the reader's call to make.
-  function fetchOne(url) {
-    var link = document.createElement("a");
+  copy.style.display = "flex";
 
-    link.href = url;
-    link.rel = "noopener";
-    link.style.display = "none";
-    document.body.appendChild(link);
-    link.click();
-    setTimeout(function () { link.parentNode.removeChild(link); }, 1000);
+  // navigator.clipboard is not given to a page read off disk, where this same
+  // dashboard is opened out of the zip it is offering. Selecting a detached
+  // field and copying it is what works in both places.
+  function toClipboard(text) {
+    var field = document.createElement("textarea");
+    var done = false;
+
+    field.value = text;
+    field.setAttribute("readonly", "");
+    field.style.position = "fixed";
+    field.style.top = "-1000px";
+    document.body.appendChild(field);
+    field.select();
+
+    try { done = document.execCommand("copy"); } catch (error) { done = false; }
+
+    document.body.removeChild(field);
+
+    return done;
   }
 
-  all.addEventListener("click", function (event) {
-    event.preventDefault();
+  function say(name, title) {
+    icon.textContent = name;
+    copy.title = title;
 
-    [all.getAttribute("href")].concat(extra).forEach(function (url, index) {
-      setTimeout(function () { fetchOne(url); }, index * 900);
-    });
+    clearTimeout(restore);
+    restore = setTimeout(function () {
+      icon.textContent = "content_copy";
+      copy.title = "Copy the download address";
+    }, 2000);
+  }
+
+  function fallback() {
+    if (toClipboard(url)) say("done", "Address copied");
+    else                  say("error", "Could not copy: " + url);
+  }
+
+  copy.addEventListener("click", function () {
+    // Granted on a secure origin and refused off disk, and it can be refused on
+    // one too, so the selection-and-copy above is what a rejection falls back on
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(function () {
+        say("done", "Address copied");
+      }, fallback);
+      return;
+    }
+
+    fallback();
   });
 })();
 
@@ -446,6 +500,20 @@ __STATS__
 
   function ink(name) {
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  // A series colour washed out far enough to sit behind black text, for the
+  // tooltip row marking the band the pointer is in. The palette is written as
+  // six-digit hex in the stylesheet above; anything else is handed back as it
+  // stands, which leaves the row on its default fill rather than on a colour
+  // that did not parse.
+  function washed(color, alpha) {
+    if (!/^#[0-9a-f]{6}$/i.test(color)) return "";
+
+    return "rgba(" + parseInt(color.slice(1, 3), 16)
+         + ", " + parseInt(color.slice(3, 5), 16)
+         + ", " + parseInt(color.slice(5, 7), 16)
+         + ", " + alpha + ")";
   }
 
   function percent(parts) {
@@ -592,6 +660,11 @@ __STATS__
   var plotted = [];
   var shares = [];
 
+  // What those taxa are drawn in, worked out when the rank is chosen rather
+  // than on every draw: the chart, the legend and the tooltip all read it, and
+  // the tooltip reads it on a pointer move.
+  var colors = [];
+
   // What each sample adds up to over those taxa, and the most any of them does,
   // both in ten-thousandths. Worked out once when the rank is chosen: the chart
   // needs the tallest column before it can draw a gridline, and every column
@@ -613,6 +686,8 @@ __STATS__
       plotted.push(taxon);
       shares.push(level.values[t]);
     });
+
+    colors = palette(plotted);
 
     for (var i = 0; i < count; i++) {
       var sum = 0;
@@ -652,7 +727,6 @@ __STATS__
     var foot = band(ctx, total);
     var plotHeight = Math.max(90, total - TOP - foot);
     var geometry = columns(view.width, COMPOSITION_LEFT, PLOT_RIGHT);
-    var colors = palette(plotted);
     var floor = TOP + plotHeight;
     var axis = scale(tallest);
 
@@ -772,7 +846,6 @@ __STATS__
   }
 
   function drawLegend() {
-    var colors = palette(plotted);
     var html = "";
 
     legend.style.paddingLeft = COMPOSITION_LEFT + "px";
@@ -1128,15 +1201,27 @@ __STATS__
     compositionChart = attach(barsCanvas, function (sample, y, state) {
       var html = '<div class="name">' + escape(samples[sample]) + "</div>";
       var under = bandAt(sample, y, state);
+      var fill;
 
       for (var t = 0; t < plotted.length; t++) {
         var share = shares[t][sample];
 
         if (share <= 0) continue;
 
-        html += '<div class="row' + (t === under ? " here" : "") + '">'
+        // The band the pointer is in wears its own colour, washed out far
+        // enough to read over, so the line and the sliver are one thing
+        fill = t === under ? washed(colors[t], 0.28) : "";
+
+        html += '<div class="row' + (t === under ? " here" : "") + '"'
+          + (fill ? ' style="background: ' + fill + '"' : "") + ">"
           + escape(plotted[t].label) + " <b>" + percent(share) + "</b></div>";
       }
+
+      // What is missing from the lines above: the reads of this sample the
+      // classifier placed nowhere, which is the height its column is short of
+      // the axis and is not drawn as a band of its own
+      html += '<div class="row unnamed">(Unclassified <b>'
+        + percent(Math.max(10000 - totals[sample], 0)) + "</b>)</div>";
 
       return html;
     });

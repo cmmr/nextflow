@@ -11,11 +11,20 @@
   Everything is inline and every link is relative, because this file is served
   from S3 next to the objects it lists and has no origin to fetch from.
 
-  Placeholders are COMMON_CSS, DIR_PATH, UP_LINK and ROWS, each wrapped in
+  One listing is written for files that are not published beside it: the reads
+  the run was given, which are only in the zip it publishes to Globus. Its rows
+  are marked "held" and its note says so, which greys the names out and stops
+  them being followed to a file the bucket does not hold. The script at the foot
+  turns them back on for the same page read out of an unpacked copy of that zip,
+  where the reads are two levels above it and every link does resolve. A folder
+  read off disk is the run as it was given to the requester; a folder read over
+  http is the published copy, which is the one holding these back.
+
+  Placeholders are COMMON_CSS, DIR_PATH, UP_LINK, NOTE and ROWS, each wrapped in
   doubled underscores. They are deliberately not spelled that way in this comment
   - the renderer substitutes the whole file, comment included, and would paste
-  the listing in here too. UP_LINK and ROWS are markup the renderer emits itself,
-  having escaped and URL-encoded every name it read off the disk.
+  the listing in here too. UP_LINK, NOTE and ROWS are markup the renderer emits
+  itself, having escaped and URL-encoded every name it read off the disk.
 -->
 <html lang="en">
 <head>
@@ -41,6 +50,38 @@ table { max-width: 900px; }
 
 /* Folders read as folders before the name is */
 td.name .dir { font-weight: 600; }
+
+/* What this listing is for, when it is for something other than the folder it
+   sits in */
+.note {
+  max-width: 900px;
+  margin: 0 0 16px;
+  padding: 10px 13px;
+  border: 1px solid var(--notice-border);
+  border-radius: 6px;
+  background: var(--notice-bg);
+  color: var(--notice-text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* A row naming a file this copy of the page cannot hand over. The name and the
+   size are still worth reading - this is the record of what went in - so the
+   row stays and only the link goes. */
+tr.held td.name a {
+  color: var(--muted);
+  pointer-events: none;
+  cursor: default;
+}
+
+/* The copy that came down with the files, where every one of them is there to
+   open */
+html.local tr.held td.name a {
+  color: var(--accent);
+  pointer-events: auto;
+  cursor: pointer;
+}
+html.local .note { display: none; }
 </style>
 </head>
 <body>
@@ -56,8 +97,20 @@ td.name .dir { font-weight: 600; }
 </header>
 
 <main>
+__NOTE__
 __ROWS__
 </main>
+
+<script>
+// A page read off disk is the copy that came down inside this run's zip, where
+// the files a published listing has to hold back are sitting beside it. Held
+// rows are written held, so a listing served from the bucket is right with or
+// without this.
+if (location.protocol === "file:" || location.hostname === "localhost"
+    || location.hostname === "127.0.0.1") {
+  document.documentElement.className += " local";
+}
+</script>
 
 </body>
 </html>

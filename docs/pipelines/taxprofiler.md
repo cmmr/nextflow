@@ -139,9 +139,9 @@ lab sheet into the six-column CSV taxprofiler wants — `sample`, `run_accession
 [`taxprofiler_upload.sh`](../../scripts/taxprofiler_upload.sh) summarises the
 classifier reports, prunes and indexes the results folders, copies them to
 `s3://$AWS_S3_BUCKET/nxf/<uid>/`, renders the shared
-[dashboard](../results/index.md), publishes the reads and the dashboard zip to
-[Globus](../operations/globus.md), and writes the report URL to the Wrike custom
-field. What its file index lists is
+[dashboard](../results/index.md), publishes the reads and the results as one zip
+to [Globus](../operations/globus.md), and writes the report URL to the Wrike
+custom field. What its file index lists is
 [`templates/taxprofiler/outputs.conf`](../../templates/taxprofiler/outputs.conf).
 
 [`taxprofiler_composition.sh`](../results/composition.md) runs first and works
@@ -216,20 +216,20 @@ own numbers, the preference and the deletion are one condition in that loop —
 and worth re-checking against the reports the way the above was, rather than
 trusting the filename.
 
-The sidebar's quick downloads are labelled rather than named after the file,
-since those filenames carry the tool, the database and the format from the
-database sheet:
+The sidebar's quick download is labelled rather than named after the file, since
+those filenames carry the tool, the database and the format from the database
+sheet:
 
 | Row | File |
 |---|---|
 | Species abundance table | `taxpasta/bracken_*.tsv`, or `taxpasta/kraken2_*.tsv` for a run without Bracken |
-| Raw sequencing data | `$GLOBUS_URL/nxf/<uid>/raw-sequences.zip?download` |
-| All result files | `$GLOBUS_URL/nxf/<uid>/dashboard.zip?download` |
 
-**Three rows and the button under them, and nothing else.** The merged MetaPhlAn
-and mOTUs profiles, and `alpha_diversity.tsv`, are all published — they are just
-not what this list is for. It is the shortest route to the file a requester came
-for, and every row added to it makes that route longer. The file index carries
+**One row and the button under it, and nothing else.** The button is the whole
+run as a single zip — `$GLOBUS_URL/nxf/<uid>/<task title>_<uid>.zip?download`,
+the reads beside the results — and its label says how big that is. The merged
+MetaPhlAn and mOTUs profiles, and `alpha_diversity.tsv`, are all published —
+they are just not what this list is for. It is the shortest route to the file a
+requester came for, and every row added to it makes that route longer. The file index carries
 each of them under the heading that says what it is for, and the second-opinion
 profiles and the numbers behind a plot the reader is already looking at are both
 a click into it.

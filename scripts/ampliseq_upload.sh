@@ -1,6 +1,7 @@
 #!/bin/bash
 #
-# ampliseq_upload.sh - Publish an ampliseq results folder and its raw reads to AWS S3.
+# ampliseq_upload.sh - Publish an ampliseq results folder, and package it with
+#                     the reads it was run on.
 #
 # Author: Daniel Smith
 # Date:   August 12th, 2026
@@ -11,12 +12,19 @@
 # lands directly under the uid rather than under an extra results/ level.
 # Nextflow's work/ directory is left behind.
 #
-# The two bulky downloads do not go to S3 at all. The reads ampliseq_samplesheet.sh
-# staged, and the whole dashboard as one zip, are written into the run's
-# directory on the CMMR-Nextflow guest collection and linked from the page - see
-# scripts/globus.sh. They are the largest thing a run publishes and the thing
-# most likely to be downloaded whole, and from there they cost neither storage
-# in the bucket nor egress out of it.
+# The bulky download does not go to S3 at all. The reads ampliseq_samplesheet.sh
+# staged and the whole dashboard go into the run's directory on the
+# CMMR-Nextflow guest collection as a single zip, linked from the page - see
+# scripts/globus.sh. It is the largest thing a run publishes and the thing most
+# likely to be taken whole, and from there it costs neither storage in the
+# bucket nor egress out of it.
+#
+# One zip rather than two, laid out the way this run directory is - the staged
+# reads beside the results - so that a requester who takes it has everything
+# before the dashboard expires, rather than one of two downloads and the belief
+# that it was all of them. The reads are listed in the dashboard's file index
+# and in a listing of their own, both greyed, so the page says what is in that
+# download without offering files the bucket does not hold.
 #
 # The folders go up browsable: index_directories.sh gives each one a
 # directory_listing.html first, since a bucket has no directories for the
@@ -27,9 +35,9 @@
 # ampliseq_composition.sh runs before both, and leaves behind the diversity table
 # and the data the Overview's two plots are drawn from.
 #
-# The read archive is stored, not compressed (zip -0): the reads are already
-# gzipped. zip stores what a symlink points at, so linked samples are archived
-# as real data.
+# The reads go in stored rather than compressed (zip -0): they are already
+# gzipped. The results are deflated, being mostly HTML and tables. zip stores
+# what a symlink points at, so linked samples are archived as real data.
 #
 # What a run wrote for itself rather than for the requester is deleted before
 # any of this, so the listings, the file index, the zip and the bucket all
@@ -57,6 +65,8 @@
 #            GLOBUS_DIR, GLOBUS_RUN_PREFIX, GLOBUS_URL, the Wrike, Globus and
 #            dashboard helper functions and the log/fail/is_valid_uid helpers,
 #            all sourced from .env
+# Writes:    one zip per run into the guest collection, named after the task and
+#            the uid
 # Outputs:   an explanation of a failure in ./run_state.json
 #
 # Does not record the run's status: wrike_job.sh marks the run Completed only
@@ -69,14 +79,9 @@ source /data/prod/nextflow/.env
 RESULTS_DIR="${1:-results}"
 RESULTS_DIR="${RESULTS_DIR%/}"
 
-# Input FASTQ directory, named to match what ampliseq_samplesheet.sh creates,
-# and the archive it becomes on the guest collection. Both are named for the
-# reader downloading them, since those names are what the buttons show.
+# Input FASTQ directory, named to match what ampliseq_samplesheet.sh creates.
+# Named for the reader unpacking it, since this is a folder of the download.
 FASTQ_DIR="raw-sequences"
-FASTQ_ZIP_NAME="raw-sequences.zip"
-
-# The whole dashboard as one zip, published beside the reads
-DASHBOARD_ZIP_NAME="dashboard.zip"
 
 # The headline numbers ampliseq_composition.sh counted out of the ASV and
 # abundance tables, as key and value, for the Overview's sidebar
@@ -131,28 +136,14 @@ if [[ ! -d "$RESULTS_DIR" ]]; then
     fail "The pipeline finished but produced no results directory ('$RESULTS_DIR') to upload."
 fi
 
-# 1. Archive the reads into this run's directory on the guest collection, rather
-#    than into the results folder: they are most of what a run publishes, and
-#    nobody reads them through the dashboard. Skipped for any pipeline that does
-#    not stage its inputs this way.
-FASTQ_URL=""
+# 1. Everything a requester downloads comes out of one zip, which is built at
+#    the end of this script - so the reads are still here to go into it. Checked
+#    now rather than then, since a run whose results cannot be packaged is of no
+#    use to the requester and there is no sense doing the rest of this first.
+command -v zip > /dev/null \
+    || fail "The results could not be packaged for download: zip is not installed."
 
-if [[ -d "$FASTQ_DIR" ]]; then
-    command -v zip > /dev/null \
-        || fail "The results could not be packaged for download: zip is not installed."
-
-    log "Archiving $FASTQ_DIR for task $TASK_ID..."
-
-    # zip's output goes into the failure message, so the requester is told why
-    # their data could not be packaged
-    if ! ZIP_OUTPUT=$(globus_archive "$RUN_ID" "$FASTQ_ZIP_NAME" "$FASTQ_DIR" -0); then
-        fail "The sequencing data could not be packaged for download:"$'\n'"$ZIP_OUTPUT"
-    fi
-
-    FASTQ_URL=$(globus_run_url "$RUN_ID" "$FASTQ_ZIP_NAME")
-else
-    log "No $FASTQ_DIR directory; skipping raw sequence archive."
-fi
+[[ -d "$FASTQ_DIR" ]] || log "No $FASTQ_DIR directory; the download will hold the results alone."
 
 # 2. Work out the two things a requester asks for first - what was in each
 #    sample, and how varied each sample was - for the Overview to plot. Ahead of
@@ -171,8 +162,10 @@ fi
 
 # 4. Give every folder below the results root a listing page, so that the folder
 #    links the report and the landing page carry still resolve once the results
-#    are objects in a bucket rather than directories on disk.
-if ! "$NEXTFLOW_DIR/scripts/index_directories.sh" "$RESULTS_DIR"; then
+#    are objects in a bucket rather than directories on disk. The staged reads
+#    get one too, written inside the results under their own name: it names every
+#    file and its size, greyed, since those files are only in the download.
+if ! "$NEXTFLOW_DIR/scripts/index_directories.sh" "$RESULTS_DIR" "$FASTQ_DIR"; then
     warn "The results folders could not be indexed; their listings will be missing."
 fi
 
@@ -187,21 +180,23 @@ if [[ -w "$SUMMARY_REPORT" ]]; then
 fi
 
 # 6. Build the pages that frame all of it, from what the run produced.
-dashboard_reset "$RESULTS_DIR" "$OUTPUT_CATALOG" "$(globus_run_url "$RUN_ID")"
+dashboard_reset "$RESULTS_DIR" "$OUTPUT_CATALOG"
 
 #    The navigation bar, after the Overview every run opens on
 dashboard_view report  "Analysis Report" "summary_report/summary_report.html"
 dashboard_view quality "Technical Report" "multiqc/multiqc_report.html"
 dashboard_index_view   "File Explorer"
 
-#    The ASV table carries its taxonomy as observation metadata, so it is the
-#    one file most people came for. The two archives follow it: the reads as
-#    they went in, and the whole of this dashboard, both served from the guest
-#    collection and both of what "Download everything" fetches.
-dashboard_button "qiime2/abundance_tables/feature-table.biom" || true
-dashboard_bundle "Raw sequencing data" "$FASTQ_URL"
-dashboard_bundle "All result files" "$(globus_run_url "$RUN_ID" "$DASHBOARD_ZIP_NAME")"
-
+#    The feature table is the one file most people came for, offered in the
+#    three formats it was written in - the same object each time, which is what
+#    the row of boxes is shaped to say. Nothing else is offered here: the tables
+#    behind it are in the file index, and everything this run published, the
+#    reads included, comes down through the one button under these rows.
+dashboard_formats "Feature table" \
+    "Counts, taxonomy and sequences for every ASV. The HDF5 file carries the phylogeny too." \
+    "Plain text|feature_table/feature-table.tsv" \
+    "JSON|feature_table/feature-table.json.biom" \
+    "HDF5|feature_table/feature-table.hdf5.biom" || true
 #    How the run was set up. Every value comes off the manifest wrike_job.sh
 #    recorded, so the page and the record cannot disagree; anything it does not
 #    carry leaves its note off the sidebar. Each is stated over the numbers it
@@ -425,21 +420,51 @@ if [[ -n "$SAMPLE_COUNT" && ! "$SAMPLE_COUNT" =~ ^[0-9]+$ ]]; then
     SAMPLE_COUNT=""
 fi
 
-# 7. Write the three pages into the results folder, so the zip below holds the
-#    same dashboard the bucket will serve.
+# 7. Package the whole run - the reads as they went in, and the results - as the
+#    one file the dashboard offers. Named after the task and the uid, so a
+#    requester can tell it apart in a downloads folder and still quote the run
+#    back to us.
+#
+#    Built before the pages, because they say how big it is and what address it
+#    is at; the pages then go in on top of it, in step 9. What that leaves out
+#    of the figure the button shows is three HTML files, which is not a size a
+#    reader is being told anything by.
+BUNDLE_NAME=$(globus_bundle_name "$RUN_ID" "$TASK_NAME")
+BUNDLE_PARTS=("$RESULTS_DIR|-9")
+
+[[ -d "$FASTQ_DIR" ]] && BUNDLE_PARTS=("$FASTQ_DIR|-0" "${BUNDLE_PARTS[@]}")
+
+log "Packaging $BUNDLE_NAME for task $TASK_ID..."
+
+# zip's output goes into the failure message, so the requester is told why their
+# data could not be packaged
+if ! ZIP_OUTPUT=$(globus_archive "$RUN_ID" "$BUNDLE_NAME" "${BUNDLE_PARTS[@]}"); then
+    fail "This run could not be packaged for download:"$'\n'"$ZIP_OUTPUT"
+fi
+
+dashboard_bundle "$(globus_run_url "$RUN_ID" "$BUNDLE_NAME")" \
+    "$(globus_archive_size "$RUN_ID" "$BUNDLE_NAME")"
+
+# 8. Write the three pages into the results folder, so the copy in that archive
+#    is the same dashboard the bucket will serve.
 if ! RENDER_OUTPUT=$(render_dashboard "$RUN_ID" "$TASK_NAME" "$SUBTITLE" \
         "$PIPELINE" "$(date '+%b %-d, %Y')" "$SAMPLE_COUNT" "$EXPIRES_ON" \
         "$PLOT_DATA_FILE"); then
     fail "The pages that present these results could not be built:"$'\n'"$RENDER_OUTPUT"
 fi
 
-# 8. Archive the finished dashboard beside the reads. Deflated rather than
-#    stored: what is left after the pruning is mostly HTML and tables.
-if ! ZIP_OUTPUT=$(globus_archive "$RUN_ID" "$DASHBOARD_ZIP_NAME" "$RESULTS_DIR"); then
-    warn "The results could not be packaged as one download:"$'\n'"$ZIP_OUTPUT"
+# 9. And into the archive, which was built without them. A download missing them
+#    is still every file the run produced, so this warns rather than fails.
+BUNDLE_PAGES=()
+for PAGE in "${DASHBOARD_PAGES[@]}"; do
+    BUNDLE_PAGES+=("$RESULTS_DIR/$PAGE")
+done
+
+if ! ZIP_OUTPUT=$(globus_archive_add "$RUN_ID" "$BUNDLE_NAME" "${BUNDLE_PAGES[@]}"); then
+    warn "The download will not carry the dashboard's own pages:"$'\n'"$ZIP_OUTPUT"
 fi
 
-# 9. Publish everything, the pages last - the landing page overwrites the
+# 10. Publish everything, the pages last - the landing page overwrites the
 #    progress page published to that key, which is how a reader watching the run
 #    is handed the report.
 log "Initiating S3 upload for Task $TASK_ID..."

@@ -51,7 +51,7 @@ is on rather than by having its `src` rewritten, which would push a second entry
 on top of the fragment's. Without that, a reader's first *back* undid the
 frame's navigation while the fragment and the underline stayed where they were,
 and the bar named a view the frame had already left. A page opened off disk
-rather than out of the bucket — the copy inside `dashboard.zip` — falls back to
+rather than out of the bucket — the copy inside the run's zip — falls back to
 rewriting `src`, since the frame is then an origin of its own.
 
 **The expiration notice**, at the end of the bar. See [The expiration
@@ -78,7 +78,7 @@ One script per pipeline — [`ampliseq_composition.sh` and
 them in `composition_data.json`, which is written into the page; a run that
 produced nothing to plot leaves the panel on its empty state. Which indices the
 diversity chart offers comes from the same file, since the two pipelines share
-none: a 16S run plots Shannon, Simpson and Pielou over its ASV table, and a
+none: a 16S run plots Shannon, Faith's PD and nine other indices over its ASV table, and a
 shotgun run plots what nonpareil and mOTUs measured without a classification
 database in the way.
 
@@ -88,13 +88,27 @@ is drawn to the space the page has rather than the page growing a scrollbar to
 fit the chart.
 
 **Quick downloads**, at the top of the sidebar. One row per headline file the
-pipeline declared, then a row for each of the two archives the run published to
-[the Globus collection](../operations/globus.md) — the reads it was given, and
-the whole dashboard as one zip. Under them, **Download everything** is the
-emphasised button, since it is what most readers want before the deletion date:
-it fetches both of those archives, one after the other. Each address ends in
+pipeline declared — nothing else; everything the run published comes down
+through the button under them.
+
+**Download everything**, the emphasised button beneath those rows, since it is
+what most readers want before the deletion date. It is the one archive the run
+published to [the Globus collection](../operations/globus.md) — the reads it was
+given beside the whole dashboard — and its label says how big that file is, so
+nobody starts a 40 GB download without being told. The address ends in
 `?download`, so the collection answers with an attachment and the page the
 reader is on never goes anywhere.
+
+One file rather than two. Two downloads let a requester take one of them and
+believe they had everything, which is exactly the mistake that costs a dataset
+on the deletion date.
+
+**The copy control** beside it hands out that address instead of starting the
+download, without the `?download` — for pasting into an `ssh` session and
+pulling the file down where the data is actually going. It is written hidden and
+revealed by script, since a clipboard is the one thing on these pages a reader
+without scripting cannot be offered; the button beside it stays a plain link, so
+a middle-click or a shared address works with nothing scripted in the way.
 
 **Run statistics**, under them, headed by how many samples the run covered —
 from `.samples.count`, the count *after* entries sharing a sample name were
@@ -187,7 +201,7 @@ It is built from the pipeline's **output catalogue** —
 — read top to bottom as `group | path | label | description`:
 
 ```
-Start here | qiime2/abundance_tables/feature-table.biom | | The ASV abundance table in BIOM v2 …
+Start here | feature_table/feature-table.hdf5.biom | | Every ASV's counts, taxonomy, sequence and place on the phylogeny …
 Taxonomy   | dada2/ASV_tax.*.tsv                       | | Taxonomy for each ASV from the DADA2 classifier …
 Sequences  | qiime2/representative_sequences/          | | The same sequences after filtering, as FASTA and …
 ```
@@ -231,26 +245,44 @@ object, including the ones in the folder listing pages.
 ## Taking a copy of the whole thing
 
 The one thing a client most wants before their deletion date is all of it at
-once, and `dashboard.zip` is that: the whole results folder plus the three pages
-it is read through, built by the upload script and served from
-[the Globus collection](../operations/globus.md). It unpacks into a `results/` folder; open the `index.html` in it and the same
-dashboard comes up — every link is relative, so the navigation bar, the
-Overview, the file index and the folder listings all resolve against the
-extracted folder.
+once, and the run's zip is that: the reads it was given beside the whole results
+folder, the three pages it is read through included. It is built by the upload
+script and served from [the Globus collection](../operations/globus.md), and it
+is named after the Wrike task and the uid — `<task title>_<uid>.zip` — so it is
+recognisable in a downloads folder and still traceable back to the run.
+
+It unpacks into `raw-sequences/` beside `results/`, the way the run directory
+itself is laid out. Open the `index.html` in `results/` and the same dashboard
+comes up — every link is relative, so the navigation bar, the Overview, the file
+index and the folder listings all resolve against the extracted folder.
+
+**The reads are live in that copy and greyed in the published one.** The file
+index lists `raw-sequences/` either way, and behind it is a listing naming every
+file and its size. On the dashboard the bucket serves, both are greyed and carry
+a note saying the files come down with **Download everything**: those bytes are
+not in the bucket, and a link that led nowhere would be worse than no link. Read
+off a disk, the same pages find `../../raw-sequences/` sitting there and turn
+the names back into links.
+
+That switch is one line of script in
+[`files.html`](../../templates/files.html) and
+[`listing.html`](../../templates/listing.html): held is how the rows are
+*written*, and a page read from `file:` or from localhost adds a `local` class
+that lifts it. So the published copy is right with or without scripting, and one
+rendering of each page serves both — the bytes in the zip are the bytes in the
+bucket.
 
 **A copy read off a disk still wants a network**, because the three pages fetch
 Tailwind and their fonts from a CDN — see [How the pages are styled
 ](#how-the-pages-are-styled). Everything is there and every link works; with no
-network it is the styling that is missing, not the results. The two links that
-do not resolve offline are the ones in Quick Downloads that point back at the
-collection.
+network it is the styling that is missing, not the results. The one link that
+does not resolve offline is **Download everything** itself, which points back at
+the collection.
 
-`raw-sequences.zip` sits beside it, holding the reads exactly as they went in.
-The sidebar's **Download everything** button fetches both.
-
-Neither is built on demand and neither is in the bucket: the upload script zips
-them into place on the cluster's own disk, which is why a run's reads cost
-nothing to publish and nothing to serve.
+It is not built on demand and it is not in the bucket: the upload script zips it
+into place on the cluster's own disk, which is why a run's reads cost nothing to
+publish and nothing to serve. The reads go in stored, being already gzipped, and
+the results deflated.
 
 ## What is not published
 
@@ -279,7 +311,7 @@ something is written down. Each list says which of the two applies, per entry:
 [taxprofiler](../pipelines/taxprofiler.md).
 
 **Deleting rather than excluding** is what keeps the pages honest. The listings,
-the file index, `dashboard.zip` and the bucket are all built from the folder
+the file index, the run's zip and the bucket are all built from the folder
 after the pruning, so none of them can describe a file a reader cannot fetch.
 
 ## Before and after the dashboard

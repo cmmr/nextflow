@@ -13,7 +13,7 @@
 #   two weeks out      comment on the task, mentioning whoever raised it and
 #                      anyone following it, so the date can be pushed out before
 #                      anything is deleted
-#   reached or passed  delete the published results and the archives the run
+#   reached or passed  delete the published results and the archive the run
 #                      published to the Globus collection, leave an expired page
 #                      where the dashboard was, and set the task's status to
 #                      "Expired"
@@ -379,10 +379,10 @@ expire_task() {
         return 0
     fi
 
-    # The reads and the dashboard zip, which are on the guest collection rather
-    # than in the bucket and so are not among the keys above. The page says
-    # everything it links to goes on this date, and these are two of those
-    # things.
+    # The reads and the results in one zip, on the guest collection rather
+    # than in the bucket and so not among the keys above. The page says
+    # everything it links to goes on this date, and that archive is most of
+    # what it links to.
     globus_discard_run "$run_id" || warn "Could not delete the Globus directory for uid $run_id."
 
     # The expired page takes the key the landing page had, which the deletion

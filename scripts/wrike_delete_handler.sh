@@ -7,7 +7,7 @@
 #
 # Called by wrike_sqs_listener.sh for TaskDeleted and TaskParentsRemoved events.
 # Cleanup covers all four places a run leaves state: queued or running Slurm
-# jobs, published S3 results, the archives it published to the Globus collection,
+# jobs, published S3 results, the archive it published to the Globus collection,
 # and the local run directory. Every step is best-effort, since a run may never
 # have created the thing being removed.
 #
@@ -85,9 +85,9 @@ scancel --name="nf-$RUN_ID" --user="$(whoami)" > /dev/null 2>&1 || true
 #    top of it if the run got that far.
 aws s3 rm "$S3_RESULTS_DIR" --recursive > /dev/null 2>&1 || true
 
-#    And the archives the run published to the guest collection - the reads and
-#    the dashboard zip - which are on this cluster's own disk rather than in the
-#    bucket, and so are not under the delete above
+#    And the archive the run published to the guest collection - the reads and
+#    the results in one zip - which is on this cluster's own disk rather than in
+#    the bucket, and so is not under the delete above
 globus_discard_run "$RUN_ID" || warn "Could not delete the Globus directory for uid $RUN_ID."
 
 # 3. Confirm to the user. Only a removed Dashboards tag gets a comment; a deleted

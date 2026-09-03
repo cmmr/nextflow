@@ -62,7 +62,8 @@ FASTQ_DIR="raw-sequences"
 # ampliseq refuses an entry whose fastq_1 has the same simple name as the sample
 # plus "_1", which is exactly what naming a file after its sample alone produces,
 # so something has to separate the two. The sample name still leads, since these
-# files are what the requester unpacks out of raw-sequences.zip.
+# files are what the requester unpacks out of the raw-sequences/ folder of the
+# zip this run publishes.
 FASTQ_INFIX="reads"
 
 # The cluster's own build rather than a system package, so it is named by absolute

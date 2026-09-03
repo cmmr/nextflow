@@ -19,20 +19,20 @@ They are `directory_listing.html`, and that is the whole convention:
 
 | | |
 |---|---|
-| `index.html` | a page something wrote to be read — the [landing page](index.md) at the top of a run, QIIME 2's barplot under `qiime2/barplot/` |
+| `index.html` | a page something wrote to be read — the [landing page](index.md) at the top of a run, a Krona chart under a shotgun run's `krona/` |
 | `directory_listing.html` | the listing of the folder it sits in, written here |
 
 Because the two never collide, the script has no special cases: it writes a
 listing into every directory it finds, whether or not the pipeline published a
 page of its own there, and a second pass over the same results folder just
-rewrites them. `qiime2/barplot/` ends up with both — QIIME's visualisation, and
+rewrites them. A folder holding a tool's own `index.html` ends up with both — that page, and
 a listing of the per-level CSVs beside it.
 
 **Every link is written by name.** A folder row points at
 `subfolder/directory_listing.html`, not at `subfolder/`, and "up one folder"
 points at `../directory_listing.html`. Nothing depends on the server rewriting a
 folder URL, which is what lets an unpacked copy of
-[`dashboard.zip`](../operations/globus.md) browse exactly the way the published
+[the run's zip](../operations/globus.md) browse exactly the way the published
 run does.
 
 **Folder URLs are reachable too**, because CloudFront maps one onto the listing

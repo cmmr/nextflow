@@ -15,7 +15,7 @@ names never collide, and neither is ever the other:
 
 | | |
 |---|---|
-| `index.html` | a page something wrote to be read — the run's [landing page](index.md) at the top of a run, QIIME 2's barplot under `qiime2/barplot/` |
+| `index.html` | a page something wrote to be read — the run's [landing page](index.md) at the top of a run, a Krona chart under a shotgun run's `krona/` |
 | `directory_listing.html` | the listing of the folder it sits in, written into **every** directory of the results tree by [`index_directories.sh`](browsable-folders.md) |
 
 So the function has one decision to make: a request for a folder is either the
@@ -26,7 +26,7 @@ Every link this system writes names the file outright — a folder row in a
 listing points at `subfolder/directory_listing.html`, not at `subfolder/`. The
 function is for the links it does *not* write: the folder links inside
 nf-core's own report, and a reader editing the address bar. Naming the file is
-also what lets an unpacked copy of [`dashboard.zip`](../operations/globus.md)
+also what lets an unpacked copy of [the run's zip](../operations/globus.md)
 browse the same way the published run does, with no server involved at all.
 
 ## The function
@@ -80,7 +80,7 @@ Worked through, for a run published at `/nxf/vg7dyqwv/`:
 | `/nxf/vg7dyqwv` | 301 to `/nxf/vg7dyqwv/`, then as above |
 | `/nxf/vg7dyqwv/qiime2/` | `qiime2/directory_listing.html` |
 | `/nxf/vg7dyqwv/qiime2` | 301, then as above |
-| `/nxf/vg7dyqwv/qiime2/barplot/index.html` | QIIME 2's barplot, untouched |
+| `/nxf/vg7dyqwv/krona/kraken2.html` | a tool's own page, untouched |
 | `/nxf/vg7dyqwv/summary_report/summary_report.html` | untouched |
 
 **The one address the function cannot get right** is `/nxf/<uid>/`, because two

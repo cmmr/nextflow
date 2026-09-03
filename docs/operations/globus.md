@@ -1,14 +1,14 @@
 # Globus
 
-Where the two bulky downloads of every run are served from, and the tool for
-handing someone a dataset directly. Files already on the cluster are shared
-straight out of BCM's Globus Connect Server endpoint (`bcmdtn2`, mapped
-collection `BCMDTN2-POSIX`) through a guest collection, `CMMR-Nextflow` — no
-upload, no egress, and at the cluster's own bandwidth.
+Where the bulky download of every run is served from, and the tool for handing
+someone a dataset directly. Files already on the cluster are shared straight out
+of BCM's Globus Connect Server endpoint (`bcmdtn2`, mapped collection
+`BCMDTN2-POSIX`) through a guest collection, `CMMR-Nextflow` — no upload, no
+egress, and at the cluster's own bandwidth.
 
-Both pipelines publish here: a run's `raw-sequences.zip` and `dashboard.zip` go
-into `$GLOBUS_DIR/nxf/<uid>/`, and [the results page](../results/index.md)
-links to them. Everything else about a run still publishes to S3.
+Both pipelines publish here: a run's one archive goes into
+`$GLOBUS_DIR/nxf/<uid>/`, and [the results page](../results/index.md) links to
+it. Everything else about a run still publishes to S3.
 
 `globus-cli` is what does this from the command line. It is a pure-Python
 package with no compiled release, so it is installed into its own venv rather
@@ -99,39 +99,62 @@ being removed, which is visible in one command.
 
 ## What the pipeline publishes here
 
-Every run writes two files into the collection, and links to them from its
+Every run writes **one** file into the collection and links to it from its
 dashboard:
 
 | | |
 |---|---|
-| `$GLOBUS_DIR/nxf/<uid>/raw-sequences.zip` | the reads the run was given, exactly as they went in |
-| `$GLOBUS_DIR/nxf/<uid>/dashboard.zip` | the whole `results/` folder, the three pages it is read through included |
+| `$GLOBUS_DIR/nxf/<uid>/<task title>_<uid>.zip` | the reads the run was given beside the whole `results/` folder, the three pages it is read through included |
 
-Both are served as
-`$GLOBUS_URL/nxf/<uid>/<file>?download`, which is what the Overview's
-**Quick Downloads** rows point at and what its **Download everything** button
-fetches, one after the other. `?download` is what makes the collection answer
-with an attachment rather than with the file itself.
+It is laid out the way the run directory itself is — `raw-sequences/` beside
+`results/` — so unpacking it gives back what the run was handed and what it
+produced, side by side, and the dashboard inside it browses the reads the same
+way it browses everything else.
 
-They are written straight onto the collection's own filesystem — which is on
-this cluster — so publishing them is a `zip` into place rather than an upload,
-and nothing about them costs S3 storage or egress. They are also the two things
-most likely to be fetched whole and least likely to be read through a browser,
-which is why they are the ones that live here rather than in the bucket. The
-analysis itself still publishes to S3, where the dashboard is served from.
+One file rather than the two this used to be. Two downloads let a requester take
+one of them, see nothing else obviously outstanding, and believe their data was
+safe; there is now nothing to take but the whole thing. The reads are still
+*named* on the dashboard — a greyed row in the file index, and a greyed listing
+of every file and its size behind it — so the page says what is in the download
+without offering files the bucket does not hold.
+
+The name is the Wrike task's own title, cut down to what a filename should carry
+and capped at 60 characters, then the uid. The title is what makes the file
+recognisable in a downloads folder among everything else a requester has taken;
+the uid is what lets them quote the run back to us months later.
+`globus_bundle_name` builds it.
+
+It is served as `$GLOBUS_URL/nxf/<uid>/<file>?download`, which is what the
+Overview's **Download everything** button fetches. `?download` is what makes the
+collection answer with an attachment rather than with the file itself; the
+**copy** control beside the button hands out the same address without it, for
+`wget` or `curl` in a shell somewhere else.
+
+It is written straight onto the collection's own filesystem — which is on this
+cluster — so publishing it is a `zip` into place rather than an upload, and
+nothing about it costs S3 storage or egress. It is also the thing most likely to
+be fetched whole and least likely to be read through a browser, which is why it
+lives here rather than in the bucket. The analysis itself still publishes to S3,
+where the dashboard is served from.
+
+The reads go in stored (`zip -0`), being already gzipped, and the results
+deflated; `globus_archive` takes each part with the level to give it. The
+dashboard's own three pages go in last, through `globus_archive_add`, because
+they say how big the archive is and that is not known until the rest of it is in
+there.
 
 [`scripts/globus.sh`](../../scripts/globus.sh) is the whole of the mechanism:
-`globus_run_dir`, `globus_run_url`, `globus_archive` and `globus_discard_run`,
-sourced by `.env` and called from each pipeline's upload script. The three
-values it reads — `GLOBUS_DIR`, `GLOBUS_RUN_PREFIX` and `GLOBUS_URL` — are set
-in [`.env`](../configuration.md), and `GLOBUS_UUID` beside them is for the
-commands on this page rather than for the pipeline, which never shells out to
-`globus`.
+`globus_run_dir`, `globus_run_url`, `globus_bundle_name`, `globus_archive`,
+`globus_archive_add`, `globus_archive_size` and `globus_discard_run`, sourced by
+`.env` and called from each pipeline's upload script. The three values it reads
+— `GLOBUS_DIR`, `GLOBUS_RUN_PREFIX` and `GLOBUS_URL` — are set in
+[`.env`](../configuration.md), and `GLOBUS_UUID` beside them is for the commands
+on this page rather than for the pipeline, which never shells out to `globus`.
 
 `globus_discard_run` is called from both places a run is torn down —
 [`wrike_expiration.sh`](expiration.md) when its date arrives, and
-`wrike_delete_handler.sh` when its task goes away — so the archives go on the
-same pass as the dashboard that linked to them.
+`wrike_delete_handler.sh` when its task goes away — so the archive goes on the
+same pass as the dashboard that linked to it.
 
 ## One permission, every run
 

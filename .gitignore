@@ -10,3 +10,5 @@ tmp/
 site/
 docs/images/
 __pycache__/
+nix/sandbox/
+nix/result

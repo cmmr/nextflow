@@ -189,10 +189,12 @@ dashboard_index_view   "File Explorer"
 
 #    The feature table is the one file most people came for, offered in the
 #    three formats it was written in - the same object each time, which is what
-#    the row of boxes is shaped to say. Nothing else is offered here: the tables
-#    behind it are in the file index, and everything this run published, the
-#    reads included, comes down through the one button under these rows.
-dashboard_formats "Feature table" \
+#    the row of boxes is shaped to say. The card it sits in is named for that
+#    table, so the row carries no heading of its own. Nothing else is offered
+#    here: the tables behind it are in the file index, and everything this run
+#    published, the reads included, comes down through the one button at the top
+#    of the page.
+dashboard_formats "" \
     "Counts, taxonomy and sequences for every ASV. The HDF5 file carries the phylogeny too." \
     "Plain text|feature_table/feature-table.tsv" \
     "JSON|feature_table/feature-table.json.biom" \

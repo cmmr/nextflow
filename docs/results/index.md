@@ -87,12 +87,13 @@ sidebar, the Overview is exactly as tall as the frame it is read in: the chart
 is drawn to the space the page has rather than the page growing a scrollbar to
 fit the chart.
 
-**Quick downloads**, at the top of the sidebar. One row per headline file the
+**Feature table**, at the top of the sidebar. One row per headline file the
 pipeline declared — nothing else; everything the run published comes down
-through the button under them.
+through the button at the top of the page.
 
-**Download everything**, the emphasised button beneath those rows, since it is
-what most readers want before the deletion date. It is the one archive the run
+**Download everything**, the emphasised button at the top right of the page,
+directly under the deletion date the navigation bar carries, since it is
+what most readers want before that date. It is the one archive the run
 published to [the Globus collection](../operations/globus.md) — the reads it was
 given beside the whole dashboard — and its label says how big that file is, so
 nobody starts a 40 GB download without being told. The address ends in
@@ -103,12 +104,8 @@ One file rather than two. Two downloads let a requester take one of them and
 believe they had everything, which is exactly the mistake that costs a dataset
 on the deletion date.
 
-**The copy control** beside it hands out that address instead of starting the
-download, without the `?download` — for pasting into an `ssh` session and
-pulling the file down where the data is actually going. It is written hidden and
-revealed by script, since a clipboard is the one thing on these pages a reader
-without scripting cannot be offered; the button beside it stays a plain link, so
-a middle-click or a shared address works with nothing scripted in the way.
+The button is a plain link, so a middle-click or a shared address works with
+nothing scripted in the way.
 
 **Run statistics**, under them, headed by how many samples the run covered —
 from `.samples.count`, the count *after* entries sharing a sample name were

@@ -28,9 +28,10 @@
 #   dashboard_formats    <heading> <note> <label|path> ...
 #                                                 one file offered in several
 #                                                 formats, as a row of boxes
-#                                                 under one heading; a format
-#                                                 the run did not write is left
-#                                                 out, and a heading whose
+#                                                 under one heading, or under
+#                                                 none for an empty heading; a
+#                                                 format the run did not write is
+#                                                 left out, and a heading whose
 #                                                 formats are all missing is
 #                                                 not drawn
 #   dashboard_bundle     <url> [bytes]            the one archive the run
@@ -66,9 +67,8 @@
 # reads it was given and this whole dashboard in a single zip - and a run that
 # published none has no such button. One file rather than two, and no separate
 # link to either half of it, because two downloads let a reader take one and
-# believe their data was safe before the dashboard expired. Beside the button is
-# a control that copies its address, for pasting into a shell on some other
-# machine.
+# believe their data was safe before the dashboard expired. It sits under the
+# deletion date the navigation bar carries.
 #
 # render_dashboard writes the three pages into the results folder rather than
 # straight to S3, so the zip a run publishes to Globus holds the same dashboard
@@ -259,7 +259,8 @@ dashboard_button() {
 # browser asked to render a hundred megabytes of it helps nobody.
 #
 # A format the run did not write is left out rather than offered and broken, and
-# a heading whose formats are all missing is not drawn at all.
+# a heading whose formats are all missing is not drawn at all. An empty heading
+# draws the row on its own, for the file the card is already named after.
 dashboard_formats() {
     local heading="$1" note="$2"
     local entry label name boxes=""
@@ -285,8 +286,12 @@ dashboard_formats() {
     [[ -n "$boxes" ]] || return 1
 
     DASHBOARD_DOWNLOADS+="<div class=\"px-2 pt-2 pb-1\">"
-    DASHBOARD_DOWNLOADS+="<span class=\"block font-label-caps text-label-caps text-on-surface-variant mb-1.5\">"
-    DASHBOARD_DOWNLOADS+="$(escape_html "$heading")</span>"
+
+    if [[ -n "$heading" ]]; then
+        DASHBOARD_DOWNLOADS+="<span class=\"block font-label-caps text-label-caps text-on-surface-variant mb-1.5\">"
+        DASHBOARD_DOWNLOADS+="$(escape_html "$heading")</span>"
+    fi
+
     DASHBOARD_DOWNLOADS+="<div class=\"grid grid-cols-3 gap-1.5\">$boxes</div>"
 
     if [[ -n "$note" ]]; then
@@ -301,8 +306,7 @@ dashboard_formats() {
 
 # The one archive the run published to the guest collection: the reads it was
 # given and the whole of this dashboard, in a single zip. Declared before the
-# pages are rendered, since the button, the file index and the address the copy
-# control hands out are all read off it.
+# pages are rendered, since the button and the file index are both read off it.
 #
 # The size is the archive as it stands on the collection, in bytes, and is what
 # the button says a reader is about to start. It is left off for a run that
@@ -319,31 +323,23 @@ dashboard_bundle() {
     return 0
 }
 
-# The button that takes everything this run published, and the control that
-# copies its address instead - for a reader who would rather fetch it from a
-# shell on the machine the data is going to than through the browser they are
-# reading this in. Nothing at all for a run that published no archive.
+# The button that takes everything this run published. Nothing at all for a run
+# that published no archive.
+#
+# It sits at the top right of the Overview, directly under the deletion date the
+# navigation bar carries, so the reader who has just been told the results go
+# away is looking at the way to keep them.
 #
 # The address is the only absolute link on the page: the archive is served from
 # the guest collection rather than sitting beside the page, so it is also the
 # link that does not resolve in an unpacked copy.
 #
 # The button is a plain link, so a middle-click or a shared address still starts
-# the download with no script involved. The copy control is written hidden and
-# the page's own script reveals it, since a clipboard is the one thing here that
-# a reader without scripting cannot be offered.
+# the download with no script involved.
 dashboard_zip_button() {
-    local plain="$DASHBOARD_BUNDLE_URL"
-
     [[ -n "$DASHBOARD_BUNDLE_URL" ]] || return 0
 
-    #    What is copied is the address without the "?download" the button uses:
-    #    the collection answers either way, and what goes into a shell should be
-    #    the file's own address rather than the browser's way of asking for it
-    plain=${plain%\?download}
-
-    printf '<div class="flex items-stretch gap-1.5">'
-    printf '<a class="flex-1 min-w-0 bg-primary text-on-primary px-2.5 py-2 rounded-lg text-[13px] font-semibold hover:bg-primary-container transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap"'
+    printf '<a class="shrink-0 bg-primary text-on-primary px-3.5 py-2 rounded-lg text-[13px] font-semibold hover:bg-primary-container transition-colors flex items-center justify-center gap-1.5 whitespace-nowrap"'
     printf ' id="download-all" href="%s"' "$(escape_html "$DASHBOARD_BUNDLE_URL")"
     printf '><span class="material-symbols-outlined text-[18px]">archive</span>Download everything'
 
@@ -355,13 +351,6 @@ dashboard_zip_button() {
                "$(escape_html "$(human_size "$DASHBOARD_BUNDLE_SIZE")")"
 
     printf '</a>'
-
-    printf '<button type="button" id="copy-link" style="display: none"'
-    printf ' data-url="%s"' "$(escape_html "$plain")"
-    printf ' class="shrink-0 border border-outline-variant text-on-surface-variant px-2 rounded-lg'
-    printf ' hover:bg-surface-container hover:text-primary transition-colors flex items-center"'
-    printf ' title="Copy the download address" aria-label="Copy the download address">'
-    printf '<span class="material-symbols-outlined text-[18px]">content_copy</span></button></div>'
 }
 
 # Close whichever block of the statistics is open, so the next heading starts
@@ -581,11 +570,11 @@ dashboard_stats_card() {
     printf '<div class="flex flex-col gap-5">%s</div></div>' "$DASHBOARD_STATS"
 }
 
-# The quick downloads, or a line saying the run named none
+# What the Feature Table card offers, or a line saying the run named none
 dashboard_downloads() {
     if [[ -z "$DASHBOARD_DOWNLOADS" ]]; then
         printf '<p class="font-body-sm text-body-sm text-on-surface-variant p-2">'
-        printf 'This run names no single files; take all of it below.</p>'
+        printf 'This run names no single files; take all of it with the button above.</p>'
         return 0
     fi
 

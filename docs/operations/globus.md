@@ -126,9 +126,8 @@ the uid is what lets them quote the run back to us months later.
 
 It is served as `$GLOBUS_URL/nxf/<uid>/<file>?download`, which is what the
 Overview's **Download everything** button fetches. `?download` is what makes the
-collection answer with an attachment rather than with the file itself; the
-**copy** control beside the button hands out the same address without it, for
-`wget` or `curl` in a shell somewhere else.
+collection answer with an attachment rather than with the file itself. The same
+address without it is what `wget` or `curl` in a shell somewhere else takes.
 
 It is written straight onto the collection's own filesystem — which is on this
 cluster — so publishing it is a `zip` into place rather than an upload, and

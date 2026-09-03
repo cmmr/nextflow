@@ -82,15 +82,20 @@ its column is short of the axis. It is what the paragraph below is about, said
 per sample rather than in general, at the moment a reader is looking at a column
 that does not reach the top.
 
-**The columns do not add up to 100%, and are not meant to.** What the classifier
-named nothing — a shotgun run's `Unclassified`, a 16S run's `Unassigned` — is
-left out of the chart entirely: it is not a taxon anybody can act on, and it was
-routinely the tallest band on the column, burying everything that was found
-under one slab saying only how much of the run went unnamed. Every share is
-still a share of the whole sample, so a column adds up to less than 100% by
-exactly that much, and the caption under the chart says so. The share itself is
-not lost: it is in `composition_data.json`, and the sidebar reports how far down
-the taxonomy the classifier did get.
+**A shotgun run's columns do not add up to 100%, and are not meant to.** What
+Kraken2 named nothing — its `Unclassified` reads — is left out of the chart
+entirely: it is not a taxon anybody can act on, and it was routinely the tallest
+band on the column, burying everything that was found under one slab saying only
+how much of the run went unnamed. Every share is still a share of the whole
+sample, so a column adds up to less than 100% by exactly that much, and the
+caption under the chart says so. The share itself is not lost: it is in
+`composition_data.json`, and the sidebar reports how far down the taxonomy the
+classifier did get.
+
+**A 16S run has no such share.** rbiom names an ASV the classifier stopped short
+on for the deepest rank it *did* reach — see [below](#how-the-16s-numbers-are-worked-out)
+— so every read is drawn under some name at every rank and an amplicon column
+closes at 100%.
 
 **So the axis is cut to the run rather than fixed at 100%.** It runs from zero
 to the tallest column, rounded up to a step whole percentages can be read off —
@@ -240,14 +245,15 @@ compare, and choosing a sampling depth on a requester's behalf is analysis
 rather than delivery. The feature table is published in three formats precisely
 so that rarefying is theirs to do.
 
-**A sequence classified only to `Bacteria` counts as `Unassigned`.** Silva writes
-it as `Bacteria;;;;;`, which is a rank short of a classification at every rank
-the chart offers, and the domain it names is the one every sequence in a 16S run
-is expected to land in — so it says only that the run worked. Its counts are
-summed into the `Unassigned` share, and since the chart does not draw that share
-at all, both are what a 16S column falls short of 100% by. Everything else keeps
-its own row: `Unclassified Pseudomonadota` names a phylum the sequence really did
-reach, and is drawn like any other taxon.
+**An ASV the classifier stopped short on is named for how far it got.** Every
+rank is collapsed by `rbiom::taxa_matrix()` with `unc = "grouped"`, so a sequence
+Silva placed no deeper than its phylum is `Unc. Bacillota` at class, at order and
+all the way down, and one it placed nowhere at all is `Unc. N/A`. There is no
+bucket of unclassified reads and no special case for one: every ASV is counted
+under some name at every rank, which is what makes an amplicon column a whole
+sample. The eleven drawn are the eleven most abundant of those names, with the
+rest summed into `Other` — `taxa = 11, other = TRUE`, rbiom's own arguments
+rather than a top-N computed here.
 
 **No Chao1.** It estimates the species that were missed from the ones seen
 exactly once and twice, and DADA2 has already dropped most of the singletons —

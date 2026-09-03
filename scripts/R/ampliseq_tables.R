@@ -3,7 +3,7 @@
 # ampliseq_tables.R - Assemble a run's feature table, and everything read off it.
 #
 # Author: Daniel Smith
-# Date:   September 2nd, 2026
+# Date:   September 3rd, 2026
 #
 # Run inside the rbiom container by ampliseq_composition.sh, which owns the
 # numbers that come from outside the feature table. This owns the feature table
@@ -12,9 +12,14 @@
 #
 # The run's ASVs are assembled from what the pipeline published - the counts and
 # sequences as its last filter left them, DADA2's taxonomy, and the phylogeny
-# EPA-NG placed them on - into one rbiom object.
+# EPA-NG placed them on - into one rbiom object. as_rbiom() takes those files as
+# they are and matches them up by the identifiers each one carries, so nothing
+# here reorders one table against another.
+#
 # That object is then written out three ways, and summarised two ways:
 #
+#   feature_table/feature-sequences.fasta   the sequences of exactly those ASVs
+#   feature_table/excluded_asvs.tsv         what exclude_taxa removed, and why
 #   feature_table/feature-table.tsv         counts and taxonomy, classic tabular
 #   feature_table/feature-table.json.biom   BIOM 1.0
 #   feature_table/feature-table.hdf5.biom   BIOM 2.1, and the only one of the
@@ -28,6 +33,12 @@
 #                                           denoised table supports
 #   <plot data>                             what the Overview's charts draw
 #   <statistics>                            counts for the Overview's sidebar
+#
+# Every rank is collapsed by rbiom's own taxa_matrix(), with unc = "grouped":
+# an ASV the classifier stopped short on is named for the deepest rank it did
+# reach - "Unc. Bacillota" at genus for one placed no further than its phylum -
+# rather than being pooled into a bucket of its own. So every ASV is drawn
+# somewhere at every rank, and a column adds up to the whole sample.
 #
 # Taxa named in exclude_taxa are dropped before any of that, so every file here
 # describes the same set of ASVs. The match is a case-insensitive substring
@@ -62,11 +73,12 @@ method       <- if (length(args) >= 5) args[[5]] else ""
 # The eleven the palette carries; everything rarer is summed into "Other"
 TOP_TAXA <- 11
 
-# What a rank is called on the page, by its depth in the lineage
-RANK_NAMES <- c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species")
+# What DADA2 writes into its taxonomy table that is not a rank: the bootstrap
+# confidences and the sequence itself
+NOT_A_RANK <- c("confidence", "sequence")
 
 
-# -- Reading what DADA2 published --------------------------------------------
+# -- Finding what DADA2 published --------------------------------------------
 
 # The first file a glob matches, or NULL. DADA2 names its taxonomy after the
 # database the run used, so those are matched rather than spelled out.
@@ -75,31 +87,6 @@ first_file <- function (...) {
     hits <- hits[file.exists(hits)]
 
     if (length(hits) == 0) NULL else hits[[1]]
-}
-
-read_tsv <- function (path)
-    utils::read.table(
-        path, sep = "\t", header = TRUE, quote = "", comment.char = "",
-        check.names = FALSE, stringsAsFactors = FALSE, na.strings = c("NA", ""))
-
-# One named character vector of sequences, from the fasta DADA2 wrote
-read_seqs <- function (path) {
-    lines  <- readLines(path, warn = FALSE)
-    lines  <- lines[nzchar(lines)]
-    starts <- which(startsWith(lines, ">"))
-
-    if (length(starts) == 0) return (NULL)
-
-    ends <- c(starts[-1] - 1, length(lines))
-    seqs <- vapply(
-        seq_along(starts),
-        function (i) paste0(lines[(starts[[i]] + 1):ends[[i]]], collapse = ""),
-        character(1))
-
-    # The header is the ASV id, up to the first space
-    names(seqs) <- sub("^>\\s*", "", sub("\\s.*$", "", lines[starts]))
-
-    seqs
 }
 
 # The ASV set the run actually settled on. Every filter ampliseq applies
@@ -137,139 +124,140 @@ if (is.null(source))
 message("Reading the ASVs as ", source$step, " left them: ",
         sub(paste0("^", results_dir, "/"), "", counts_file))
 
-counts_df <- read_tsv(counts_file)
-
-if (!"ASV_ID" %in% colnames(counts_df))
-    stop("dada2/ASV_table.tsv has no ASV_ID column")
-
-otus   <- as.character(counts_df[["ASV_ID"]])
-counts <- as.matrix(counts_df[, setdiff(colnames(counts_df), "ASV_ID"), drop = FALSE])
+# The one table read by hand: rbiom's TSV reader wants the classic BIOM header,
+# which DADA2 does not write. Every non-numeric column goes with it, since some
+# stages publish the sequence beside the counts.
+counts <- utils::read.delim(counts_file, row.names = 1, check.names = FALSE)
+counts <- as.matrix(counts[, vapply(counts, is.numeric, logical(1)), drop = FALSE])
 counts[is.na(counts)] <- 0
-storage.mode(counts)  <- "double"
-rownames(counts)      <- otus
 
 # The taxonomy with species where the run reached it, and without where it did
-# not. Everything that is not a rank goes: DADA2 writes its bootstrap
-# confidences and the sequence itself into the same table.
+# not
 tax_file <- first_file("dada2", "ASV_tax_species.*.tsv")
 if (is.null(tax_file)) tax_file <- first_file("dada2", "ASV_tax.*.tsv")
-
-taxonomy <- NULL
-
-if (!is.null(tax_file)) {
-    tax_df <- read_tsv(tax_file)
-    ranks  <- setdiff(colnames(tax_df), c("ASV_ID", "confidence", "sequence"))
-    ranks  <- ranks[!endsWith(ranks, "_confidence")]
-
-    # addSpecies renames DADA2's own species column when it adds its exact
-    # matches, so at most one of the two is kept as "Species"
-    if ("Species_exact" %in% ranks) {
-        if ("Species" %in% ranks) {
-            ranks <- setdiff(ranks, "Species_exact")
-        } else {
-            colnames(tax_df)[colnames(tax_df) == "Species_exact"] <- "Species"
-            ranks[ranks == "Species_exact"] <- "Species"
-        }
-    }
-
-    taxonomy <- data.frame(
-        .otu = as.character(tax_df[["ASV_ID"]]),
-        tax_df[, ranks, drop = FALSE],
-        check.names      = FALSE,
-        stringsAsFactors = FALSE)
-
-    taxonomy <- taxonomy[match(otus, taxonomy[[".otu"]]), , drop = FALSE]
-    taxonomy[[".otu"]] <- otus
-
-    # Reordering by a permutation turns R's automatic row names into explicit
-    # ones, and rbiom refuses a taxonomy that carries both row names and an
-    # .otu column. DADA2 does not publish its taxonomy in the table's order, so
-    # this is the ordinary case rather than an edge of one.
-    rownames(taxonomy) <- NULL
-}
-
-seqs_file <- first_file(source$dir, source$fasta)
-sequences <- if (is.null(seqs_file)) NULL else read_seqs(seqs_file)
-
-if (!is.null(sequences)) {
-    sequences <- sequences[otus]
-
-    # An incomplete fasta is worse than none: rbiom refuses a partial set, and
-    # the sequences are published beside this either way
-    if (anyNA(names(sequences)) || any(is.na(sequences))) sequences <- NULL
-}
-
-tree_file <- first_file("pplace", "asv_tree.newick")
-tree      <- NULL
-
-if (!is.null(tree_file)) {
-    tree <- try(rbiom::read_tree(tree_file), silent = TRUE)
-
-    if (inherits(tree, "try-error")) {
-        message("NOTE: the phylogeny could not be read; leaving it out.")
-        tree <- NULL
-    } else if (!all(otus %in% tree$tip.label)) {
-        #    Faith's PD needs every ASV on the tree, and rbiom will not take a
-        #    tree that covers only some of them. Reaching here means the tree
-        #    and the table came from different stages of the run.
-        message("NOTE: the phylogeny covers ", sum(otus %in% tree$tip.label),
-                " of ", length(otus), " ASVs; leaving it out.")
-        tree <- NULL
-    }
-}
 
 
 # -- The one object everything else is read from -----------------------------
 
+# as_rbiom() reads the taxonomy file itself and matches it to the counts by ASV
+# id, dropping whatever belongs to a stage this table no longer carries
 biom <- rbiom::as_rbiom(
-    biom      = counts,
-    taxonomy  = taxonomy,
-    tree      = tree,
-    sequences = sequences,
-    id        = "16S rRNA amplicon sequencing analysis")
+    biom        = counts,
+    taxonomy    = tax_file,
+    underscores = TRUE,
+    id          = "16S rRNA amplicon sequencing analysis")
+
+# Everything DADA2 wrote into that table is a rank as far as rbiom is concerned,
+# so the columns that are not one are dropped here.
+if (biom$n_ranks > 1) {
+    taxonomy <- as.data.frame(biom$taxonomy)
+    keep     <- setdiff(colnames(taxonomy), c(".otu", NOT_A_RANK))
+    keep     <- keep[!endsWith(keep, "_confidence")]
+
+    #    addSpecies renames DADA2's own species column when it adds its exact
+    #    matches, so at most one of the two is kept as "Species"
+    if ("Species_exact" %in% keep) {
+        if ("Species" %in% keep) {
+            keep <- setdiff(keep, "Species_exact")
+        } else {
+            colnames(taxonomy)[colnames(taxonomy) == "Species_exact"] <- "Species"
+            keep[keep == "Species_exact"] <- "Species"
+        }
+    }
+
+    biom$taxonomy <- taxonomy[, c(".otu", keep), drop = FALSE]
+}
+
+ranks <- setdiff(biom$ranks, ".otu")
 
 # Taxa the run was told to exclude, matched the way QIIME 2 matched them: a
 # case-insensitive substring against the whole lineage.
 if (!identical(tolower(exclude_taxa), "none") && nzchar(exclude_taxa) &&
-    !is.null(biom$taxonomy)) {
+    length(ranks) > 0) {
 
     patterns <- trimws(strsplit(exclude_taxa, ",", fixed = TRUE)[[1]])
     patterns <- patterns[nzchar(patterns)]
 
     if (length(patterns) > 0) {
+        asvs     <- biom$taxonomy[[".otu"]]
         lineages <- apply(
-            biom$taxonomy[, -1, drop = FALSE], 1,
-            function (row) paste(row[!is.na(row)], collapse = ";"))
+            biom$taxonomy[, ranks, drop = FALSE], 1,
+            function (row) paste(stats::na.omit(row), collapse = "; "))
 
-        drop <- Reduce(`|`, lapply(
-            patterns,
-            function (p) grepl(p, lineages, ignore.case = TRUE, fixed = FALSE)))
+        #    Which pattern took each ASV, and nothing for one that stays
+        matched <- vapply(
+            lineages,
+            function (lineage) paste(
+                Filter(function (p) grepl(p, lineage, ignore.case = TRUE),
+                       patterns),
+                collapse = ", "),
+            character(1))
 
-        keep <- biom$taxonomy[[".otu"]][!drop]
+        drop <- nzchar(matched)
 
-        if (length(keep) == 0)
+        if (all(drop))
             stop("excluding ", exclude_taxa, " removed every ASV")
 
-        message("Excluded ", sum(drop), " of ", length(drop),
-                " ASVs matching: ", exclude_taxa)
+        if (any(drop)) {
+            message("Excluded ", sum(drop), " of ", length(drop),
+                    " ASVs matching: ", exclude_taxa)
 
-        biom <- biom$clone()
-        biom$counts <- biom$counts[keep, , drop = FALSE]
+            #    What went, and which pattern took it. Every other filtering
+            #    step the pipeline runs publishes its own record of what it
+            #    removed; without this one the last step in the chain is the
+            #    only one a reader cannot trace.
+            dir.create(file.path(results_dir, "feature_table"),
+                       recursive = TRUE, showWarnings = FALSE)
+
+            #    taxa_sums() comes back in its own order, so the reads are
+            #    taken from it by ASV id rather than by position
+            utils::write.table(
+                data.frame(
+                    asv_id           = asvs[drop],
+                    matched          = unname(matched[drop]),
+                    taxonomy         = unname(lineages[drop]),
+                    reads            = as.integer(round(
+                                           rbiom::taxa_sums(biom, ".otu")[asvs[drop]])),
+                    stringsAsFactors = FALSE),
+                file.path(results_dir, "feature_table", "excluded_asvs.tsv"),
+                sep = "\t", quote = FALSE, row.names = FALSE, na = "")
+
+            #    Subsetting takes the samples the exclusion emptied with it:
+            #    rbiom drops any row or column left with no reads in it
+            biom <- biom[asvs[!drop], ]
+        }
     }
 }
 
-# Samples the exclusion emptied describe nothing, and a zero column breaks
-# every share taken against it
-depths <- rbiom::sample_sums(biom)
-if (any(depths <= 0)) {
-    kept <- names(depths)[depths > 0]
+# The sample order every table and every array below follows
+biom <- biom[, sort(biom$samples)]
 
-    if (length(kept) == 0) stop("no sample has any reads left")
+# The phylogeny and the sequences describe the ASVs of the stage they were
+# published at, so they are attached once the exclusion has taken its ASVs out.
+# rbiom refuses either if it covers only some of what is left - Faith's PD needs
+# every ASV on the tree - and a run reaching that has read them from a different
+# stage than the counts. Either one missing costs what is read off it rather
+# than the run, so it is reported and left out.
+attach_or_warn <- function (what, attach) {
+    attached <- try(attach(), silent = TRUE)
 
-    message("Dropped ", sum(depths <= 0), " sample(s) with no reads.")
-    biom <- biom$clone()
-    biom$counts <- biom$counts[, kept, drop = FALSE]
+    if (inherits(attached, "try-error"))
+        message("NOTE: leaving the ", what, " out: ",
+                conditionMessage(attr(attached, "condition")))
 }
+
+tree_file <- first_file("pplace", "asv_tree.newick")
+
+if (!is.null(tree_file))
+    attach_or_warn("phylogeny", function () biom$tree <- tree_file)
+
+seqs_file <- first_file(source$dir, source$fasta)
+
+#    read_fasta() returns a list, which the $sequences setter will not take;
+#    naming the ASVs it has to find also gets the fasta checked against them
+if (!is.null(seqs_file))
+    attach_or_warn("sequences", function ()
+        biom$sequences <- unlist(rbiom::read_fasta(seqs_file, ids = biom$otus)))
 
 
 # -- The feature table, three ways -------------------------------------------
@@ -277,108 +265,83 @@ if (any(depths <= 0)) {
 table_dir <- file.path(results_dir, "feature_table")
 dir.create(table_dir, recursive = TRUE, showWarnings = FALSE)
 
+# An output that cannot be written warns and leaves the rest of the run alone
+write_or_warn <- function (name, write) {
+    path <- file.path(table_dir, name)
+    unlink(path)
+
+    written <- try(write(path), silent = TRUE)
+
+    if (inherits(written, "try-error"))
+        message("WARNING: could not write ", name, ": ",
+                conditionMessage(attr(written, "condition")))
+}
+
+# The sequences of exactly the ASVs in the table beside it. Every fasta the
+# pipeline publishes belongs to some earlier stage of the filtering, so without
+# this one nothing on disk matches the feature table - the sequences are inside
+# the BIOM files, but only rbiom and biom-format will get them out.
+if (!is.null(biom$sequences))
+    write_or_warn(
+        "feature-sequences.fasta",
+        function (path) rbiom::write_fasta(biom, path))
+
 for (spec in list(
         list(file = "feature-table.tsv",       format = "tab"),
         list(file = "feature-table.json.biom", format = "json"),
-        list(file = "feature-table.hdf5.biom", format = "hdf5"))) {
+        list(file = "feature-table.hdf5.biom", format = "hdf5")))
 
-    path <- file.path(table_dir, spec$file)
-    unlink(path)
-
-    written <- try(
-        rbiom::write_biom(biom, path, format = spec$format),
-        silent = TRUE)
-
-    if (inherits(written, "try-error"))
-        message("WARNING: could not write ", spec$file, ": ",
-                conditionMessage(attr(written, "condition")))
-}
+    write_or_warn(spec$file, function (path)
+        rbiom::write_biom(biom, path, format = spec$format))
 
 
 # -- Counts collapsed to each rank -------------------------------------------
 
-# The lineage of every ASV, one column per rank, as plain strings. An
-# unclassified rank is empty rather than NA, so a truncated lineage reads the
-# same as it did in the tables this replaces.
-lineage_matrix <- function (biom) {
-    if (is.null(biom$taxonomy)) return (NULL)
+# One row per taxon, one column per sample, at one rank. Both tables and the
+# chart come out of taxa_matrix(), with unc = "grouped": an ASV the classifier
+# stopped short on is named for the deepest rank it did reach, so it is counted
+# at every rank rather than set aside at the ones it never got to.
+rank_matrix <- function (rank, ...)
+    rbiom::taxa_matrix(biom, rank = rank, unc = "grouped", ...)
 
-    mtx <- as.matrix(biom$taxonomy[, -1, drop = FALSE])
-    mtx[is.na(mtx)] <- ""
-    rownames(mtx) <- biom$taxonomy[[".otu"]]
+# What sits above each of those names, for the line under it in the legend.
+# taxa_map() groups the ASVs exactly as taxa_matrix() does, so the two agree on
+# what a row is called; asking it for the lineage as well gives the path above.
+#
+# A rank the classifier never reached carries the name of the last one it did,
+# repeated the rest of the way down, so the path is read off the runs of that
+# lineage rather than off its ranks - and the taxon's own name comes off the end
+# of it, since the legend has that on the line above.
+rank_lineages <- function (rank) {
+    labels <- as.character(rbiom::taxa_map(biom, rank = rank, unc = "grouped"))
+    paths  <- strsplit(
+        rbiom::taxa_map(biom, rank = rank, unc = "grouped", lineage = TRUE),
+        "; ", fixed = TRUE)
 
-    mtx
+    above <- vapply(
+        paths,
+        function (path) paste(head(rle(path)$values, -1), collapse = "; "),
+        character(1))
+
+    stats::setNames(above, labels)[!duplicated(labels)]
 }
 
-# What one ASV is called at a given rank: the deepest rank it was named to,
-# marked "Unclassified" when that is shallower than the rank being read, and
-# "Unassigned" when the classifier named nothing at all. A species is written
-# beside its genus, which is the only way an epithet reads as a species.
-taxon_label <- function (row, depth, genus_at, species_at) {
-    for (i in depth:1) {
-        if (!nzchar(row[[i]])) next
-
-        name <- row[[i]]
-
-        if (i == species_at && genus_at >= 1 && nzchar(row[[genus_at]]))
-            name <- paste(row[[genus_at]], name)
-
-        if (i != depth) name <- paste("Unclassified", name)
-
-        # A sequence placed in a domain and no deeper says as little as one
-        # placed nowhere
-        if (identical(name, "Unclassified Bacteria") ||
-            identical(name, "Unclassified Archaea")) name <- "Unassigned"
-
-        return (name)
-    }
-
-    "Unassigned"
-}
-
-# What sits above that name, for the line under it in the legend
-taxon_lineage <- function (row, depth, genus_at, species_at) {
-    deepest <- 0
-    for (i in depth:1) if (nzchar(row[[i]])) { deepest <- i; break }
-
-    if (deepest <= 1) return ("")
-
-    above <- row[1:(deepest - 1)]
-
-    # The genus belongs to the species name rather than to the path above it
-    if (deepest == species_at && genus_at >= 1 && genus_at < deepest)
-        above <- above[-genus_at]
-
-    paste(above[nzchar(above)], collapse = "; ")
-}
-
-lineages <- lineage_matrix(biom)
 levels   <- list()
 rank_dir <- file.path(results_dir, "abundance_tables")
 
-if (!is.null(lineages) && ncol(lineages) > 0) {
+if (length(ranks) > 0) {
 
     dir.create(rank_dir, recursive = TRUE, showWarnings = FALSE)
 
-    ranks      <- colnames(lineages)
-    genus_at   <- match("Genus",   ranks, nomatch = 0)
-    species_at <- match("Species", ranks, nomatch = 0)
-
-    mtx    <- as.matrix(biom$counts)
-    totals <- colSums(mtx)
-
     for (depth in seq_along(ranks)) {
 
-        labels <- vapply(
-            seq_len(nrow(lineages)),
-            function (i) taxon_label(lineages[i, ], depth, genus_at, species_at),
-            character(1))
-
-        collapsed <- rowsum(mtx[rownames(lineages), , drop = FALSE], labels)
+        rank <- ranks[[depth]]
 
         #    Published for anyone who wants every row, at every rank the
         #    classifier reached
-        stem <- sprintf("L%d-%s", depth, tolower(ranks[[depth]]))
+        stem      <- sprintf("L%d-%s", depth, tolower(rank))
+        collapsed <- rank_matrix(rank)
+        shares    <- rank_matrix(rank, transform = "percent")
 
         utils::write.table(
             data.frame(taxon = rownames(collapsed), collapsed,
@@ -386,72 +349,34 @@ if (!is.null(lineages) && ncol(lineages) > 0) {
             file.path(rank_dir, paste0(stem, "-counts.tsv")),
             sep = "\t", quote = FALSE, row.names = FALSE, na = "")
 
-        shares <- sweep(collapsed, 2, totals, "/")
-        shares[!is.finite(shares)] <- 0
-
         utils::write.table(
             data.frame(taxon = rownames(shares), round(shares, 8),
                        check.names = FALSE),
             file.path(rank_dir, paste0(stem, "-relative.tsv")),
             sep = "\t", quote = FALSE, row.names = FALSE, na = "")
 
-        #    And the eleven the chart draws, in ten-thousandths, with the tail
-        #    summed into "Other" so a column always closes at ten thousand
-        parts <- round(shares * 10000)
-        means <- rowMeans(parts)
-        order <- order(means, decreasing = TRUE)
-
-        drawn <- head(order, TOP_TAXA)
-        drawn <- drawn[means[drawn] > 0]
-
-        first_of <- match(rownames(parts)[drawn], labels)
-
-        taxa <- lapply(seq_along(drawn), function (k) {
-            i <- drawn[[k]]
-            list(
-                label      = rownames(parts)[[i]],
-                lineage    = taxon_lineage(lineages[first_of[[k]], ], depth,
-                                           genus_at, species_at),
-                mean       = unname(round(means[[i]])),
-                prevalence = unname(round(sum(parts[i, ] > 0) /
-                                          ncol(parts) * 100)))
-        })
-
-        values <- lapply(drawn, function (i) unname(parts[i, ]))
-
-        drawn_total <- Reduce(`+`, values, rep(0, ncol(parts)))
-        rest        <- 10000 - drawn_total
-
-        #    Every share is rounded on its own, so a column can come out a
-        #    ten-thousandth or two over. The excess comes off the tallest band
-        #    drawn, which is where it is least visible, rather than leaving the
-        #    stack taller than the axis it is read against.
-        if (any(rest < 0) && length(values) > 0) {
-            over <- which(rest < 0)
-
-            for (i in over) {
-                tallest <- which.max(vapply(values, function (v) v[[i]], numeric(1)))
-                values[[tallest]][[i]] <- values[[tallest]][[i]] + rest[[i]]
-            }
-
-            rest[over] <- 0
-        }
-
-        taxa[[length(taxa) + 1]] <- list(
-            label = "Other", lineage = "",
-            mean = max(0, 10000 - sum(round(means[drawn]))), prevalence = 0)
-        values[[length(values) + 1]] <- rest
-
         #    Domain is published like every other rank, but not offered as a
         #    chart: every sequence in a 16S run is expected to land in one
         if (depth < 2) next
 
+        #    And the eleven the chart draws, most abundant first, with
+        #    everything rarer summed into "Other", in the ten-thousandths of a
+        #    sample the chart is drawn in
+        drawn   <- round(10000 * rank_matrix(rank, taxa = TOP_TAXA,
+                                             other = TRUE,
+                                             transform = "percent"))
+        lineage <- c(rank_lineages(rank), Other = "")
+
         levels[[length(levels) + 1]] <- list(
-            rank   = depth,
-            name   = if (depth <= length(RANK_NAMES)) RANK_NAMES[[depth]]
-                     else ranks[[depth]],
-            taxa   = taxa,
-            values = values)
+            rank = depth,
+            name = rank,
+            taxa = lapply(rownames(drawn), function (label) list(
+                       label      = label,
+                       lineage    = unname(lineage[[label]]),
+                       mean       = round(mean(drawn[label, ])),
+                       prevalence = round(mean(drawn[label, ] > 0) * 100))),
+            values = lapply(rownames(drawn), function (label)
+                        I(as.integer(drawn[label, ]))))
     }
 }
 
@@ -468,8 +393,8 @@ if (!is.null(lineages) && ncol(lineages) > 0) {
 # On this data they collapse towards the observed count and describe the
 # denoiser rather than the sample.
 #
-# "depth" is rbiom's first column and is the read total, not an index; it is
-# reported as "reads" everywhere else here.
+# "reads" is the read total rather than an index, and comes from sample_sums()
+# rather than from adiv_matrix().
 ADIV <- list(
     list(key = "shannon",     title = "Shannon index",
          note = "richness and evenness together", places = 2),
@@ -498,12 +423,11 @@ ADIV <- list(
 
 # Faith's PD is the one index here that reads the phylogeny, so a run without
 # one simply does not offer it
-wanted <- vapply(ADIV, function (spec) spec$key, character(1))
-wanted <- setdiff(wanted, "reads")
+wanted <- setdiff(vapply(ADIV, function (spec) spec$key, character(1)), "reads")
 
 if (is.null(biom$tree)) wanted <- setdiff(wanted, "faith")
 
-adiv <- rbiom::adiv_matrix(biom, adiv = wanted)
+adiv <- rbiom::adiv_matrix(biom, adiv = wanted)[biom$samples, , drop = FALSE]
 
 # An index rbiom could not compute for this run is dropped rather than
 # published as a column of nothing
@@ -516,8 +440,8 @@ rounding <- function (key) {
 }
 
 alpha <- data.frame(
-    sample = rownames(adiv),
-    reads  = as.integer(round(adiv[, "depth"])),
+    sample = biom$samples,
+    reads  = as.integer(round(rbiom::sample_sums(biom))),
     stringsAsFactors = FALSE)
 
 for (key in have) {
@@ -534,8 +458,6 @@ for (key in have) {
 if ("observed" %in% have)
     colnames(alpha)[colnames(alpha) == "observed"] <- "observed_asvs"
 
-alpha <- alpha[order(alpha$sample), , drop = FALSE]
-
 utils::write.table(
     alpha, file.path(results_dir, "alpha_diversity.tsv"),
     sep = "\t", quote = FALSE, row.names = FALSE, na = "")
@@ -543,28 +465,19 @@ utils::write.table(
 
 # -- What the Overview draws -------------------------------------------------
 
-# The samples in the order the alpha table lists them, which is the order every
-# array below follows
-samples <- alpha$sample
-at      <- match(samples, colnames(biom$counts))
-
-reorder <- function (values) lapply(values, function (v) unname(v[at]))
-
-for (i in seq_along(levels)) levels[[i]]$values <- reorder(levels[[i]]$values)
-
 # Which indices the diversity chart offers, and how each is written out. Only
 # the ones this run actually has, in the order declared above.
 metric_specs <- Filter(
     function (spec) identical(spec$key, "reads") || spec$key %in% have,
     ADIV)
 
-alpha_values <- list()
-for (key in have)
-    alpha_values[[key]] <- alpha[[if (key == "observed") "observed_asvs" else key]]
+# Keyed by the name the chart asks for, taken from the column the table wrote
+alpha_values <- lapply(stats::setNames(nm = have), function (key)
+    I(alpha[[if (key == "observed") "observed_asvs" else key]]))
 
 data <- list(
-    samples = samples,
-    reads   = alpha$reads,
+    samples = I(alpha$sample),
+    reads   = I(alpha$reads),
     alpha   = alpha_values,
     metrics = metric_specs,
     levels  = levels)
@@ -574,60 +487,18 @@ data <- list(
 # here that looks outside the feature table.
 if (nzchar(method)) data <- c(list(method = method), data)
 
-# Hand-rolled rather than pulling in a JSON package: the shapes here are known,
-# and the container stays to rbiom and what it needs.
-json <- local({
-
-    esc <- function (s) {
-        s <- gsub("\\", "\\\\", s, fixed = TRUE)
-        s <- gsub("\"", "\\\"", s, fixed = TRUE)
-        s <- gsub("\n", "\\n",  s, fixed = TRUE)
-        s <- gsub("\t", "\\t",  s, fixed = TRUE)
-        paste0("\"", s, "\"")
-    }
-
-    enc <- function (x) {
-        if (is.null(x))                       return ("null")
-        if (is.list(x) && !is.null(names(x))) {
-            return (paste0("{", paste(
-                sprintf("%s:%s", esc(names(x)), vapply(x, enc, character(1))),
-                collapse = ","), "}"))
-        }
-        if (is.list(x))
-            return (paste0("[", paste(vapply(x, enc, character(1)),
-                                      collapse = ","), "]"))
-        if (is.logical(x))   return (if (length(x) == 1) tolower(as.character(x))
-                                     else paste0("[", paste(tolower(as.character(x)), collapse = ","), "]"))
-        if (is.character(x)) return (if (length(x) == 1) esc(x)
-                                     else paste0("[", paste(vapply(x, esc, character(1)), collapse = ","), "]"))
-
-        x <- ifelse(is.finite(x), x, 0)
-        num <- format(x, scientific = FALSE, trim = TRUE, digits = 10)
-        if (length(x) == 1) num else paste0("[", paste(num, collapse = ","), "]")
-    }
-
-    enc(data)
-})
-
-writeLines(json, plot_data)
+# I() marks the values that stay an array however few entries they have;
+# everything else here is a scalar, which is what the page reads it as.
+writeLines(
+    jsonlite::toJSON(data, auto_unbox = TRUE, digits = NA, na = "null"),
+    plot_data)
 
 
 # -- What the sidebar counts -------------------------------------------------
 
-# How far down the taxonomy the classifier got, as the number of ASVs that
-# reached each rank
-classified <- function (rank) {
-    if (is.null(lineages)) return (NULL)
-
-    at <- match(rank, colnames(lineages), nomatch = 0)
-    if (at == 0) return (NULL)
-
-    sum(nzchar(lineages[rownames(biom$counts), at]))
-}
-
 stats <- list(
-    samples = length(samples),
-    asvs    = nrow(biom$counts))
+    samples = biom$n_samples,
+    asvs    = biom$n_otus)
 
 # Every read that reached an ASV and survived the taxon exclusion, which is what
 # the sidebar's "Retained reads" bar is taken against the run's input total
@@ -637,12 +508,13 @@ stats$reads_min    <- min(alpha$reads)
 stats$reads_median <- round(stats::median(alpha$reads))
 stats$reads_max    <- max(alpha$reads)
 
+# How far down the taxonomy the classifier got, as the number of ASVs that
+# reached each rank
 for (entry in list(c("phylum_asvs", "Phylum"),
                    c("genus_asvs",  "Genus"),
-                   c("species_asvs", "Species"))) {
-    value <- classified(entry[[2]])
-    if (!is.null(value)) stats[[entry[[1]]]] <- value
-}
+                   c("species_asvs", "Species")))
+    if (entry[[2]] %in% ranks)
+        stats[[entry[[1]]]] <- sum(!is.na(biom$taxonomy[[entry[[2]]]]))
 
 writeLines(
     vapply(names(stats),
@@ -650,5 +522,5 @@ writeLines(
            character(1)),
     stats_file)
 
-message("Wrote the feature table and its summaries for ", length(samples),
-        " samples and ", nrow(biom$counts), " ASVs.")
+message("Wrote the feature table and its summaries for ", biom$n_samples,
+        " samples and ", biom$n_otus, " ASVs.")

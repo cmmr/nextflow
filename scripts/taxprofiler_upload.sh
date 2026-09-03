@@ -226,7 +226,7 @@ dashboard_index_view   "File Explorer"
 #    looking at, are files a run produces rather than files a run is read
 #    through - the file index lists every one of them, under the heading that
 #    says what it is for. Everything this run published, the reads included,
-#    comes down through the one button under these rows.
+#    comes down through the one button at the top of the page.
 if ! dashboard_button "taxpasta/bracken_*.tsv" "Species abundance table"; then
     #    "|| true" because a glob that names nothing is a false return, and a
     #    run whose bracken step did not produce a table has nothing left to fall

@@ -9,10 +9,13 @@
 
   This is templates/redesign/code.html split in two: the navigation bar stays
   here and everything under it is a page of its own, loaded into the frame
-  below. The bar therefore survives navigation - the run's name, its views and
-  its deletion date are the one piece of chrome that does not reload - and each
-  view is a whole page rather than a panel: overview.html for the run itself,
-  the pipeline's own reports as they were written, files.html for the index.
+  below. What the bar carries is held to the same width as the page under it, so
+  the views line up with that page's heading and the deletion date with the
+  "Download everything" button beneath it. The bar survives navigation - the
+  run's name, its views and its deletion date are the one piece of chrome that
+  does not reload - and each view is a whole page rather than a panel:
+  overview.html for the run itself, the pipeline's own reports as they were
+  written, files.html for the index.
 
   The links carry target="view", so they load into that frame with or without
   scripting; the script remembers which one the bar was asked for in the
@@ -49,7 +52,7 @@ __COMMON_HEAD__
 <body class="bg-surface-bg-light text-on-surface font-body-md h-screen overflow-hidden flex flex-col">
 <!-- TopNavBar -->
 <header class="bg-primary text-on-primary docked full-width top-0 z-50 shadow-md">
-<div class="flex flex-wrap justify-between items-center gap-y-2 w-full px-margin-page py-3">
+<div class="flex flex-wrap justify-between items-center gap-y-2 w-full max-w-7xl mx-auto px-margin-page py-3">
 <div class="flex flex-wrap items-center gap-3 md:gap-5">
 <div class="text-[17px] leading-6 font-bold tracking-[0.14em] text-on-primary md:border-r md:border-white/15 md:pr-5">CMMR</div>
 <nav class="flex flex-wrap gap-x-1 gap-y-1 md:gap-x-2" id="views">__NAV__</nav>

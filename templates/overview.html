@@ -46,10 +46,8 @@
 
   "Download everything" is the one archive this run published to the guest
   collection - the reads it was given and this whole dashboard in a single zip.
-  Beside it is a control that copies that address instead, for a reader fetching
-  it from a shell on the machine the data is going to. It is written hidden and
-  the script at the foot of this page reveals it, since a clipboard is the one
-  thing here a reader without scripting cannot be offered.
+  It sits at the top right of the page, under the deletion date the bar above
+  carries.
 
   Placeholders are COMMON_HEAD, TASK_NAME, SUBTITLE, PLOT_DATA, DOWNLOADS,
   ZIP_BUTTON, STATS, YEAR and FOOTER_NOTE, each wrapped in doubled
@@ -194,9 +192,12 @@ canvas { display: block; width: 100%; }
 <!-- Main Content Canvas -->
 <main class="flex-1 min-h-0 flex flex-col bg-surface relative overflow-y-auto lg:overflow-hidden">
 <div class="p-margin-page max-w-7xl mx-auto w-full flex flex-col gap-4 lg:flex-1 lg:min-h-0">
-<div class="shrink-0 min-w-0">
+<div class="shrink-0 flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+<div class="min-w-0">
 <h1 class="font-headline-lg text-headline-lg font-bold tracking-tight text-primary">__TASK_NAME__</h1>
 <p class="font-body-sm text-body-sm text-on-surface-variant mt-1">__SUBTITLE__</p>
+</div>
+__ZIP_BUTTON__
 </div>
 <div class="flex flex-col lg:flex-row gap-gutter-grid lg:flex-1 lg:min-h-0">
 <div class="flex-1 min-w-0 flex flex-col lg:min-h-0">
@@ -268,13 +269,10 @@ them.</p>
 <aside class="w-full lg:w-80 flex flex-col gap-gutter-grid shrink-0 lg:min-h-0">
 <div class="bg-surface-container-lowest rounded-xl border border-outline-variant p-padding-card shadow-sm shrink-0">
 <h3 class="text-base font-semibold text-primary mb-3 flex items-center gap-2">
-<span class="material-symbols-outlined text-[20px]">download</span>Quick Downloads
+<span class="material-symbols-outlined text-[20px]">table_view</span>Feature Table
       </h3>
 <div class="flex flex-col gap-0.5">
 __DOWNLOADS__
-</div>
-<div class="mt-3 pt-3 border-t border-outline-variant/50">
-__ZIP_BUTTON__
 </div>
 </div>
 __STATS__
@@ -295,79 +293,6 @@ __STATS__
 <div class="tip" hidden id="tip"></div>
 
 <script>
-// The control beside "Download everything", which copies that archive's address
-// rather than starting it - for a reader who would rather pull it down on the
-// machine the data is going to than through the browser they are reading this
-// in. The button is written hidden and revealed here, so a reader whose browser
-// cannot run this is not offered a control that does nothing.
-//
-// The button itself is left alone: it is a plain link to a file the collection
-// answers as an attachment, so a click, a middle-click or a shared address all
-// start the same download with nothing scripted in the way.
-(function () {
-  var copy = document.getElementById("copy-link");
-
-  if (!copy) return;
-
-  var url = copy.getAttribute("data-url") || "";
-  var icon = copy.querySelector(".material-symbols-outlined");
-  var restore = null;
-
-  if (!url) return;
-
-  copy.style.display = "flex";
-
-  // navigator.clipboard is not given to a page read off disk, where this same
-  // dashboard is opened out of the zip it is offering. Selecting a detached
-  // field and copying it is what works in both places.
-  function toClipboard(text) {
-    var field = document.createElement("textarea");
-    var done = false;
-
-    field.value = text;
-    field.setAttribute("readonly", "");
-    field.style.position = "fixed";
-    field.style.top = "-1000px";
-    document.body.appendChild(field);
-    field.select();
-
-    try { done = document.execCommand("copy"); } catch (error) { done = false; }
-
-    document.body.removeChild(field);
-
-    return done;
-  }
-
-  function say(name, title) {
-    icon.textContent = name;
-    copy.title = title;
-
-    clearTimeout(restore);
-    restore = setTimeout(function () {
-      icon.textContent = "content_copy";
-      copy.title = "Copy the download address";
-    }, 2000);
-  }
-
-  function fallback() {
-    if (toClipboard(url)) say("done", "Address copied");
-    else                  say("error", "Could not copy: " + url);
-  }
-
-  copy.addEventListener("click", function () {
-    // Granted on a secure origin and refused off disk, and it can be refused on
-    // one too, so the selection-and-copy above is what a rejection falls back on
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(url).then(function () {
-        say("done", "Address copied");
-      }, fallback);
-      return;
-    }
-
-    fallback();
-  });
-})();
-
 // The "details" link a statistics bar can carry, which shows and hides the
 // stages behind that bar's reading. Both are written hidden - the link because
 // a reader without scripting cannot work it, the stages because they are an

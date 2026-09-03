@@ -29,9 +29,12 @@
 #
 # nix-build leaves a ./result symlink pointing at the image tarball. That path
 # is a /nix/store path *inside* the sandbox, so it has to be read against the
-# sandbox root to name a file the host can see:
+# sandbox root to name a file the host can see. Plain readlink: -f would
+# canonicalize, which needs /nix/store to exist on the host, and it does not.
 #
-#     apptainer build rbiom.sif "docker-archive:$NIX_DIR$(readlink -f result)"
+#     TARBALL="$NIX_DIR$(readlink result)"
+#     APPTAINER_TMPDIR="$NEXTFLOW_DIR/tmp" apptainer build rbiom.sif \
+#         "docker-archive:$TARBALL"
 #     rm -f result
 #
 # Then move the image where the pipeline looks for it and point .env at it:
@@ -142,6 +145,14 @@ in
 pkgs.dockerTools.buildLayeredImage {
   name = "rbiom";
   tag = "latest";
+
+  # Uncompressed, which is what apptainer's docker-archive reader wants - its
+  # own documented input is the plain tar "docker image save" writes. The
+  # default here is gzip, and apptainer rejects that with "gzip: invalid
+  # header". Nothing is lost: this tarball exists for exactly one command
+  # before it becomes a .sif, so compressing it only buys work at both ends.
+  # It costs transient store space - a couple of gigabytes rather than one.
+  compressor = "none";
 
   # "contents", not "copyToRoot" - the layered builder symlink-joins these into
   # the image root itself, so /bin ends up holding R, Rscript, bash and

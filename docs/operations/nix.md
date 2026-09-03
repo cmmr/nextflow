@@ -89,12 +89,40 @@ sandbox, and there is no `/nix/store` on the host — so the path has to be read
 against the sandbox root before apptainer can find the file:
 
 ```bash
-apptainer build rbiom.sif "docker-archive:$NIX_DIR$(readlink -f result)"
+TARBALL="$NIX_DIR$(readlink result)"
 ```
 
-`readlink -f` resolves the symlink without requiring the target to exist, which
-is why this works from the host at all. Prefixing `$NIX_DIR` turns the
-in-sandbox path into the host path for the same bytes, so nothing is copied.
+```bash
+ls -lh "$TARBALL"
+```
+
+```bash
+export APPTAINER_TMPDIR="$NEXTFLOW_DIR/tmp"
+```
+
+```bash
+apptainer build rbiom.sif "docker-archive:$TARBALL"
+```
+
+Prefixing `$NIX_DIR` turns the in-sandbox path into the host path for the same
+bytes, so nothing is copied.
+
+**Plain `readlink`, not `readlink -f`.** `-f` canonicalizes, and canonicalizing
+requires every component but the last to exist — `/nix/store/` does not exist on
+the host, which is the whole reason the prefix is needed. So `-f` fails, prints
+nothing, and `$TARBALL` silently becomes `$NIX_DIR` on its own: a directory that
+apptainer then rejects for reasons that have nothing to do with the real
+mistake. Plain `readlink` reads the link's target verbatim and asks nothing of
+it. `readlink -m` would also do. The `ls` above is there to catch this before
+apptainer does.
+
+`APPTAINER_TMPDIR` matters because the conversion unpacks every layer before it
+writes the squashfs, and the R image is around a gigabyte compressed. The
+default is `/tmp`, which on a login node is usually far too small for that, and
+the failure is a bare "no space left on device" partway through.
+
+The tarball's timestamp reads `Dec 31 1969`. That is nix zeroing mtimes so the
+build is reproducible, not a corrupt file.
 
 Then put it where the pipeline looks and clear up:
 
@@ -157,9 +185,14 @@ pkgs/development/r-modules/bioc-packages.json
 **Build the OCI tarball, not a SIF.** nixpkgs has `singularity-tools.buildImage`,
 but it runs the build inside a QEMU VM with a disk size given up front, and an R
 closure overruns the default. `dockerTools.buildLayeredImage` and then
-`apptainer build` is the route with fewer moving parts. Note it takes
-`contents`, a plain list of derivations — `copyToRoot` belongs to
-`dockerTools.buildImage`, and the layered builder rejects it.
+`apptainer build` is the route with fewer moving parts. Two things about it:
+
+- It takes `contents`, a plain list of derivations. `copyToRoot` belongs to
+  `dockerTools.buildImage`, and the layered builder rejects unknown arguments.
+- Set `compressor = "none"`. The default is gzip, and apptainer's
+  `docker-archive` reader wants the plain tar that `docker image save` writes —
+  a gzipped one fails with `gzip: invalid header`. The tarball is converted to a
+  `.sif` immediately, so compressing it only buys work at both ends.
 
 **Being in nixpkgs is not a promise that it builds.** The R sets are generated
 from CRAN and Bioconductor metadata rather than from anything that compiled, so

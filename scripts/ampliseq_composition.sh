@@ -247,9 +247,18 @@ fi
 EXCLUDE_TAXA=$(state_get "manifest.params.exclude_taxa") || true
 : "${EXCLUDE_TAXA:=none}"
 
+#    How the numbers were made, for the caption under the composition chart.
+#    Passed in rather than edited into the rendered file afterwards: a database
+#    title is free to contain the characters sed reads as syntax.
+if ! METHOD=$(composition_method); then
+    warn "The classification database could not be named; the Overview will not state it."
+    METHOD=""
+fi
+
 if ! R_OUTPUT=$(apptainer exec -B /data "$RBIOM_CONTAINER" \
         Rscript --vanilla "$TABLES_SCRIPT" \
-            "$RESULTS_DIR" "$PLOT_DATA" "$TABLE_STATS" "$EXCLUDE_TAXA" 2>&1); then
+            "$RESULTS_DIR" "$PLOT_DATA" "$TABLE_STATS" \
+            "$EXCLUDE_TAXA" "$METHOD" 2>&1); then
     warn "The feature table could not be assembled; the Overview will show no plots:"$'\n'"$R_OUTPUT"
     rm -f "$PLOT_DATA"
     exit 0
@@ -263,24 +272,7 @@ if [[ ! -s "$PLOT_DATA" ]]; then
     exit 0
 fi
 
-# 2. What produced those numbers, written into the same file for the caption
-#    under the composition chart. A run whose record does not name a database
-#    leaves the line off rather than guessing.
-if METHOD=$(composition_method); then
-    if ! METHOD_JSON=$(printf '%s' "$METHOD" | jq -R -s .); then
-        warn "The method line could not be encoded; the Overview will not state it."
-    else
-        #    Inserted after the opening brace, which is where every other key
-        #    of this object begins
-        if ! sed -i "1s|^{|{\"method\":$METHOD_JSON,|" "$PLOT_DATA"; then
-            warn "The method line could not be added; the Overview will not state it."
-        fi
-    fi
-else
-    warn "The classification database could not be named; the Overview will not state it."
-fi
-
-# 3. The counts the sidebar reports, from the R script and from the summary
+# 2. The counts the sidebar reports, from the R script and from the summary
 if [[ -s "$TABLE_STATS" ]]; then
     if ! write_run_statistics; then
         warn "The run statistics could not be counted; the dashboard will show fewer numbers."

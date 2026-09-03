@@ -191,8 +191,10 @@ closure overruns the default. `dockerTools.buildLayeredImage` and then
   `dockerTools.buildImage`, and the layered builder rejects unknown arguments.
 - Set `compressor = "none"`. The default is gzip, and apptainer's
   `docker-archive` reader wants the plain tar that `docker image save` writes —
-  a gzipped one fails with `gzip: invalid header`. The tarball is converted to a
-  `.sif` immediately, so compressing it only buys work at both ends.
+  a gzipped one fails with `gzip: invalid header`. That message is misleading:
+  the archive is valid gzip and `file` reads it happily; the reader just will
+  not take a compressed one. The tarball becomes a `.sif` immediately, so
+  compressing it only buys work at both ends.
 
 **Being in nixpkgs is not a promise that it builds.** The R sets are generated
 from CRAN and Bioconductor metadata rather than from anything that compiled, so

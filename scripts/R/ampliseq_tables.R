@@ -38,8 +38,10 @@
 # requester's behalf. The read depth every index was computed at is published
 # beside it, and the feature table is there to be rarefied downstream.
 #
-# Usage: ampliseq_tables.R <results_dir> <plot_data.json> <statistics.tsv> [exclude_taxa]
-#        exclude_taxa is a comma-separated list, or "none"
+# Usage: ampliseq_tables.R <results_dir> <plot_data.json> <statistics.tsv>
+#            [exclude_taxa] [method]
+#        exclude_taxa is a comma-separated list, or "none"; method is the
+#        sentence the composition chart is captioned with, or empty
 #
 # Requires: rbiom (>= 3.1.0), and h5lite for the HDF5 output
 
@@ -54,6 +56,7 @@ results_dir  <- sub("/$", "", args[[1]])
 plot_data    <- args[[2]]
 stats_file   <- args[[3]]
 exclude_taxa <- if (length(args) >= 4) args[[4]] else "none"
+method       <- if (length(args) >= 5) args[[5]] else ""
 
 # The eleven the palette carries; everything rarer is summed into "Other"
 TOP_TAXA <- 11
@@ -522,6 +525,11 @@ data <- list(
     metrics = metric_specs,
     levels  = levels)
 
+# How those numbers were made, for the caption under the composition chart. Read
+# off DADA2's own record of the database by the caller, which is the only thing
+# here that looks outside the feature table.
+if (nzchar(method)) data <- c(list(method = method), data)
+
 # Hand-rolled rather than pulling in a JSON package: the shapes here are known,
 # and the container stays to rbiom and what it needs.
 json <- local({
@@ -576,6 +584,10 @@ classified <- function (rank) {
 stats <- list(
     samples = length(samples),
     asvs    = nrow(biom$counts))
+
+# Every read that reached an ASV and survived the taxon exclusion, which is what
+# the sidebar's "Retained reads" bar is taken against the run's input total
+stats$reads_retained <- sum(alpha$reads)
 
 stats$reads_min    <- min(alpha$reads)
 stats$reads_median <- round(stats::median(alpha$reads))

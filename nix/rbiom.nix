@@ -147,9 +147,15 @@ pkgs.dockerTools.buildLayeredImage {
   tag = "latest";
 
   # Uncompressed, which is what apptainer's docker-archive reader wants - its
-  # own documented input is the plain tar "docker image save" writes. The
-  # default here is gzip, and apptainer rejects that with "gzip: invalid
-  # header". Nothing is lost: this tarball exists for exactly one command
+  # own documented input is the plain tar "docker image save" writes.
+  #
+  # The default here is gzip, and apptainer refuses it with "gzip: invalid
+  # header". That message is misleading: the gzip pigz writes is valid, and
+  # file(1) reads it back without complaint. The reader simply does not accept
+  # a compressed archive. So this is not a corruption to be fixed by
+  # recompressing - leave it uncompressed.
+  #
+  # Nothing is lost either way: the tarball exists for exactly one command
   # before it becomes a .sif, so compressing it only buys work at both ends.
   # It costs transient store space - a couple of gigabytes rather than one.
   compressor = "none";

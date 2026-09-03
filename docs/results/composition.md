@@ -383,14 +383,30 @@ and how many reached an ASV, the thinnest, middle and deepest sample, and what
 share of the reads the classifier could place at family, at genus and at species.
 Reads in come from `overall_summary.tsv` — cutadapt's own count of what it
 processed, or DADA2's input for a run that skipped primer trimming — and
-everything else from the ASV and relative abundance tables.
+everything else from the ASV and relative abundance tables. It also names what
+the reads were, as *"16S V4 · Illumina, 2 × 250 bp"*: the region and the
+instrument off the manifest, and the chemistry off
+`multiqc/multiqc_data/multiqc_fastqc.txt`, which is where FastQC's own reading of
+each raw file survives the pruning that takes the `_fastqc.zip` files. A length
+FastQC states as a range — `35-251`, for files something has already trimmed —
+is read at the top of that range, since the chemistry is the longest read in the
+file. The mate is the trailing `_1` / `_2` of the name MultiQC tabulated it
+under, so a run whose two mates were read to different lengths says
+*"251 + 151 bp"* rather than averaging them.
+
+**A nanopore run is named by its instrument alone** — *"16S full length · Oxford
+Nanopore"*. The sequencer reads whatever molecule it is given to whatever length
+that molecule is, so its read lengths are a distribution rather than a chemistry,
+and any one number for them would describe the run less well than saying nothing.
+The distribution itself is in the MultiQC report, which is where it can be read
+as one.
 
 **taxprofiler** reports the reads the run started with, how many of them came
 through quality filtering, and how many were left once the host was taken out;
 the thinnest, middle and deepest sample; and the share of what reached the
 classifier that it resolved to phylum, to genus and to species. It also names
 what the reads were — the platform the samplesheet measured them into, and the
-chemistry fastp read off them, as *"Illumina, 2 x 151 bp"* — which is the note
+chemistry fastp read off them, as *"Illumina, 2 × 151 bp"* — which is the note
 the read totals are headed with.
 
 **Every bar is what was still in hand at that step**, never what was taken out.

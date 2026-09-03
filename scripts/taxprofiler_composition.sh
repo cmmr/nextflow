@@ -315,7 +315,7 @@ fastp_totals() {
     ' "$@"
 }
 
-# The chemistry fastp read off the files, as a reader says it: "2 x 151 bp" for
+# The chemistry fastp read off the files, as a reader says it: "2 × 151 bp" for
 # a paired run, "151 bp" for a single-ended one. fastp states it as "paired end
 # (151 cycles + 151 cycles)", so the cycle counts are what is read out of it.
 #
@@ -340,7 +340,7 @@ read_chemistry() {
             }
 
             if (n == 1)                                printf "%d bp", cycles[1]
-            else if (n >= 2 && cycles[1] == cycles[2]) printf "2 x %d bp", cycles[1]
+            else if (n >= 2 && cycles[1] == cycles[2]) printf "2 × %d bp", cycles[1]
             else if (n >= 2)                           printf "%d + %d bp", cycles[1], cycles[2]
         }'
 }

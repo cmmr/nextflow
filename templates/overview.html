@@ -630,9 +630,16 @@ __STATS__
   // chart. So the axis is cut to the tallest column and rounded up to a step a
   // reader can read whole percentages off - which lands back on the familiar
   // 0-25-50-75-100 for a run that named most of what it sequenced.
+  //
+  // A column is a share of its sample, so 100% is the top there is. Each band is
+  // rounded to a ten-thousandth on its own, which can carry a full column a part
+  // or two past ten thousand; without this the axis would round that up to the
+  // next step it knows and draw a gridline at 125%.
   function scale(highest) {
     var steps = [100, 200, 500, 1000, 2000, 2500];
     var step = steps[steps.length - 1];
+
+    highest = Math.min(highest, 10000);
 
     for (var i = 0; i < steps.length; i++) {
       if (highest <= steps[i] * 4) { step = steps[i]; break; }

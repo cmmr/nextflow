@@ -139,11 +139,12 @@ and the reference database above the classification. Each is read off the run's
 `.manifest`, the same record a rerun is rebuilt from and published beside the
 page as `run_state.json`, so the page
 and the record cannot disagree — and a setting the manifest does not carry
-leaves its note off rather than naming an empty one. On a taxprofiler run the
-note over the read totals is what the reads were — *"Illumina, 2 x 151 bp"*,
-*"Nanopore"* — which is measured off the reads rather than declared, so it comes
-off `.statistics` with the numbers under it; the classifier and database sit over
-the classification.
+leaves its note off rather than naming an empty one. The note over the read
+totals ends with what the reads were — *"16S V4 · Illumina, 2 × 250 bp"*,
+*"Illumina, 2 × 151 bp"*, *"Nanopore"* — and that part is measured off the reads
+rather than declared, so it comes off `.statistics` with the numbers under it:
+fastp read it for a taxprofiler run, FastQC by way of MultiQC for an ampliseq
+one. The classifier and database sit over the classification.
 
 **A footer** saying when the run finished, which pipeline version produced it,
 and the uid. That last is there so a reader asking us about these results has

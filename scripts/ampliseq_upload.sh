@@ -292,19 +292,35 @@ read_stage_reading() {
 
 declare -A STATS=()
 
-#    Which stages the read totals break down into, and in which order, is the
-#    one reading here that is not a number: ampliseq_composition.sh took it off
-#    the summary's own header, since the two sequencing paths do not run their
-#    steps in the same order.
+#    The two readings here that are not numbers, both worked out by
+#    ampliseq_composition.sh: which stages the read totals break down into and
+#    in which order, taken off the summary's own header since the two sequencing
+#    paths do not run their steps in the same order, and the chemistry FastQC
+#    read off the raw files.
 READ_STAGES=""
+CHEMISTRY=""
 
 while IFS=$'\t' read -r STAT_KEY STAT_VALUE; do
-    if [[ "$STAT_KEY" == "read_stages" ]]; then
-        READ_STAGES="$STAT_VALUE"
-    elif [[ "$STAT_VALUE" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-        STATS["$STAT_KEY"]="$STAT_VALUE"
-    fi
+    case "$STAT_KEY" in
+        read_stages)    READ_STAGES="$STAT_VALUE" ;;
+        read_chemistry) CHEMISTRY="$STAT_VALUE" ;;
+        *)
+            if [[ "$STAT_VALUE" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+                STATS["$STAT_KEY"]="$STAT_VALUE"
+            fi
+            ;;
+    esac
 done < <(state_get_tsv "$STATS_KEY")
+
+#    "Illumina, 2 × 250 bp" - the chemistry follows the instrument it came off,
+#    and stands on its own for a run that recorded no instrument
+if [[ -n "$CHEMISTRY" ]]; then
+    if [[ -n "$PLATFORM" ]]; then
+        SEQUENCED+=", $CHEMISTRY"
+    else
+        SEQUENCED+="${SEQUENCED:+ · }$CHEMISTRY"
+    fi
+fi
 
 if [[ -n "${STATS[reads_retained]:-}" ]]; then
     RETAINED=${STATS[reads_retained]}

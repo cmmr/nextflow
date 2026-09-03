@@ -68,6 +68,10 @@ readonly OVERALL_SUMMARY="$RESULTS_DIR/overall_summary.tsv"
 # database the run used
 readonly TAXONOMY_DIR="$RESULTS_DIR/dada2"
 
+# What FastQC measured off each raw FASTQ, as MultiQC tabulated it. The zips
+# FastQC wrote are pruned from the results; this table is not.
+readonly FASTQC_TABLE="$RESULTS_DIR/multiqc/multiqc_data/multiqc_fastqc.txt"
+
 # What the Overview's two plots are drawn from, in the run directory rather than
 # in the results: it is that page's own data, and every number in it comes from
 # a table that is published
@@ -174,6 +178,81 @@ taxonomy_database() {
     return 1
 }
 
+# The chemistry FastQC read off the raw files, as a reader says it: "2 × 250 bp"
+# for a paired run, "250 bp" for a single-ended one, and "250 + 150 bp" where the
+# two mates were read to different lengths.
+#
+# FastQC states a length as one number or as a range - "35-251" for files a
+# trimmer has already been over - and the chemistry is the longest read in the
+# file, so the top of the range is what is taken.
+#
+# A mate is read off the trailing _1 / _2 MultiQC names the file by, and the
+# commonest length of each mate is the run's, since one file sequenced
+# differently does not rename the run. Ties go to the longer, or the page would
+# come out differently on two runs of the same data.
+#
+# A nanopore run has none of this to report. Its read lengths are a wide
+# distribution rather than a chemistry - the sequencer reads whatever molecule it
+# is given, to whatever length that molecule is - so any one number for them
+# would describe the run less well than saying nothing. Such a run is named by
+# its instrument alone.
+read_chemistry() {
+    local chemistry
+
+    [[ "$(state_get "manifest.params.sequencing_type")" == "nanopore" ]] && return 1
+
+    [[ -r "$FASTQC_TABLE" ]] || return 1
+
+    chemistry=$(LC_ALL=C awk -F'	' '
+        function longest(s,   n, top) {
+            while (match(s, /[0-9]+/)) {
+                n = substr(s, RSTART, RLENGTH) + 0
+                if (n > top) top = n
+                s = substr(s, RSTART + RLENGTH)
+            }
+
+            return top
+        }
+
+        NR == 1 {
+            for (i = 1; i <= NF; i++) at[$i] = i
+
+            if (!("Sample" in at) || !("Sequence length" in at)) exit
+
+            named = 1
+            next
+        }
+
+        named {
+            mate = ($(at["Sample"]) ~ /_2$/) ? 2 : 1
+            seen[mate, longest($(at["Sequence length"]))]++
+        }
+
+        END {
+            for (key in seen) {
+                split(key, part, SUBSEP)
+                mate = part[1] + 0
+                bp   = part[2] + 0
+
+                if (seen[key] < most[mate]) continue
+                if (seen[key] == most[mate] && bp <= len[mate]) continue
+
+                most[mate] = seen[key]
+                len[mate]  = bp
+            }
+
+            if (!len[1])                  exit
+            else if (!len[2])             printf "%d bp", len[1]
+            else if (len[1] == len[2])    printf "2 × %d bp", len[1]
+            else                          printf "%d + %d bp", len[1], len[2]
+        }
+    ' "$FASTQC_TABLE")
+
+    [[ -n "$chemistry" ]] || return 1
+
+    printf '%s' "$chemistry"
+}
+
 # How those numbers were made, for the caption under the composition chart
 composition_method() {
     local database
@@ -184,10 +263,16 @@ composition_method() {
 }
 
 # Everything the sidebar reports: what the R script counted off the feature
-# table, and the read totals counted off the summary beside it.
+# table, the chemistry FastQC read off the raw files, and the read totals counted
+# off the summary beside them.
 write_run_statistics() {
+    local CHEMISTRY
+
     {
         cat "$TABLE_STATS"
+
+        CHEMISTRY=$(read_chemistry) && printf 'read_chemistry	%s
+' "$CHEMISTRY"
 
         if [[ -r "$OVERALL_SUMMARY" ]]; then
             printf 'reads_total\t%s\n' "$(total_input_reads)"

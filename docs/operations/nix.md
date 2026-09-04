@@ -5,10 +5,11 @@ add another.
 
 Most of what the pipelines run comes from [BioContainers](https://biocontainers.pro)
 as `docker://quay.io/biocontainers/...`, pinned by tag. That works for anything
-bioconda packages. It does not cover the R toolchain
-[`ampliseq_tables.R`](../results/composition.md) needs — rbiom, h5lite and
-phyloseq are CRAN and Bioconductor packages, on conda-forge rather than bioconda,
-so no BioContainer is built for them.
+bioconda packages. It does not cover the R toolchain the two table builders —
+[`ampliseq_tables.R`](../results/composition.md) and
+[`taxprofiler_tables.R`](../pipelines/taxprofiler.md#the-feature-tables) — need:
+rbiom, h5lite and phyloseq are CRAN and Bioconductor packages, on conda-forge
+rather than bioconda, so no BioContainer is built for them.
 
 Nix covers it. Every one of those packages is in nixpkgs, at the versions we
 want, and a pinned revision describes the whole closure — R itself, every

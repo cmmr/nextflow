@@ -15,6 +15,9 @@ scripts/
   R/ampliseq_tables.R      Assembles a run's feature table with rbiom and writes
                            everything read off it. Runs in the nix/rbiom.nix
                            image; see docs/results/composition.md.
+  R/taxprofiler_tables.R   The same for a shotgun run: the merged profile as a
+                           BIOM with a tree in it, and Faith's PD off that tree.
+                           Same image.
   pipeline_params.sh       The parameter map a params file is built from. Likewise.
   wrike_api.sh             Wrike REST helpers and object IDs. Likewise sourced.
   publish_dashboard.sh     Builds the three pages a run is read through, and
@@ -35,7 +38,10 @@ scripts/
   ampliseq_composition.sh  Works out what the Overview plots. Run by ampliseq_upload.sh.
   ampliseq_upload.sh       POST_PROCESS_CMDS for the ampliseq pipeline.
   taxprofiler_samplesheet.sh  PRE_PROCESS_CMDS for the taxprofiler pipelines.
-  taxprofiler_composition.sh  Works out what the Overview plots. Run by taxprofiler_upload.sh.
+  taxprofiler_composition.sh  Works out what the Overview plots and builds the
+                           feature tables. Run by taxprofiler_upload.sh.
+  taxprofiler_taxonomy_tree.sh  The NCBI taxonomy over the taxa one run saw, as a
+                           tree with branch lengths. Run by the above.
   taxprofiler_upload.sh       POST_PROCESS_CMDS for the taxprofiler pipelines.
   build_host_reference.sh     Builds a host-depletion reference. Setup, not part of a run.
   build_16s_reference.sh      Builds the 16S landmarks the region detector aligns to. Likewise.

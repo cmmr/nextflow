@@ -1,5 +1,6 @@
 tool,db_name,db_params,db_type,db_path
-kraken2,pluspf_20260626,,short;long,/data/prod/nextflow/db/kraken2/pluspf_20260626
-bracken,pluspf_20260626_bracken,;-r 150,short,/data/prod/nextflow/db/kraken2/pluspf_20260626
+kraken2,pluspf_20260626,--confidence 0.1,short;long,/data/prod/nextflow/db/kraken2/pluspf_20260626
+bracken,pluspf_20260626_bracken,--confidence 0.1;-r 150,short,/data/prod/nextflow/db/kraken2/pluspf_20260626
 metaphlan,mpa_vJun23_CHOCOPhlAnSGB_202403,,short,/data/prod/nextflow/db/metaphlan/mpa_vJun23_CHOCOPhlAnSGB_202403
 motus,db_mOTU_v3.1.0,,short;long,/data/prod/nextflow/db/motus/db_mOTU_v3.1.0/db_mOTU
+sylph,gtdb_r220,,short,/data/prod/nextflow/db/sylph/gtdb-r220-c200-dbv1.syldb

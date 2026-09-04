@@ -66,15 +66,27 @@
 # fastp left and before the host was taken out - that is where taxprofiler wires
 # it - so a sample sequenced twice keeps its deepest run rather than an average.
 #
+# The feature tables a requester loads are built here too, by
+# scripts/R/taxprofiler_tables.R in the rbiom container: the merged profile as a
+# BIOM with a tree in it, so that UniFrac and Faith's PD can be computed from a
+# shotgun run the way they can from a 16S one. Two trees carry that - the NCBI
+# taxonomy over the taxa the run saw, built by taxprofiler_taxonomy_tree.sh, and
+# the phylogeny MetaPhlAn publishes with its own database - and Faith's PD comes
+# back from both into the table below, with the share of the run's reads each
+# reading covers beside it.
+#
 # Usage:     taxprofiler_composition.sh [results_dir]
 #            defaults to ./results, the outdir set in the taxprofiler params file
 # Called by: taxprofiler_upload.sh, before it indexes and uploads the results
-# Requires:  GNU awk; jq, for the fastp reports
+# Requires:  GNU awk; jq, for the fastp reports; apptainer and the rbiom
+#            container, for the feature tables
+# Runs:      taxprofiler_taxonomy_tree.sh and scripts/R/taxprofiler_tables.R
 # Outputs:   <results_dir>/alpha_diversity.tsv
+#            <results_dir>/feature_table/
 #            ./composition_data.json
 #            the "statistics" of ./run_state.json
-# Env:       NEXTFLOW_DIR, the log/warn/fail helpers and the run state helpers,
-#            sourced from .env
+# Env:       NEXTFLOW_DIR, RBIOM_CONTAINER, the log/warn/fail helpers and the run
+#            state helpers, sourced from .env
 
 set -euo pipefail
 
@@ -104,6 +116,20 @@ readonly MOTUS_DIR="$RESULTS_DIR/motus"
 readonly MOTUS_SUFFIX=".out"
 
 readonly ALPHA_TABLE="$RESULTS_DIR/alpha_diversity.tsv"
+
+# What the feature tables are built from and by. The database sheet is looked
+# for in the results first, where taxprofiler_upload.sh copies it, so a rerun
+# over a finished results folder finds the databases that run actually used.
+readonly TAXPASTA_DIR="$RESULTS_DIR/taxpasta"
+readonly METAPHLAN_DIR="$RESULTS_DIR/metaphlan"
+readonly DB_SHEET="taxprofiler_database.csv"
+
+readonly TABLES_SCRIPT="$NEXTFLOW_DIR/scripts/R/taxprofiler_tables.R"
+readonly TREE_SCRIPT="$NEXTFLOW_DIR/scripts/taxprofiler_taxonomy_tree.sh"
+
+# R with rbiom and h5lite, built from nix/rbiom.nix. Set in .env; a path to a
+# .sif, or any address apptainer can pull.
+readonly RBIOM_CONTAINER="${RBIOM_CONTAINER:-}"
 
 # What the Overview's two plots are drawn from, in the run directory rather than
 # in the results: it is that page's own data, and every number in it comes from
@@ -159,9 +185,13 @@ MOTUS_TABLE="$WORK/motus.tsv"
 # are collected in
 MOTUS_SET="$WORK/motus_reports.tsv"
 
-# All four are opened by name inside awk, by passes that are already reading
+# Faith's PD off each of the two trees, as scripts/R/taxprofiler_tables.R
+# returns it: sample, the index, and the abundance it was computed over
+FAITH_TABLE="$WORK/faith.tsv"
+
+# All five are opened by name inside awk, by passes that are already reading
 # other files
-export PROFILE_SET READ_TOTALS NONPAREIL_TABLE MOTUS_TABLE
+export PROFILE_SET READ_TOTALS NONPAREIL_TABLE MOTUS_TABLE FAITH_TABLE
 
 # Which tool and database the plots are drawn from, as the sidebar names them
 PROFILE_TOOL=""
@@ -498,6 +528,167 @@ motus_table() {
     ' "$MOTUS_SET" "${reports[@]}" | LC_ALL=C sort -k1,1
 }
 
+# -- The feature tables, and the phylogenetic diversity read off them ---------
+
+# The first file a glob matches, or nothing
+first_match() {
+    local path
+
+    for path in "$@"; do
+        [[ -r "$path" ]] || continue
+
+        printf '%s' "$path"
+        return 0
+    done
+
+    return 1
+}
+
+# One column of one tool's row in the database sheet this run was given
+database_field() {
+    local tool="$1" want="$2"
+    local sheet
+
+    sheet=$(first_match "$RESULTS_DIR/$DB_SHEET" "$DB_SHEET") || return 1
+
+    LC_ALL=C awk -F, -v tool="$tool" -v want="$want" '
+        NR == 1 { for (i = 1; i <= NF; i++) idx[$i] = i; next }
+        idx["tool"] && idx[want] && $idx["tool"] == tool { print $idx[want]; exit }
+    ' "$sheet"
+}
+
+# The taxon ids of a merged taxpasta table, one per line. A kraken2 table
+# carries a row at every rank, and a clade count plus the counts inside it is
+# the same read twice, so only its species rows are taken.
+profile_taxon_ids() {
+    local path="$1" species_only="$2"
+
+    LC_ALL=C awk -F'\t' -v species_only="$species_only" '
+        NR == 1 {
+            for (i = 1; i <= NF; i++) idx[$i] = i
+            if (!idx["taxonomy_id"]) exit 1
+            next
+        }
+
+        species_only == 1 && idx["rank"] && $idx["rank"] != "species" { next }
+
+        $idx["taxonomy_id"] ~ /^[0-9]+$/ && $idx["taxonomy_id"] != "0" \
+            && $idx["taxonomy_id"] != "1" { print $idx["taxonomy_id"] }
+    ' "$path"
+}
+
+# Whether the server can run the table builder at all. A server that cannot is
+# our problem rather than the requester's, so it warns: the run still publishes
+# everything the pipeline wrote and every plot on the Overview.
+can_build_tables() {
+    if ! command -v apptainer > /dev/null; then
+        warn "apptainer is not installed; no feature table will be built."
+        return 1
+    fi
+
+    if [[ -z "$RBIOM_CONTAINER" ]]; then
+        warn "RBIOM_CONTAINER is not set; no feature table will be built." \
+             "Build it from nix/rbiom.nix - see docs/operations/nix.md - and set" \
+             "RBIOM_CONTAINER in .env to the image."
+        return 1
+    fi
+
+    if [[ "$RBIOM_CONTAINER" == /* && ! -e "$RBIOM_CONTAINER" ]]; then
+        warn "There is no image at $RBIOM_CONTAINER; no feature table will be" \
+             "built. Build it from nix/rbiom.nix - see docs/operations/nix.md."
+        return 1
+    fi
+
+    if [[ ! -r "$TABLES_SCRIPT" ]]; then
+        warn "The table builder is missing from the server ($TABLES_SCRIPT)."
+        return 1
+    fi
+
+    return 0
+}
+
+# The BIOM files a requester loads, and Faith's PD off each tree into
+# $FAITH_TABLE. Everything here is optional: a run missing a profile, a
+# taxonomy dump or the MetaPhlAn phylogeny publishes the tables it can and
+# leaves those columns empty.
+build_feature_tables() {
+    local profile species_only=0
+    local taxonomy_dir metaphlan_db metaphlan_name metaphlan_tree=""
+    local metaphlan_profile="" tree="" lineage=""
+    local ids="$WORK/taxon_ids.txt"
+
+    can_build_tables || return 1
+
+    if profile=$(first_match "$TAXPASTA_DIR"/bracken_*.tsv); then
+        :
+    elif profile=$(first_match "$TAXPASTA_DIR"/kraken2_*.tsv); then
+        species_only=1
+    else
+        profile=""
+        log "No merged taxpasta profile under $TAXPASTA_DIR; no feature table will be built."
+    fi
+
+    # The taxonomy dump the profile's own taxon ids come from. The Kraken2
+    # database carries nodes.dmp and names.dmp, which is why taxpasta is pointed
+    # at it too.
+    taxonomy_dir=$(database_field kraken2 db_path) || taxonomy_dir=""
+
+    if [[ -n "$profile" && -r "$taxonomy_dir/nodes.dmp" ]]; then
+        if ! profile_taxon_ids "$profile" "$species_only" > "$ids"; then
+            warn "The taxon ids could not be read from ${profile##*/}."
+            : > "$ids"
+        fi
+
+        if [[ -s "$ids" ]]; then
+            tree="$WORK/taxonomy.newick"
+            lineage="$WORK/lineage.tsv"
+
+            log "Building the taxonomy tree for $(wc -l < "$ids") taxa..."
+
+            if ! "$TREE_SCRIPT" "$taxonomy_dir" "$ids" "$lineage" > "$tree"; then
+                warn "The taxonomy tree could not be built; the feature table will carry none."
+                tree=""
+                lineage=""
+            fi
+        fi
+    elif [[ -n "$profile" ]]; then
+        warn "No nodes.dmp under \"$taxonomy_dir\"; the feature table will carry no tree."
+    fi
+
+    # MetaPhlAn's own phylogeny, fetched into its database directory by
+    # fetch_taxprofiler_db.sh and named after the release
+    metaphlan_db=$(database_field metaphlan db_path) || metaphlan_db=""
+    metaphlan_name=$(database_field metaphlan db_name) || metaphlan_name=""
+
+    if [[ -n "$metaphlan_db" && -n "$metaphlan_name" \
+          && -r "$metaphlan_db/$metaphlan_name.nwk" ]]; then
+        metaphlan_tree="$metaphlan_db/$metaphlan_name.nwk"
+        metaphlan_profile=$(first_match "$METAPHLAN_DIR"/metaphlan_*_combined_reports.txt) \
+            || metaphlan_profile=""
+    else
+        log "No MetaPhlAn phylogeny beside its database; no SGB table will be built."
+    fi
+
+    if [[ -z "$profile" && -z "$metaphlan_profile" ]]; then
+        return 1
+    fi
+
+    local output
+
+    # $WORK holds the tree and the lineage table, and is outside /data
+    if ! output=$(apptainer exec -B /data -B "$WORK" "$RBIOM_CONTAINER" \
+            Rscript --vanilla "$TABLES_SCRIPT" \
+                "$RESULTS_DIR" "$FAITH_TABLE" "$profile" "$species_only" \
+                "$tree" "$lineage" "$metaphlan_profile" "$metaphlan_tree" 2>&1); then
+        warn "The feature tables could not be assembled:"$'\n'"$output"
+        return 1
+    fi
+
+    [[ -n "$output" ]] && log "$output"
+
+    return 0
+}
+
 # Per-sample diversity, as the table published with the results, in the sample
 # order everything else on the page follows.
 #
@@ -538,17 +729,45 @@ write_alpha_table() {
                 motus[field[1]] = field[2]
             }
 
+            # sample, Faith's PD on the taxonomy, the reads it covered, Faith's
+            # PD on the MetaPhlAn phylogeny, and the abundance that one covered
+            while ((getline line < ENVIRON["FAITH_TABLE"]) > 0) {
+                split(line, field, "\t")
+                if (field[1] == "sample") continue
+
+                faith[field[1]]     = field[2]
+                placed[field[1]]    = field[3]
+                faith_sgb[field[1]] = field[4]
+                sgb_pct[field[1]]   = field[5]
+            }
+
             print "sample\treads\tnonpareil_diversity\tcoverage_pct\tredundancy_pct" \
-                  "\tmodel_fit\teffort_gbp\teffort_95_gbp\tobserved_motus"
+                  "\tmodel_fit\teffort_gbp\teffort_95_gbp\tobserved_motus" \
+                  "\tfaith_pd\tfaith_pd_basis_pct\tfaith_pd_sgb\tfaith_pd_sgb_basis_pct"
+        }
+
+        # What share of the reads that reached the classifier ended up on the
+        # tree the index was computed over. A phylogenetic diversity over half a
+        # sample is a different reading from one over all of it, and this is
+        # what lets a reader tell them apart.
+        function basis(name,   total) {
+            total = depth[name] + 0
+
+            if (!(name in placed) || placed[name] == "NA" || total <= 0) return "NA"
+
+            return sprintf("%.2f", placed[name] * 100 / total)
         }
 
         {
             name = $1
 
-            printf "%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", name, depth[name] + 0, \
+            printf "%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", \
+                name, depth[name] + 0, \
                 reading(diversity[name]), reading(coverage[name]), \
                 reading(redundancy[name]), reading(fit[name]), reading(spent[name]), \
-                reading(needed[name]), reading(motus[name])
+                reading(needed[name]), reading(motus[name]), \
+                reading(faith[name]), basis(name), \
+                reading(faith_sgb[name]), reading(sgb_pct[name])
         }
     ' "$PROFILE_SET"
 }
@@ -614,6 +833,17 @@ composition_metrics() {
         metrics+=('{"key":"effort95","title":"Effort for 95% coverage","note":"the sequencing this sample would take to reach 95% coverage","places":1,"unit":" Gbp","source":"Nonpareil"}')
     fi
 
+    # The two that do read a classification database, so they come after the
+    # three that do not. Each describes only the classified part of the sample;
+    # alpha_diversity.tsv carries the share it was computed over beside it.
+    if alpha_has_column faith_pd_sgb; then
+        metrics+=('{"key":"faithsgb","title":"Faith'"'"'s PD (phylogeny)","note":"branch length of the published species phylogeny this sample covers, over the species MetaPhlAn detected","places":2,"source":"MetaPhlAn"}')
+    fi
+
+    if alpha_has_column faith_pd; then
+        metrics+=('{"key":"faith","title":"Faith'"'"'s PD (taxonomy)","note":"branch length of the NCBI taxonomy this sample covers, over the reads that were classified - a taxonomic diversity rather than an evolutionary one","places":2,"source":"'"$PROFILE_TOOL"'"}')
+    fi
+
     (( ${#metrics[@]} > 0 )) || return 1
 
     metrics+=('{"key":"reads","title":"Read depth","note":"reads that reached the classifier","integer":true,"scale":"sqrt","source":"the Kraken2 reports"}')
@@ -661,9 +891,10 @@ alpha_json() {
 
             for (i = 1; i <= n; i++) out = out (i > 1 ? "," : "") json_string(name[i])
 
-            printf "%s],%s,\"alpha\":{%s,%s,%s,%s}", out, series("reads", 2), \
+            printf "%s],%s,\"alpha\":{%s,%s,%s,%s,%s,%s}", out, series("reads", 2), \
                 series("diversity", 3), series("coverage", 4), \
-                series("effort95", 8), series("motus", 9)
+                series("effort95", 8), series("motus", 9), \
+                series("faith", 10), series("faithsgb", 12)
         }
     ' "$ALPHA_TABLE"
 }
@@ -1058,6 +1289,15 @@ else
     log "No mOTUs profiles under $MOTUS_DIR; the cluster counts will be missing."
 fi
 
+# 3. The feature tables, and the phylogenetic diversity read off their trees.
+#    Ahead of the diversity table, whose last four columns come back from them.
+: > "$FAITH_TABLE"
+
+build_feature_tables \
+    || log "No feature table was built; the diversity table keeps its other columns."
+
+[[ -s "$FAITH_TABLE" ]] || log "This run measured no phylogenetic diversity."
+
 if ! write_alpha_table > "$ALPHA_TABLE"; then
     warn "The diversity table could not be built; the Overview will show no plots."
     rm -f "$ALPHA_TABLE"
@@ -1083,7 +1323,7 @@ DATA="\"feature\":{\"one\":\"species\",\"many\":\"species\",\"depth\":\"reads th
 # encodes it, since it is a sentence being written into JSON.
 DATA="\"method\":$(composition_method | jq -R -s .),$DATA"
 
-# 3. Composition, every rank in the order a reader reads them
+# 4. Composition, every rank in the order a reader reads them
 LEVELS=""
 
 if ! LEVELS=$(levels_json "${PROFILES[@]}"); then
@@ -1093,7 +1333,7 @@ fi
 
 DATA+=",\"levels\":[$LEVELS]"
 
-# 4. The run's headline numbers: the same reports, and the ones each step of the
+# 5. The run's headline numbers: the same reports, and the ones each step of the
 #    run wrote about its own reads
 if ! write_run_statistics; then
     warn "The run statistics could not be counted; the dashboard will show fewer numbers."

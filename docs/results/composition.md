@@ -11,7 +11,7 @@ panel with a tab-link for each of those two questions.
 | Pipeline | Script | Reads |
 |---|---|---|
 | ampliseq | [`ampliseq_composition.sh`](../../scripts/ampliseq_composition.sh), which runs [`ampliseq_tables.R`](../../scripts/R/ampliseq_tables.R) | DADA2's own tables, assembled into one feature table by rbiom |
-| taxprofiler | [`taxprofiler_composition.sh`](../../scripts/taxprofiler_composition.sh) | the per-sample Bracken and Kraken2 reports for composition, nonpareil and mOTUs for diversity |
+| taxprofiler | [`taxprofiler_composition.sh`](../../scripts/taxprofiler_composition.sh), which runs [`taxprofiler_tables.R`](../../scripts/R/taxprofiler_tables.R) | the per-sample Bracken and Kraken2 reports for composition, nonpareil and mOTUs for diversity, and the merged profiles for the feature tables |
 
 Both write the same file in the same shape, so there is one Overview rather than
 one per pipeline. What the two differ on, the plot data says rather than the
@@ -104,8 +104,9 @@ indices those are is the run's own: an amplicon run offers the Shannon index
 first and then every other index rbiom computes on a denoised table — observed
 ASVs, read depth, Simpson, inverse Simpson, Faith's PD, Berger-Parker,
 Brillouin, Fisher's alpha, Margalef, Menhinick and McIntosh; a shotgun run
-offers what nonpareil and mOTUs measured, none of which needs a classification
-database, and opens on estimated coverage. Under it, the caption
+offers what nonpareil and mOTUs measured first, none of which needs a
+classification database, then the two Faith's PDs that do, and opens on
+estimated coverage. Under it, the caption
 says what the index is and — where the run's data names one — which tool
 measured it, and a table gives the lowest, median and highest value **of that
 index**. The other indices are a select away, and three numbers for an index the
@@ -341,6 +342,34 @@ reference genome, which is where a Kraken2 database is blind by construction.
 Richness is the count of its clusters with a non-zero read count; its
 `unassigned` row is not a cluster and is left out.
 
+**Two phylogenetic indices sit beside them**, computed by
+[`scripts/R/taxprofiler_tables.R`](../pipelines/taxprofiler.md#the-feature-tables)
+off the two trees that run publishes:
+
+| Column | Tree | What it is |
+|---|---|---|
+| `faith_pd` | the NCBI taxonomy over the species this run saw, branch lengths by rank depth | a taxonomic diversity |
+| `faith_pd_sgb` | the maximum-likelihood phylogeny MetaPhlAn publishes with its database | an evolutionary one |
+
+Unlike everything above them, **both read a classification database**, so both
+describe only the part of the sample that was classified. That is why each has a
+basis column beside it — `faith_pd_basis_pct` is the share of the reads reaching
+the classifier that ended up on the tree, `faith_pd_sgb_basis_pct` the share of
+MetaPhlAn's profile that did. A phylogenetic index over 40% of a sample is a
+different reading from one over 90%, and the pair is what lets someone tell them
+apart. Nonpareil's estimated coverage in the same row says how much of the
+community the *sequencing* reached, which is the other half of the caveat.
+
+**The unclassified reads are not on either tree, and are not put there.** There
+is nowhere to put them: both Faith's PD and UniFrac are sums over branches, and
+a read that reached no taxon has no branch. Hanging an `unclassified` tip off the
+root would be worse than leaving it out — it is present in every sample, so it
+adds nothing to unweighted UniFrac and a constant to every Faith's PD, while in
+weighted UniFrac it would be the largest mass in the sample on a single branch,
+and what it would be measuring is the reference database rather than the
+community. So the metrics are computed over what was classified and the fraction
+is published beside them.
+
 **Nothing is rarefied.** Rarefaction exists to make counts comparable between
 groups and there are no groups here — and nonpareil's readings are estimates of a
 whole community rather than counts to be levelled.
@@ -384,10 +413,13 @@ share of the reads the classifier could place at family, at genus and at species
 Reads in come from `overall_summary.tsv` — cutadapt's own count of what it
 processed, or DADA2's input for a run that skipped primer trimming — and
 everything else from the ASV and relative abundance tables. It also names what
-the reads were, as *"16S V4 · Illumina, 2 × 250 bp"*: the region and the
-instrument off the manifest, and the chemistry off
+the reads were, over the totals counted off them, as *"Illumina, 2 × 250 bp"*:
+the instrument off the manifest, and the chemistry off
 `multiqc/multiqc_data/multiqc_fastqc.txt`, which is where FastQC's own reading of
-each raw file survives the pruning that takes the `_fastqc.zip` files. A length
+each raw file survives the pruning that takes the `_fastqc.zip` files. The region
+is stated over the classification instead, as *"16S V4 · SILVA 138.2"* — it is
+what the primers amplified, and so the whole of what the classifier had to name.
+A length
 FastQC states as a range — `35-251`, for files something has already trimmed —
 is read at the top of that range, since the chemistry is the longest read in the
 file. The mate is the trailing `_1` / `_2` of the name MultiQC tabulated it

@@ -6,8 +6,11 @@
 # Date:   August 20th, 2026
 #
 # One-time cluster setup, run once per database rather than as part of any
-# pipeline. Downloads a database, verifies every file against the publisher's own
-# checksums, and writes a manifest recording what was fetched and from where.
+# pipeline. Downloads a database, verifies every file against a checksum, and
+# writes a manifest recording what was fetched and from where. Two files have no
+# publisher checksum: the MetaPhlAn phylogeny, pinned below by the md5 of the
+# file as fetched, and the sylph sketch, pinned by its byte size with the sha256
+# of what arrived recorded in its manifest.
 #
 # Everything taxprofiler reads is fetched fresh by this script even when a copy
 # already exists elsewhere on the cluster, so that every database a run touches
@@ -24,17 +27,22 @@
 #   <release>/                the database, as the pipeline reads it
 #   <release>.manifest.json   source URLs, checksums, sizes, and when it was fetched
 #
-# Usage:     fetch_taxprofiler_db.sh <kraken2|metaphlan|motus>
+# sylph is the exception to the directory: its database is one .syldb file, with
+# the sylph-tax metadata table beside it.
+#
+# Usage:     fetch_taxprofiler_db.sh <kraken2|metaphlan|motus|sylph>
 #
 #            Submit it rather than running it on the login node; the downloads
 #            are large and slow:
 #            sbatch --cpus-per-task=4 --mem=8G --time=24:00:00 \
 #                scripts/fetch_taxprofiler_db.sh kraken2
 #
-# Requires:  curl, jq, md5sum, tar
+# Requires:  curl, jq, md5sum, sha256sum, tar
 # Env:       NEXTFLOW_DIR and the log/warn/fail helpers, sourced from .env
 #
-# Existing output is left alone; remove db/<tool>/<release> to re-fetch.
+# Existing output is left alone; remove db/<tool>/<release> to re-fetch. The one
+# exception is the MetaPhlAn phylogeny: a database installed before this script
+# fetched one gets the tree on its own rather than a 26 GB re-download.
 
 set -euo pipefail
 
@@ -53,6 +61,16 @@ readonly KRAKEN2_BASE="https://genome-idx.s3.amazonaws.com/kraken"
 # the 4.1.1 taxprofiler 2.0.1 runs. This is the newest 4.1.1 accepts.
 readonly METAPHLAN_INDEX="mpa_vJun23_CHOCOPhlAnSGB_202403"
 readonly METAPHLAN_BASE="https://cmprod1.cibio.unitn.it/biobakery4/metaphlan_databases"
+
+# The maximum-likelihood phylogeny of this release's SGBs, 36,273 tips labelled
+# with the bare SGB number that the t__SGB rows of a MetaPhlAn profile carry.
+# scripts/R/taxprofiler_tables.R reads it into the BIOM the run publishes, which
+# is what makes UniFrac and Faith's PD computable over that profile.
+#
+# The publisher lists no checksum for it, so this md5 is the file as fetched on
+# 2026-09-04 rather than one they gave; a mismatch means the release moved under
+# its own name and the tree wants re-checking against the database beside it.
+readonly METAPHLAN_TREE_MD5="b141b49693f541ae491605d2f1cfc981"
 
 # mOTUs. The database is version-locked to the tool: taxprofiler 2.0.1 runs
 # MOTUS_PROFILE in the motus 3.1.0 container, and mOTUs checks the version file
@@ -73,13 +91,28 @@ readonly MOTUS_MD5="f841c36150025af837f7a9a358c9a3c3"
 # directory holds it rather than being it.
 readonly MOTUS_DB_DIR="db_mOTU"
 
+# sylph, profiling against GTDB rather than RefSeq. The .syldb is a k-mer sketch
+# of every GTDB r220 species representative at c=200, which is the compression
+# the publisher recommends for short reads; the metadata table is what sylph-tax
+# turns sylph's genome accessions into lineages with.
+#
+# The sketch is served without a checksum, so its size is pinned instead and the
+# sha256 of what arrived goes in the manifest. The metadata table is on Zenodo,
+# which publishes an md5.
+readonly SYLPH_RELEASE="gtdb-r220-c200-dbv1"
+readonly SYLPH_URL="https://faust.compbio.cs.cmu.edu/sylph-stuff/$SYLPH_RELEASE.syldb"
+readonly SYLPH_BYTES=14061572967
+readonly SYLPH_TAXONOMY="gtdb_r220_metadata.tsv.gz"
+readonly SYLPH_TAXONOMY_URL="https://zenodo.org/records/14320496/files/$SYLPH_TAXONOMY"
+readonly SYLPH_TAXONOMY_MD5="ad14ff1636ad93506da1f46b65494fb8"
+
 if [[ $# -ne 1 ]]; then
-    fail "Usage: $0 <kraken2|metaphlan|motus>"
+    fail "Usage: $0 <kraken2|metaphlan|motus|sylph>"
 fi
 
 TOOL="$1"
 
-for tool in curl jq md5sum tar; do
+for tool in curl jq md5sum sha256sum tar; do
     command -v "$tool" > /dev/null || fail "Required tool '$tool' is not installed."
 done
 
@@ -129,6 +162,19 @@ record_source() {
         --arg md5 "$2" \
         --arg bytes "$3" \
         '. + [{url: $url, md5: $md5, bytes: ($bytes | tonumber)}]')
+}
+
+# The tip labels of a newick tree, one per line. Records start after "(" or ",",
+# so a leaf reads "NAME:length" while a closing branch reads ")support:length"
+# and is dropped by trimming from its ")".
+tree_tips() {
+    awk 'BEGIN { RS = "[(,]" }
+        {
+            sub(/\).*/, "")
+            sub(/:.*/, "")
+            gsub(/[ \t\r\n;]/, "")
+            if ($0 != "") print
+        }' "$1"
 }
 
 write_manifest() {
@@ -217,9 +263,46 @@ fetch_kraken2() {
     log "  manifest:              $manifest"
 }
 
+# The SGB phylogeny for a release, into that release's directory, checked for a
+# plausible tip count before it is called done. Sets METAPHLAN_TREE and
+# METAPHLAN_TREE_TIPS rather than printing them: record_source has to reach the
+# manifest, which a subshell would swallow.
+METAPHLAN_TREE=""
+METAPHLAN_TREE_TIPS=0
+
+fetch_metaphlan_tree() {
+    local out_dir="$1"
+    local tree_url="$METAPHLAN_BASE/$METAPHLAN_INDEX.nwk"
+
+    METAPHLAN_TREE="$out_dir/$METAPHLAN_INDEX.nwk"
+
+    download_verified "$tree_url" "$METAPHLAN_TREE" "$METAPHLAN_TREE_MD5"
+    record_source "$tree_url" "$METAPHLAN_TREE_MD5" "$(stat -c%s "$METAPHLAN_TREE")"
+
+    METAPHLAN_TREE_TIPS=$(tree_tips "$METAPHLAN_TREE" | sort -u | wc -l)
+
+    if (( METAPHLAN_TREE_TIPS <= 10000 )); then
+        rm -f "$METAPHLAN_TREE"
+        fail "The MetaPhlAn phylogeny has only $METAPHLAN_TREE_TIPS tips; the download is incomplete."
+    fi
+}
+
 fetch_metaphlan() {
     local out_dir="$NEXTFLOW_DIR/db/metaphlan/$METAPHLAN_INDEX"
     local manifest="$NEXTFLOW_DIR/db/metaphlan/$METAPHLAN_INDEX.manifest.json"
+
+    # A database installed before the phylogeny was part of this script gets the
+    # phylogeny on its own rather than a 26 GB re-download
+    if [[ -d "$out_dir" && ! -e "$out_dir/$METAPHLAN_INDEX.nwk" ]]; then
+        log "$METAPHLAN_INDEX is already installed; fetching only its phylogeny..."
+
+        fetch_metaphlan_tree "$out_dir"
+
+        log "Fetched the MetaPhlAn phylogeny: $METAPHLAN_TREE ($METAPHLAN_TREE_TIPS tips)."
+        log "  Its source and checksum are not in $manifest; that manifest describes"
+        log "  the database as it was fetched. Remove the directory and re-run to rebuild both."
+        return 0
+    fi
 
     [[ -e "$out_dir" ]] && fail "$out_dir already exists; remove it to re-fetch."
 
@@ -267,12 +350,61 @@ fetch_metaphlan() {
     compgen -G "$out_dir/*.bt2l" > /dev/null || compgen -G "$out_dir/*.bt2" > /dev/null \
         || fail "The MetaPhlAn database has no bowtie2 index; the download is incomplete."
 
+    # The SGB phylogeny, published beside the database rather than inside it
+    fetch_metaphlan_tree "$out_dir"
+
     write_manifest "$METAPHLAN_INDEX" "$out_dir" "$manifest" \
-        "Newest database MetaPhlAn 4.1.1 accepts, which is the version nf-core/taxprofiler 2.0.1 pins. mpa_latest currently names a newer database requiring MetaPhlAn 4.2."
+        "Newest database MetaPhlAn 4.1.1 accepts, which is the version nf-core/taxprofiler 2.0.1 pins. mpa_latest currently names a newer database requiring MetaPhlAn 4.2. $METAPHLAN_INDEX.nwk is the SGB phylogeny for this release, $METAPHLAN_TREE_TIPS tips; its md5 is recorded from the file as fetched, the publisher lists none."
 
     log "Fetched $METAPHLAN_INDEX:"
     log "  db_path:  $out_dir"
+    log "  phylogeny: $METAPHLAN_TREE ($METAPHLAN_TREE_TIPS tips)"
     log "  manifest: $manifest"
+}
+
+fetch_sylph() {
+    local out_dir="$NEXTFLOW_DIR/db/sylph"
+    local sketch="$out_dir/$SYLPH_RELEASE.syldb"
+    local taxonomy="$out_dir/$SYLPH_TAXONOMY"
+    local manifest="$out_dir/$SYLPH_RELEASE.manifest.json"
+
+    [[ -e "$sketch" ]] && fail "$sketch already exists; remove it to re-fetch."
+
+    mkdir -p "$out_dir"
+    require_free_space "$out_dir" 20
+
+    download_verified "$SYLPH_TAXONOMY_URL" "$taxonomy" "$SYLPH_TAXONOMY_MD5"
+    record_source "$SYLPH_TAXONOMY_URL" "$SYLPH_TAXONOMY_MD5" "$(stat -c%s "$taxonomy")"
+
+    # Downloaded straight into place: 13 GB has nowhere else to go, and a
+    # partial file is caught by the size check below rather than by a checksum
+    log "Downloading $SYLPH_RELEASE.syldb (13 GB)..."
+    if ! curl -sSL --fail --retry 3 -o "$sketch" "$SYLPH_URL"; then
+        rm -f "$sketch"
+        fail "Could not download $SYLPH_URL"
+    fi
+
+    local bytes
+    bytes=$(stat -c%s "$sketch")
+
+    if [[ "$bytes" != "$SYLPH_BYTES" ]]; then
+        rm -f "$sketch"
+        fail "$SYLPH_RELEASE.syldb came back $bytes bytes; $SYLPH_BYTES were expected."
+    fi
+
+    log "Hashing $SYLPH_RELEASE.syldb..."
+    local sha256
+    sha256=$(sha256sum "$sketch" | cut -d" " -f1)
+
+    record_source "$SYLPH_URL" "sha256:$sha256" "$bytes"
+
+    write_manifest "$SYLPH_RELEASE" "$out_dir" "$manifest" \
+        "sylph sketch of the GTDB r220 species representatives at c=200, and the sylph-tax metadata table that names them. The sketch is published without a checksum, so the sha256 recorded here is of the file as fetched; its size is pinned in the script."
+
+    log "Fetched $SYLPH_RELEASE:"
+    log "  db_path:        $sketch"
+    log "  sylph_taxonomy: $taxonomy"
+    log "  manifest:       $manifest"
 }
 
 fetch_motus() {
@@ -342,5 +474,6 @@ case "$TOOL" in
     kraken2)   fetch_kraken2 ;;
     metaphlan) fetch_metaphlan ;;
     motus)     fetch_motus ;;
-    *)         fail "Unknown database '$TOOL'. Use kraken2, metaphlan or motus." ;;
+    sylph)     fetch_sylph ;;
+    *)         fail "Unknown database '$TOOL'. Use kraken2, metaphlan, motus or sylph." ;;
 esac

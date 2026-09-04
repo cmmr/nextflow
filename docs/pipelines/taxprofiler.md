@@ -2,8 +2,9 @@
 
 Shotgun metagenomic profiling with
 [nf-core/taxprofiler](https://nf-co.re/taxprofiler), running kraken2, bracken,
-metaphlan and mOTUs over the same lab samplesheet the ampliseq pipeline takes,
-with nonpareil measuring how much of each community was sequenced at all.
+metaphlan, mOTUs and sylph over the same lab samplesheet the ampliseq pipeline
+takes, with nonpareil measuring how much of each community was sequenced at all
+and a BIOM feature table carrying a tree out to the requester.
 
 Everything here is taxprofiler-specific. For how a request becomes a run at all,
 see the [README](../index.md).
@@ -17,13 +18,17 @@ see the [README](../index.md).
 | Kraken2 database | **PlusPF 2026-06-26** | `db/kraken2/pluspf_20260626` (111 GB) |
 | Bracken distributions | 50, 75, 100, 150, 200, 250, 300-mers | same directory |
 | MetaPhlAn database | **mpa_vJun23_CHOCOPhlAnSGB_202403** | `db/metaphlan/…` (33 GB) |
+| MetaPhlAn SGB phylogeny | same release, 36,273 tips | `db/metaphlan/…/mpa_vJun23_CHOCOPhlAnSGB_202403.nwk` (1.2 MB) |
 | mOTUs database | **db_mOTU_v3.1.0** | `db/motus/db_mOTU_v3.1.0/db_mOTU` (3.5 GB) |
+| sylph database | **GTDB r220**, 113,104 species at `c=200` | `db/sylph/gtdb-r220-c200-dbv1.syldb` (13 GB) |
+| sylph taxonomy | `gtdb_r220_metadata.tsv.gz` | `db/sylph/` (12 MB) |
 | Host — none | PhiX only (`GCF_000819615.1`) | `db/hostremoval/phix` |
 | Host — human | T2T-CHM13v2.0 (`GCF_009914755.1`) + PhiX | `db/hostremoval/chm13v2phix` (14 GB) |
 | Host — mouse | GRCm39 (`GCF_000001635.27`) + PhiX | `db/hostremoval/grcm39phix` (13 GB) |
 
 Tool versions come from taxprofiler 2.0.1 and are not ours to choose: kraken2
-2.1.5, bracken 3.1, metaphlan 4.1.1, motus 3.1.0, nonpareil 3.5.5. Nonpareil
+2.1.5, bracken 3.1, metaphlan 4.1.1, motus 3.1.0, sylph 0.7.0, sylph-tax 1.2.0,
+nonpareil 3.5.5. Nonpareil
 needs no database of its own — it measures redundancy in the reads themselves.
 The bowtie2 and minimap2 builds used for the host references are recorded in
 each reference's `manifest.json`.
@@ -91,6 +96,63 @@ paths land in `taxprofiler_args.yaml` and in the manifest, so a
 [rerun](index.md#reproducing-an-earlier-run) reproduces the host that was used
 rather than re-reading the question.
 
+**Human is depleted only when the answer asks for it.** Some published shotgun
+studies deplete against human on every run, host or not, on the grounds that
+human DNA is a handler and reagent contaminant of every library rather than a
+candidate host. This pipeline does not: what a run was depleted against is what
+the requester asked for, and a host they did not name is not silently added to
+their methods section. Human reads in a non-human sample are visible in the
+Kraken2 report like any other taxon, which is the right place for them.
+
+
+## Preprocessing
+
+Short reads take fastp, then complexity filtering, then host removal, then run
+merging, with nonpareil forking off between fastp and the complexity filter —
+which is where taxprofiler 2.0.1 wires it. Because the complexity filter here is
+fastp's own, that fork is after it in practice: taxprofiler's complexity
+subworkflow is a pass-through when its tool is `fastp`, and the filtering has
+already happened one step up.
+
+**Complexity filtering is on, through fastp rather than bbduk.** Homopolymer
+runs, poly-G tails from two-colour chemistry and microsatellite carry no
+taxonomic signal, and PlusPF is full of repeat-rich human, protozoan and fungal
+sequence for them to land on. taxprofiler's default tool for this is `bbduk`,
+which is a separate process and a second full pass over every FASTQ; setting
+`shortread_complexityfilter_tool` to `fastp` instead makes taxprofiler append
+`--low_complexity_filter --complexity_threshold 30` to the fastp call that is
+already running, so the step costs no extra task and no extra I/O.
+
+fastp's measure — the fraction of bases differing from the next base — is
+cruder than bbduk's Shannon entropy over a 50 bp window. bbduk at
+`entropy=0.3` is the upgrade if a run ever needs it; it costs one more pass over
+the reads and one more copy of every FASTQ in the work directory.
+
+**Reads shorter than 35 bp are dropped**, against taxprofiler's default of 15 —
+see [Diversity and coverage](#diversity-and-coverage) for why.
+
+**Duplicates are not removed.** fastp would do it for free, inside the same
+call, under `shortread_qc_dedup`. It is left off: duplication rate in a shotgun
+library tracks library size and the sample's own alpha diversity, so an abundant
+organism sequenced deeply genuinely produces identical fragments, and removing
+them biases common taxa downward in a depth-dependent direction. The studies
+that recommend deduplication are about the cost of assembly and binning, which
+this pipeline does not do. fastp measures the rate either way, and MultiQC
+reports it.
+
+**Pairs are not merged.** `shortread_qc_mergepairs` exists for tools that cannot
+use pair information — DIAMOND, and MALT's independent alignment — and every
+profiler here handles pairs natively. Merging would also change the read count
+every share on the dashboard is taken against.
+
+**Long reads take porechop_abi and nanoq**, at nanoq's defaults of 1,000 bp
+minimum length and Q7 minimum quality. That length interacts with platform
+detection: [`taxprofiler_samplesheet.sh`](#preparing-a-run) calls a run long-read
+when its median read length exceeds 1,000 bp, so a PacBio HiFi or short-fragment
+ONT run near that boundary is filtered at the same threshold that classified it.
+`longread_qc_qualityfilter_minlength` is the parameter to lower for one, the way
+`INSTRUMENT_PLATFORM` pins the platform.
+
 
 ## Preparing a run
 
@@ -148,7 +210,8 @@ custom field. What its file index lists is
 out what the Overview plots and what its sidebar reports: the plots and the
 classification bars from the kraken2-style reports the run publishes, and the
 read totals above them from what fastp and bowtie2 wrote about their own steps.
-See [Composition and diversity](../results/composition.md).
+It also builds the [feature tables](#the-feature-tables) a requester loads. See
+[Composition and diversity](../results/composition.md).
 
 **The two bulky downloads go to Globus, not to S3.** The reads staged in
 `raw-sequences/` and the whole dashboard as one zip are written into
@@ -157,6 +220,13 @@ See [Composition and diversity](../results/composition.md).
 uploading them would cost more than the analysis did; writing them onto the
 guest collection is a `zip` into place on the cluster's own disk, and the
 requester fetches them at the cluster's own bandwidth.
+
+**The reads in that zip are the raw ones, and only those.**
+`save_analysis_ready_fastqs` would add the trimmed, complexity-filtered,
+host-depleted set beside them; it is off. What a requester wants back is the
+data as it was sequenced — the processed reads are reproducible from it and
+from the published parameters, and a second copy of every FASTQ doubles a
+download that is already the largest thing a run produces.
 
 **Most of what the pipeline wrote is deleted before any of it is published.**
 [`templates/taxprofiler/prune.conf`](../../templates/taxprofiler/prune.conf)
@@ -178,6 +248,17 @@ deletions empty goes with them.
 | `multiqc/multiqc_plots/` | Each of the report's interactive figures rendered again as PNG, SVG and PDF. |
 | `fastqc/*/*_fastqc.zip` | The same measurements as the `_fastqc.html` published beside it, which is also what MultiQC read. |
 | one of `krona/*.html` | See below. |
+
+**sylph's per-sample files are kept.** The rule for deleting a set of
+per-sample profiles is that a merged file beside them carries the same numbers,
+and sylph's does not: the merged table is one column of whichever abundance
+`sylph_data_type` named, while each `.sylphmpa` also carries the containment ANI
+and the effective coverage the detection was called on — which is what says
+whether to believe it. They are hundreds of kilobytes, not gigabytes.
+
+**`feature_table/` is not touched either.** Nothing in it is a second encoding
+of something else published here: the tables in it carry a tree, and the
+taxpasta and MetaPhlAn tables they were built from do not.
 
 `motus/motus_*_combined_reports.txt` is not deleted but is rewritten:
 `drop-zero-rows` takes out the rows that are zero in every sample. A mOTUs
@@ -223,16 +304,24 @@ sheet:
 | Row | File |
 |---|---|
 | Species abundance table | `taxpasta/bracken_*.tsv`, or `taxpasta/kraken2_*.tsv` for a run without Bracken |
+| Feature table — Plain text / JSON / HDF5 | `feature_table/feature-table.tsv`, `.json.biom`, `.hdf5.biom` |
 
-**One row and the button under it, and nothing else.** The button is the whole
-run as a single zip — `$GLOBUS_URL/nxf/<uid>/<task title>_<uid>.zip?download`,
-the reads beside the results — and its label says how big that is. The merged
-MetaPhlAn and mOTUs profiles, and `alpha_diversity.tsv`, are all published —
-they are just not what this list is for. It is the shortest route to the file a
-requester came for, and every row added to it makes that route longer. The file index carries
-each of them under the heading that says what it is for, and the second-opinion
-profiles and the numbers behind a plot the reader is already looking at are both
-a click into it.
+**One row, one row of boxes, and the button under them.** The button is the
+whole run as a single zip — `$GLOBUS_URL/nxf/<uid>/<task title>_<uid>.zip?download`,
+the reads beside the results — and its label says how big that is.
+
+The row of boxes is [the feature table](#the-feature-tables) in the three
+formats it was written in, shaped the way the 16S pipeline shapes the same
+offer: one file three ways rather than three files. It is there because a
+requester computing UniFrac or Faith's PD needs the object with the tree in it,
+and nothing else on the page is that.
+
+The merged MetaPhlAn, mOTUs and sylph profiles, and `alpha_diversity.tsv`, are
+all published — they are just not what this list is for. It is the shortest
+route to the file a requester came for, and every row added to it makes that
+route longer. The file index carries each of them under the heading that says
+what it is for, and the second-opinion profiles and the numbers behind a plot
+the reader is already looking at are both a click into it.
 
 All three open in a tab rather than downloading, which is what
 [their content types](../results/index.md#what-a-link-does-when-you-click-it)
@@ -284,10 +373,49 @@ Profiling databases come from
 
 | tool | db_name | notes |
 | --- | --- | --- |
-| kraken2 | `pluspf_20260626` | RefSeq archaea, bacteria, viral, plasmid, human, UniVec_Core, protozoa, fungi. `db_type` is `short;long` |
-| bracken | `pluspf_20260626_bracken` | same directory as the kraken2 row; `db_params` is `;-r 150` |
+| kraken2 | `pluspf_20260626` | RefSeq archaea, bacteria, viral, plasmid, human, UniVec_Core, protozoa, fungi. `db_params` is `--confidence 0.1`; `db_type` is `short;long` |
+| bracken | `pluspf_20260626_bracken` | same directory as the kraken2 row; `db_params` is `--confidence 0.1;-r 150` |
 | metaphlan | `mpa_vJun23_CHOCOPhlAnSGB_202403` | `db_type` is `short` |
 | motus | `db_mOTU_v3.1.0` | `db_path` ends in `db_mOTU`; `db_type` is `short;long` |
+| sylph | `gtdb_r220` | `db_path` is the `.syldb` file itself, not a directory; `db_type` is `short` |
+
+**Kraken2 runs at `--confidence 0.1`, not at its default of 0.** At the default
+a single distinguishing k-mer places a read at a leaf, which against a database
+this size gives species-level precision around 0.16; 0.2 lifts it to about 0.76
+while recall barely moves, because a large database still has plenty of k-mer
+support for organisms that are really there. 0.1 is the conservative end of the
+published range — most studies that set it at all use 0.2 or 0.4 — chosen
+because Bracken redistributes below the threshold and because the cost is
+immediately visible: the classified share on the Overview falls, and that is the
+whole point. It is a flag rather than a step, so it costs no runtime.
+
+It goes on **both** rows. Running kraken2 and bracken makes taxprofiler classify
+every sample twice, once per row, and on the bracken row it must sit *before*
+the semicolon, which is where that row's kraken2 parameters live.
+
+**sylph profiles against GTDB rather than RefSeq.** PlusPF is RefSeq-derived and
+therefore blind by construction to the lineages that exist only as
+metagenome-assembled genomes; sylph's prebuilt database is 113,104 GTDB r220
+species representatives, and it calls a species present from containment ANI
+rather than from k-mer hits alone. It profiles the whole of that in about 15 GB
+of RAM and minutes per sample, which is why it is worth a fifth profiler when a
+fifth Kraken2-shaped classifier would not be.
+
+Three things about it are different from everything else here, and the file
+index says so:
+
+- **Its names are GTDB lineages**, not NCBI ones. The same organism can carry a
+  different name here than in the Bracken table beside it.
+- **taxpasta does not support sylph**, so there is no `taxpasta/sylph_*.tsv`.
+  taxprofiler runs `sylph-tax merge` itself and publishes
+  `sylph/sylph_gtdb_r220_combined_reports.tsv` in MetaPhlAn-style lineage
+  format.
+- **There is no Krona chart for it.** taxprofiler draws Krona for kraken2,
+  bracken, centrifuge, kaiju and malt only.
+
+Its `db_type` is `short`. sylph can read long reads, but its defaults are tuned
+for short ones and a long-read run would need its identity thresholds set; a
+`short` row is skipped on a long-read run rather than answered badly.
 
 **The mOTUs `db_path` has to end in a directory called `db_mOTU`.** mOTUs
 resolves its own files relative to that name, so the release directory holds one
@@ -362,6 +490,99 @@ the worse trade: it gates the whole subworkflow, and would take
 it, along with their MultiQC sections.
 
 
+## The feature tables
+
+A requester who wants to compute UniFrac or Faith's PD needs a table and a tree
+in one object. The 16S pipeline hands them one — a BIOM 2.1 file with the EPA-NG
+phylogeny inside it — and this one now does too, built by
+[`scripts/R/taxprofiler_tables.R`](../../scripts/R/taxprofiler_tables.R) in the
+same rbiom container, called by
+[`taxprofiler_composition.sh`](../results/composition.md).
+
+Shotgun data has no sequences to build a phylogeny from. It has taxon ids. So
+two tables are published, from the two profiles that can carry a tree at all:
+
+| File | Table | Tree |
+|---|---|---|
+| `feature_table/feature-table.{tsv,json.biom,hdf5.biom}` | Bracken's species counts, keyed by NCBI taxon id | the NCBI taxonomy over exactly those species, branch lengths by rank depth |
+| `feature_table/metaphlan-table.hdf5.biom` | MetaPhlAn's SGB relative abundances | the maximum-likelihood phylogeny published with that database |
+
+Both trees are written out beside the tables as `taxonomy-tree.newick` and
+`metaphlan-tree.newick`, and both go into the BIOM 2.1 files at
+`observation/group-metadata/phylogeny`, which is the spec's own place for one.
+That is the same file layout the 16S pipeline publishes, so a requester who has
+loaded one has loaded the other.
+
+### The taxonomy tree
+
+[`taxprofiler_taxonomy_tree.sh`](../../scripts/taxprofiler_taxonomy_tree.sh)
+walks `nodes.dmp` and `names.dmp` — both inside the Kraken2 database, which is
+also what `taxpasta_taxonomy_dir` points at — and writes the taxonomy restricted
+to the taxa the run observed, collapsed to seven ranks: domain, phylum, class,
+order, family, genus, species. Ranks between those, and the unranked nodes NCBI
+carries, are skipped rather than counted, so every lineage is measured on the
+same scale. **Branch length is the reciprocal of the child's depth**, so a
+phylum-level branch is 1/2 and a species-level one 1/7.
+
+That assignment is not invented here. It is what WGSUniFrac (Wei and Koslicki,
+*WABI 2022*) tested UniFrac against: they replaced the fitted branch lengths of
+GTDB's bac120 tree with it and recovered the same clustering, swapped GTDB's
+topology for NCBI's and got much the same answer again, and beat the OGU /
+Web-of-Life alignment approach in a head-to-head at a fraction of its cost.
+Their conclusion is the one this section rests on — a tree reflecting a general
+trend among the organisms is enough for UniFrac to say something useful about
+beta diversity.
+
+**It is a taxonomy with lengths on it, not an inferred phylogeny**, and the file
+index says so on the row that offers it. Faith's PD computed over it is a
+taxonomic diversity; the number is not comparable with a Faith's PD from the 16S
+pipeline, which is computed over a real phylogeny.
+
+Only tips are labelled. An id that turns out to be an ancestor of another id in
+the same table is emitted as an unlabelled internal node, and the R script drops
+it from the table rather than inventing a place for it — which is what keeps the
+tree and the table describing the same set. The same pass writes the seven-rank
+lineage the feature table carries as its taxonomy, so the two agree by
+construction.
+
+The tree is built from the **Bracken** taxpasta table, whose rows are species.
+For a run without Bracken it falls back to the Kraken2 table filtered to its
+species rows: that table carries a row at every rank, and a clade count plus the
+counts inside it is the same read twice.
+
+### The MetaPhlAn phylogeny
+
+MetaPhlAn publishes a Newick tree beside every database release. For the pinned
+`mpa_vJun23_CHOCOPhlAnSGB_202403` it is 1.2 MB, **36,273 tips with real branch
+lengths**, inferred from the same PhyloPhlAn marker set the profiler is built
+on. Every tip label is the bare SGB number, which is exactly the key the
+`t__SGB…` rows of a MetaPhlAn profile carry — so the merged profile taxprofiler
+already publishes and this tree join with no translation step.
+
+MetaPhlAn's `--tax_lev` defaults to `a`, so those `t__SGB` rows are in every
+profile, and `merge_metaphlan_tables.py` keeps them. MetaPhlAn's own
+`calculate_diversity.R` computes UniFrac from this pair, and does it through
+rbiom, which is the library this pipeline was already using.
+
+`fetch_taxprofiler_db.sh metaphlan` downloads the tree into the database
+directory. The publisher lists no checksum for it, so the md5 pinned in that
+script is the file as fetched; a mismatch means the release moved under its own
+name. **On a cluster where the database is already installed, run that same
+command again**: it fetches the tree on its own rather than re-downloading 26 GB,
+and says that the tree's provenance is therefore not in the manifest beside it.
+
+The trade is coverage: MetaPhlAn is marker-gene based and detects fewer species
+than Kraken2 does, so this table describes less of the sample. What it describes
+it describes on a real phylogeny.
+
+### What it costs
+
+Nothing in the pipeline. Both trees are post-processing: one download of 1.2 MB,
+one awk pass over the taxonomy dump, and one R invocation in a container that
+was already built for the 16S pipeline. A run missing any piece publishes the
+tables it can and reports what it left out, rather than failing the upload.
+
+
 ## Diversity and coverage
 
 **Shannon, Simpson and Pielou are not reported for a shotgun run.** They were,
@@ -377,8 +598,10 @@ Overview's diversity chart is drawn from them:
 |---|---|---|
 | Estimated coverage | nonpareil | What share of the community the reads reached |
 | Nonpareil diversity (Nd) | nonpareil | How varied the community is, on a log scale, from how often the same sequence recurs |
-| Effort for 95% coverage | nonpareil | How much sequencing that sample would take to get there |
 | Observed mOTUs | mOTUs | Species-level clusters found in universal marker genes |
+| Effort for 95% coverage | nonpareil | How much sequencing that sample would take to get there |
+| Faith's PD (phylogeny) | MetaPhlAn's SGB tree | Branch length of a real phylogeny the sample covers |
+| Faith's PD (taxonomy) | Bracken on the taxonomy tree | Branch length of the NCBI taxonomy the sample covers |
 | Read depth | kraken2 | The reads the estimates above were measured at |
 
 That is the order the `Index` select offers them in, so **estimated coverage is
@@ -387,9 +610,11 @@ run is worth reading: a sample the reads only reached a third of has a diversity
 and a cluster count that describe the sequencing rather than the community. It is
 also the reading a requester asks about first, in those words or in others.
 
-Because the five come off two tools that answer different questions, the caption
-under the chart **names the tool each reading came from** — *"Values come from
-Nonpareil."* — so a reader comparing two of them knows which is which.
+Because the seven come off four tools that answer different questions, the
+caption under the chart **names the tool each reading came from** — *"Values come
+from Nonpareil."* — so a reader comparing two of them knows which is which. The
+last two before read depth are the only ones that consult a classification
+database; everything above them does not.
 
 Two of them carry their own axis. Estimated coverage is a share of a whole, so
 its topmost gridline is 100% rather than the best sample in the run — otherwise
@@ -412,6 +637,31 @@ have no assembled reference at all, which is where a Kraken2 database is blind b
 construction. Its profiles are published and merged like any other classifier's;
 what the diversity chart takes from them is one number per sample, the count of
 clusters with a non-zero read count.
+
+**The two Faith's PDs are the exception, and carry their own caveat.** Unlike
+everything above them they do read a classification database — see [The feature
+tables](#the-feature-tables) for the two trees they are computed over — so each
+describes only the part of the sample that was classified. That is why each has
+a basis column next to it in the table:
+
+| Reading | Basis |
+|---|---|
+| `faith_pd` | `faith_pd_basis_pct`, the share of the reads reaching the classifier that ended up on the taxonomy tree |
+| `faith_pd_sgb` | `faith_pd_sgb_basis_pct`, the share of MetaPhlAn's profile that is on the SGB phylogeny |
+
+**The unclassified reads are not on either tree, and are not put there.** Faith's
+PD and UniFrac are both sums over branches, and a read that reached no taxon has
+no branch — every tool in this space computes over the classified subset by
+construction, and MetaPhlAn's own diversity script goes further and drops a
+sample that comes back 100% unknown. Hanging an `unclassified` tip off the root
+would be worse than leaving it out: it is present in every sample, so it adds
+nothing to unweighted UniFrac and the same constant to every Faith's PD, and in
+weighted UniFrac it would be the largest mass in the sample on a single branch —
+measuring the reference database rather than the community. So the metrics are
+computed over what was classified, and the fraction is published beside them.
+Nonpareil's estimated coverage in the same row is the other half of that caveat:
+it says how much of the community the *sequencing* reached, without consulting a
+database at all.
 
 **Nonpareil sets the QC floor.** Its k-mer mode counts 24-mers and refuses to
 run — *"Reads are required to have a minimum length of kmer size"* — the moment
@@ -437,7 +687,9 @@ Three more things about where taxprofiler 2.0.1 wires nonpareil are worth
 knowing before quoting its numbers, none of which we can change without patching
 the pipeline:
 
-- **It runs before host removal.** Nonpareil sees the reads fastp left, so on a
+- **It runs before complexity filtering and host removal.** Nonpareil sees the
+  reads fastp left — which, since the complexity filter rides inside that same
+  fastp call, does mean it sees them complexity filtered — but on a
   `Human + PhiX` run the host reads are still in what it measures. Coverage and
   Nd for a host-heavy sample describe the sample *including* its host.
 - **It reads R1 only.** For paired data the module is handed the first mate. The
@@ -467,11 +719,16 @@ template, which dropped `params.max_cpus` / `max_memory` / `max_time` in favour
 of `process.resourceLimits`; the `params` block in `config/slurm.config` sets
 nothing taxprofiler reads.
 
-Kraken2, MetaPhlAn, mOTUs and the host-depletion aligner are sized against the
-node rather than left on nf-core's `process_high` label. 16 cpus each puts two of
+Kraken2, MetaPhlAn, mOTUs, sylph and the host-depletion aligner are sized
+against the node rather than left on nf-core's `process_high` label. 16 cpus each puts two of
 any of them on a 32-core node with no cores stranded. Kraken2's memory is the
 figure to watch: it reads `hash.k2d` into its own heap, 110 GB for PlusPF, so the
 reservation is 128 GB.
+
+**sylph is the cheap one.** It holds the 13 GB GTDB sketch plus the sample's
+own, and the published figure for profiling the whole of GTDB-r220 is about
+15 GB; 32 GB is that with room. `SYLPHTAX_TAXPROF` and `SYLPHTAX_MERGE` join a
+profile against a 12 MB table and are given one core.
 
 **Nonpareil is given a memory reservation it will actually use.** The module
 passes `task.memory` straight to nonpareil's `-R`, which is the ceiling nonpareil
@@ -492,12 +749,15 @@ nothing. They drive two scripts —
 [`fetch_taxprofiler_db.sh`](../../scripts/fetch_taxprofiler_db.sh) for the profiling
 databases and
 [`build_host_reference.sh`](../../scripts/build_host_reference.sh) for the host
-references — each of which verifies every download against the publisher's own
-checksums and writes a manifest beside its output. Each is a Slurm job; run them
-from the login node. Steps 1–3 and 4–6 are
+references — each of which verifies every download against a checksum and
+writes a manifest beside its output. Two files have no publisher checksum to
+verify against: the MetaPhlAn phylogeny, pinned in the script by the md5 of the
+file as fetched, and the sylph sketch, pinned by its byte size with the sha256
+of what arrived recorded in its manifest. Each is a Slurm job; run them
+from the login node. Steps 1–4 and 5–7 are
 independent of each other and can run concurrently.
 
-Total: about 148 GB of profiling database and 19 GB of host references — each
+Total: about 161 GB of profiling database and 19 GB of host references — each
 mammalian reference is ~14 GB, being a 3 GB FASTA, a 4 GB bowtie2 index and a
 7 GB minimap2 index — and roughly four hours of wall time dominated by the two
 mammalian bowtie2 builds. Nonpareil has no setup step: it needs no database.
@@ -517,8 +777,11 @@ sbatch --job-name=db-kraken2 --cpus-per-task=4 --mem=8G --time=24:00:00 --output
 
 ### 2. MetaPhlAn — mpa_vJun23_CHOCOPhlAnSGB_202403
 
-26 GB across two tars. The version is pinned in the script, not resolved from
-`mpa_latest`, which names a database MetaPhlAn 4.1.1 cannot read.
+26 GB across two tars, plus the 1.2 MB SGB phylogeny for the same release, which
+lands in the database directory as `<release>.nwk` and is what the
+[feature tables](#the-feature-tables) put a real phylogeny into the BIOM with.
+The version is pinned in the script, not resolved from `mpa_latest`, which names
+a database MetaPhlAn 4.1.1 cannot read.
 
 ```bash
 sbatch --job-name=db-metaphlan --cpus-per-task=4 --mem=8G --time=24:00:00 --output=/data/prod/nextflow/log/db_%j.out /data/prod/nextflow/scripts/fetch_taxprofiler_db.sh metaphlan
@@ -537,7 +800,18 @@ refuses to profile without it.
 sbatch --job-name=db-motus --cpus-per-task=4 --mem=8G --time=24:00:00 --output=/data/prod/nextflow/log/db_%j.out /data/prod/nextflow/scripts/fetch_taxprofiler_db.sh motus
 ```
 
-### 4. Host reference — PhiX only
+### 4. sylph — GTDB r220
+
+13 GB of k-mer sketch from Carnegie Mellon, plus the 12 MB sylph-tax metadata
+table from Zenodo. The sketch is served without a checksum, so the script pins
+its byte size and records the sha256 of what arrived in the manifest; the
+metadata table is verified against Zenodo's own md5.
+
+```bash
+sbatch --job-name=db-sylph --cpus-per-task=4 --mem=8G --time=24:00:00 --output=/data/prod/nextflow/log/db_%j.out /data/prod/nextflow/scripts/fetch_taxprofiler_db.sh sylph
+```
+
+### 5. Host reference — PhiX only
 
 Seconds. Used by the "PhiX" answer, and by "Human + PhiX" and "Mouse + PhiX" as one
 half of their combined references.
@@ -546,7 +820,7 @@ half of their combined references.
 sbatch --job-name=ref-phix --cpus-per-task=32 --mem=64G --time=12:00:00 --output=/data/prod/nextflow/log/ref_%j.out /data/prod/nextflow/scripts/build_host_reference.sh phix GCF_000819615.1
 ```
 
-### 5. Host reference — human + PhiX
+### 6. Host reference — human + PhiX
 
 One to two hours, ~4 GB of index. Used by the "Human + PhiX" answer.
 
@@ -554,7 +828,7 @@ One to two hours, ~4 GB of index. Used by the "Human + PhiX" answer.
 sbatch --job-name=ref-chm13v2phix --cpus-per-task=32 --mem=64G --time=12:00:00 --output=/data/prod/nextflow/log/ref_%j.out /data/prod/nextflow/scripts/build_host_reference.sh chm13v2phix GCF_009914755.1 GCF_000819615.1
 ```
 
-### 6. Host reference — mouse + PhiX
+### 7. Host reference — mouse + PhiX
 
 Same again. Used by the "Mouse + PhiX" answer.
 
@@ -562,7 +836,7 @@ Same again. Used by the "Mouse + PhiX" answer.
 sbatch --job-name=ref-grcm39phix --cpus-per-task=32 --mem=64G --time=12:00:00 --output=/data/prod/nextflow/log/ref_%j.out /data/prod/nextflow/scripts/build_host_reference.sh grcm39phix GCF_000001635.27 GCF_000819615.1
 ```
 
-### 7. Verify
+### 8. Verify
 
 Each host reference should show six `.bt2` files, and each database a manifest.
 
@@ -578,7 +852,7 @@ jq -r '"\(.name)\t\([.sources[].url] | join(" "))"' /data/prod/nextflow/db/*/*.m
 the `.mmi` is missing, since those are what `BOWTIE2_ALIGN` and `MINIMAP2_ALIGN`
 look for.
 
-### 8. Register the pipeline in Wrike
+### 9. Register the pipeline in Wrike
 
 `taxprofiler` is one of the "Nextflow Pipeline" options on the "Bioinformatics
 Pipeline" request form, and picking it asks the "Taxprofiler --hostremoval_reference" follow-up

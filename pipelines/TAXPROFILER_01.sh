@@ -1,6 +1,6 @@
 
-# Shotgun metagenomics: fastp trimming, then kraken2, bracken, metaphlan and
-# mOTUs, with nonpareil measuring how much of each community was sequenced.
+# Shotgun metagenomics: fastp trimming, then kraken2, bracken, metaphlan, mOTUs
+# and sylph, with nonpareil measuring how much of each community was sequenced.
 # Which host is depleted first is the request form's follow-up answer, recorded
 # by wrike_task_handler.sh; PhiX alone when the form never asked.
 PIPELINE_NAME="taxprofiler_01"
@@ -40,18 +40,41 @@ params_set shortread_qc_tool                "fastp"
 # lands on some samples and not others depending on what the sample caught. 35
 # clears it with room.
 params_set shortread_qc_minlength           35
+
+# Homopolymer runs, poly-G tails and microsatellite carry no taxonomic signal
+# and land on the repeat-rich human, protozoan and fungal sequence PlusPF
+# carries. fastp rather than the bbduk default: taxprofiler appends
+# --low_complexity_filter to the fastp call already running, so this is the same
+# task rather than a second pass over every read.
+params_set perform_shortread_complexityfilter         true
+params_set shortread_complexityfilter_tool            "fastp"
+params_set shortread_complexityfilter_fastp_threshold 30
+
 params_set perform_longread_qc              true
 params_set perform_runmerging               true
 params_set run_kraken2                      true
 params_set run_bracken                      true
 params_set run_metaphlan                    true
 params_set run_motus                        true
+
+# GTDB rather than RefSeq, so the run sees the species representatives that
+# exist only as metagenome-assembled genomes. Minutes per sample against the
+# hours the other profilers take.
+params_set run_sylph                        true
+params_set sylph_data_type                  "relative_abundance"
+params_set sylph_taxonomy                   "$NEXTFLOW_DIR/db/sylph/gtdb_r220_metadata.tsv.gz"
+
 params_set run_krona                        true
 params_set run_profile_standardisation      true
 params_set standardisation_taxpasta_format  "tsv"
 params_set taxpasta_taxonomy_dir            "$NEXTFLOW_DIR/db/kraken2/pluspf_20260626"
 params_set taxpasta_add_name                true
 params_set taxpasta_add_rank                true
+
+# The lineage columns make the merged tables self-contained: a reader collapses
+# to any rank without joining back to a taxonomy dump they do not have.
+params_set taxpasta_add_lineage             true
+params_set taxpasta_add_ranklineage         true
 
 # How varied each sample was, which no classifier here answers honestly: half a
 # WGS sample's reads reach no taxon, so an index computed over the half a
@@ -86,6 +109,9 @@ esac
 # "None" skips host removal outright. Every other answer also strips PhiX, since
 # the Illumina spike-in is never part of the sample and PlusPF carries viral
 # genomes that would otherwise classify it.
+#
+# Human is depleted only when the answer asks for it. A host the requester did
+# not name is not depleted against on this pipeline's own initiative.
 if [[ -n "$TAXPROFILER_HOST_REFERENCE" ]]; then
     params_set perform_shortread_hostremoval  true
     params_set hostremoval_reference          "$NEXTFLOW_DIR/db/hostremoval/$TAXPROFILER_HOST_REFERENCE.fa"

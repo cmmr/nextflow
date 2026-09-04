@@ -202,8 +202,8 @@ dashboard_formats "" \
 #    How the run was set up. Every value comes off the manifest wrike_job.sh
 #    recorded, so the page and the record cannot disagree; anything it does not
 #    carry leaves its note off the sidebar. Each is stated over the numbers it
-#    explains rather than in a row of its own - what was amplified and what read
-#    it over the read totals, what they were classified against over the
+#    explains rather than in a row of its own - what read the samples over the
+#    read totals, and what was amplified and what it was named against over the
 #    classification.
 PIPELINE=""
 REGION=""
@@ -219,10 +219,10 @@ else
     warn "This run recorded no manifest; the page will not say how the run was set up."
 fi
 
-#    The instrument the reads came off, which is what the note over the read
-#    totals is. Whether the run was paired or single-end is how the pipeline was
-#    set up rather than what the reads are, and it is in the samplesheet and the
-#    manifest for anyone who needs it.
+#    The instrument the reads came off, which the note over the read totals
+#    opens with. How long those reads are and whether they came in pairs is
+#    measured off the reads themselves rather than taken from how the pipeline
+#    was set up, so it is read out of the statistics further down.
 case "$SEQUENCING_TYPE" in
     illumina_pe|illumina_se) PLATFORM="Illumina" ;;
     nanopore)                PLATFORM="Oxford Nanopore" ;;
@@ -230,9 +230,15 @@ case "$SEQUENCING_TYPE" in
     *)                       PLATFORM="$SEQUENCING_TYPE" ;;
 esac
 
+#    The detector records the region as "16SV4"; a reader reads "16S V4". It is
+#    stated over the classification rather than over the read totals: the region
+#    is the stretch the primers amplified, which is the whole of what the
+#    classifier was given to put a name to.
+REFERENCE=""
+[[ -n "$REGION" ]] && REFERENCE=${REGION/#16S/16S }
+
 #    ampliseq names a database as it is passed to it - "silva=138.2". Read as a
 #    note rather than as a parameter, it wants a space and its own capitals.
-REFERENCE=""
 if [[ -n "$REF_TAXONOMY" ]]; then
     REFERENCE_NAME=${REF_TAXONOMY%%=*}
     REFERENCE_VERSION=${REF_TAXONOMY#*=}
@@ -243,17 +249,15 @@ if [[ -n "$REF_TAXONOMY" ]]; then
         REFERENCE_NAME=${REFERENCE_NAME^}
     fi
 
-    REFERENCE="$REFERENCE_NAME"
-    [[ "$REFERENCE_VERSION" != "$REF_TAXONOMY" ]] && REFERENCE+=" $REFERENCE_VERSION"
+    [[ "$REFERENCE_VERSION" != "$REF_TAXONOMY" ]] &&
+        REFERENCE_NAME+=" $REFERENCE_VERSION"
+
+    REFERENCE+="${REFERENCE:+ · }$REFERENCE_NAME"
 fi
 
-#    The detector records the region as "16SV4"; a reader reads "16S V4"
-SEQUENCED=""
-[[ -n "$REGION" ]] && SEQUENCED=${REGION/#16S/16S }
-
-if [[ -n "$PLATFORM" ]]; then
-    SEQUENCED+="${SEQUENCED:+ · }$PLATFORM"
-fi
+#    What the reads were, over the totals counted off them: the instrument here,
+#    and the chemistry FastQC measured, added below once the statistics are read
+SEQUENCED="$PLATFORM"
 
 #    What the run measured, as the sidebar reports it. The counts are whole
 #    numbers written out in the units a sidebar has room for; the bars are only
@@ -314,13 +318,7 @@ done < <(state_get_tsv "$STATS_KEY")
 
 #    "Illumina, 2 × 250 bp" - the chemistry follows the instrument it came off,
 #    and stands on its own for a run that recorded no instrument
-if [[ -n "$CHEMISTRY" ]]; then
-    if [[ -n "$PLATFORM" ]]; then
-        SEQUENCED+=", $CHEMISTRY"
-    else
-        SEQUENCED+="${SEQUENCED:+ · }$CHEMISTRY"
-    fi
-fi
+[[ -n "$CHEMISTRY" ]] && SEQUENCED+="${SEQUENCED:+, }$CHEMISTRY"
 
 if [[ -n "${STATS[reads_retained]:-}" ]]; then
     RETAINED=${STATS[reads_retained]}

@@ -234,6 +234,16 @@ if ! dashboard_button "taxpasta/bracken_*.tsv" "Species abundance table"; then
     dashboard_button "taxpasta/kraken2_*.tsv" "Taxonomic profile table" || true
 fi
 
+#    The same table as an object with a tree in it, in the three formats it was
+#    written in, so a requester can compute UniFrac and Faith's PD without
+#    building a phylogeny of their own. Offered as one row of boxes because it
+#    is one file three ways rather than three files.
+dashboard_formats "Feature table" \
+    "Counts and taxonomy for every species. The BIOM files carry the tree the diversity metrics are computed over." \
+    "Plain text|feature_table/feature-table.tsv" \
+    "JSON|feature_table/feature-table.json.biom" \
+    "HDF5|feature_table/feature-table.hdf5.biom" || true
+
 #    How the run was set up. The pipeline version comes off the manifest
 #    wrike_job.sh recorded, so the page and the record cannot disagree; what was
 #    depleted comes off the request.

@@ -88,8 +88,9 @@ is drawn to the space the page has rather than the page growing a scrollbar to
 fit the chart.
 
 **Feature table**, at the top of the sidebar. One row per headline file the
-pipeline declared — nothing else; everything the run published comes down
-through the button at the top of the page.
+pipeline declared, and a row of format boxes for the one file it declared in
+several — nothing else; everything the run published comes down through the
+button at the top of the page.
 
 **Download everything**, the emphasised button at the top right of the page,
 directly under the deletion date the navigation bar carries, since it is
@@ -134,17 +135,21 @@ share read against it — what came through a step, what a rank could be placed 
 — is the growth green.
 
 **How the run was set up is stated over the numbers it explains**, rather than
-in a row of its own: the region and the instrument sit above the read totals,
-and the reference database above the classification. Each is read off the run's
-`.manifest`, the same record a rerun is rebuilt from and published beside the
-page as `run_state.json`, so the page
-and the record cannot disagree — and a setting the manifest does not carry
-leaves its note off rather than naming an empty one. The note over the read
-totals ends with what the reads were — *"16S V4 · Illumina, 2 × 250 bp"*,
-*"Illumina, 2 × 151 bp"*, *"Nanopore"* — and that part is measured off the reads
-rather than declared, so it comes off `.statistics` with the numbers under it:
-fastp read it for a taxprofiler run, FastQC by way of MultiQC for an ampliseq
-one. The classifier and database sit over the classification.
+in a row of its own: what read the samples sits above the read totals, and what
+was amplified and what named it sit above the classification — *"Illumina,
+2 × 250 bp"* over the one, *"16S V4 · SILVA 138.2"* over the other. The region
+goes with the database rather than with the instrument because it is the stretch
+the primers amplified, which is the whole of what the classifier was given to
+put a name to.
+
+Each is read off the run's `.manifest`, the same record a rerun is rebuilt from
+and published beside the page as `run_state.json`, so the page and the record
+cannot disagree — and a setting the manifest does not carry leaves its note off
+rather than naming an empty one. The exception is the reads' own description —
+*"2 × 250 bp"*, *"2 × 151 bp"* — which is measured off the reads rather than
+declared, so it comes off `.statistics` with the numbers under it: fastp read it
+for a taxprofiler run, FastQC by way of MultiQC for an ampliseq one. A nanopore
+run carries none, and is named by its instrument alone.
 
 **A footer** saying when the run finished, which pipeline version produced it,
 and the uid. That last is there so a reader asking us about these results has

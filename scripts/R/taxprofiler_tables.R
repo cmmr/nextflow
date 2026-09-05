@@ -126,8 +126,14 @@ read_taxpasta <- function (path) {
 
     if (nrow(table) == 0) stop(basename(path), " carries no classified taxa")
 
-    numeric_matrix(table[setdiff(colnames(table), TAXPASTA_FIELDS)], ids,
-                   paste(basename(path), "names no samples"))
+    counts <- numeric_matrix(table[setdiff(colnames(table), TAXPASTA_FIELDS)], ids,
+                             paste(basename(path), "names no samples"))
+
+    #    "bracken_<db_name>.tsv" or "kraken2_<db_name>.tsv"
+    database <- sub("^[^_]+_", "", sub("\\.tsv$", "", basename(path)))
+    colnames(counts) <- strip_database(colnames(counts), database)
+
+    counts[, sort(colnames(counts)), drop = FALSE]
 }
 
 # The merged MetaPhlAn profile, reduced to its t__SGB rows and keyed by the bare
@@ -159,11 +165,30 @@ read_metaphlan <- function (path) {
     database <- sub("_combined_reports.*$", "",
                     sub("^metaphlan_", "", basename(path)))
 
-    colnames(counts) <- sub(paste0("_", database, "$"), "",
-                            sub("\\.metaphlan$", "", colnames(counts)))
+    colnames(counts) <- strip_database(colnames(counts), database)
 
     #    Two clades can collapse onto one SGB number
     rowsum(counts, group = rownames(counts), reorder = FALSE)
+}
+
+# Every merged table names its columns after the files it merged, so a sample
+# arrives as "<sample>_<db_name>" or "<sample>_<db_name>.<tool>". The database
+# is trimmed back off, or the BIOM names samples something nothing else in the
+# run does. Matched rather than substituted, since a db_name may contain the
+# characters a pattern would read as syntax and a sample name may contain dots.
+strip_database <- function (samples, database) {
+    tail <- paste0("_", database)
+
+    without_tool <- sub("\\.[^.]*$", "", samples)
+    tooled       <- endsWith(without_tool, tail)
+
+    samples[tooled] <- without_tool[tooled]
+
+    trimmed <- endsWith(samples, tail)
+    samples[trimmed] <- substr(samples[trimmed], 1,
+                               nchar(samples[trimmed]) - nchar(tail))
+
+    samples
 }
 
 # The sample columns of a table read as characters, as one numeric matrix in

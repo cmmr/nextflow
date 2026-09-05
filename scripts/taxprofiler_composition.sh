@@ -729,8 +729,10 @@ write_alpha_table() {
                 motus[field[1]] = field[2]
             }
 
-            # sample, Faith's PD on the taxonomy, the reads it covered, Faith's
-            # PD on the MetaPhlAn phylogeny, and the abundance that one covered
+            # sample, the phylogenetic diversity on the taxonomy, the reads it
+            # covered, the same on the MetaPhlAn phylogeny, and what that one
+            # covered. No apostrophes below this line: the whole program is one
+            # single-quoted shell word, and one would end it.
             while ((getline line < ENVIRON["FAITH_TABLE"]) > 0) {
                 split(line, field, "\t")
                 if (field[1] == "sample") continue
@@ -850,6 +852,23 @@ composition_metrics() {
 
     local IFS=,
     printf '%s' "${metrics[*]}"
+}
+
+# The sample names alone, in the order everything else is drawn in, for a run
+# whose diversity table could not be built. The page defaults every other array
+# it looks for, so composition still draws.
+samples_json() {
+    LC_ALL=C awk -F'\t' '
+        function json_string(s) {
+            gsub(/\\/, "\\\\", s)
+            gsub(/"/, "\\\"", s)
+            return "\"" s "\""
+        }
+
+        { out = out (NR > 1 ? "," : "") json_string($1) }
+
+        END { printf "\"samples\":[%s]", out }
+    ' "$PROFILE_SET"
 }
 
 # The same table as the arrays the plots read, plus the sample names every other
@@ -1298,21 +1317,29 @@ build_feature_tables \
 
 [[ -s "$FAITH_TABLE" ]] || log "This run measured no phylogenetic diversity."
 
+# The diversity half fails on its own. Composition and the sidebar are read off
+# the classifier reports and owe this table nothing, so a table that cannot be
+# built costs that half of the panel rather than the page.
 if ! write_alpha_table > "$ALPHA_TABLE"; then
-    warn "The diversity table could not be built; the Overview will show no plots."
+    warn "The diversity table could not be built; the Overview will plot composition only."
     rm -f "$ALPHA_TABLE"
-    exit 0
 fi
 
-DATA=$(alpha_json)
+if [[ -s "$ALPHA_TABLE" ]]; then
+    DATA=$(alpha_json)
 
-# Which readings the run actually produced, and how the page writes each of
-# them. A run that measured none leaves the key off, which is what hides that
-# half of the panel.
-if METRICS=$(composition_metrics); then
-    DATA="\"metrics\":[$METRICS],$DATA"
+    # Which readings the run actually produced, and how the page writes each of
+    # them. A run that measured none leaves the key off, which is what hides
+    # that half of the panel.
+    if METRICS=$(composition_metrics); then
+        DATA="\"metrics\":[$METRICS],$DATA"
+    else
+        log "This run measured no diversity; the Overview will plot composition only."
+    fi
 else
-    log "This run measured no diversity; the Overview will plot composition only."
+    #    The sample names on their own, which both charts are drawn in the order
+    #    of. Without the alpha key the page hides the diversity half.
+    DATA=$(samples_json)
 fi
 
 # What the reader is being shown a count of, so the page says species where the

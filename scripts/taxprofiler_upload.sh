@@ -347,9 +347,30 @@ if [[ "$TOTAL_READS" =~ ^[0-9]+$ ]] && (( TOTAL_READS > 0 )); then
         HOST_KEPT=$(( STATS[host_total] - STATS[host_removed] ))
     fi
 
-    stat_share_detail reads "After quality filter" "${STATS[qc_passed]:-}" "$TOTAL_READS" \
-        "$(dashboard_report_section "$MULTIQC_REPORT" "$MULTIQC_REPORT_HREF" \
-            "fastp-filtered-reads-chart fastp general_stats")"
+    #    fastp is one pass over the reads, not four, but it buckets each read by
+    #    the first of its tests that the read failed - quality, then N content,
+    #    then length, then complexity - so taking those buckets off the total in
+    #    that order is what was still in hand after each. A run that produced no
+    #    fastp reports has none of these keys and drops every row.
+    FASTP_SECTION=$(dashboard_report_section "$MULTIQC_REPORT" "$MULTIQC_REPORT_HREF" \
+        "fastp-filtered-reads-chart fastp general_stats")
+
+    QC_LEFT="$TOTAL_READS"
+
+    qc_step() {
+        local label="$1" removed="${STATS[$2]:-}"
+
+        [[ "$removed" =~ ^[0-9]+$ ]] || return 0
+
+        QC_LEFT=$(( QC_LEFT - removed ))
+
+        stat_share_detail reads "$label" "$QC_LEFT" "$TOTAL_READS" "$FASTP_SECTION"
+    }
+
+    qc_step "After quality filter"    qc_cut_quality
+    qc_step "After N filter"          qc_cut_ncontent
+    qc_step "After length filter"     qc_cut_length
+    qc_step "After complexity filter" qc_cut_complexity
 
     stat_share_detail reads "After host depletion" "$HOST_KEPT" "$TOTAL_READS" \
         "$(dashboard_report_section "$MULTIQC_REPORT" "$MULTIQC_REPORT_HREF" \

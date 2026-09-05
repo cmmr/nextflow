@@ -121,10 +121,13 @@ filtering and host depletion have each taken their cut, and under them it report
 how much of that the classifier could place at phylum, at genus and at species.
 The same pass that works out the plots counts all of it, into `.statistics`.
 
-**Two bars, not a funnel.** What each step in between took is that step's own
-accounting and is in the Technical Report, per sample and per tool; a sidebar
-restating all of it is a funnel nobody reads, and it crowded out the readings
-that were worth the room.
+**Two bars, and the funnel behind a details link.** The sidebar shows what went
+in and what was left; the steps in between sit under `details` on the second of
+them, out of the way of a reader who wants only the two. On a shotgun run that is
+each of fastp's tests in the order fastp applies them — quality, N content,
+length, complexity — then host depletion, each written as what was *still in
+hand* after it rather than as what it took. Every one of those labels links into
+that step's own per-sample accounting in the Technical Report.
 
 A share is written whole. On a shotgun run there is one exception, for the step
 that needs it: where rounding whole would read 100% for a step that did drop

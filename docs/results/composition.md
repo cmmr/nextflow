@@ -105,8 +105,8 @@ first and then every other index rbiom computes on a denoised table — observed
 ASVs, read depth, Simpson, inverse Simpson, Faith's PD, Berger-Parker,
 Brillouin, Fisher's alpha, Margalef, Menhinick and McIntosh; a shotgun run
 offers what nonpareil and mOTUs measured first, none of which needs a
-classification database, then the two Faith's PDs that do, and opens on
-estimated coverage. Under it, the caption
+classification database, then Faith's PD, which does, and opens on estimated
+coverage. Under it, the caption
 says what the index is and — where the run's data names one — which tool
 measured it, and a table gives the lowest, median and highest value **of that
 index**. The other indices are a select away, and three numbers for an index the
@@ -342,23 +342,32 @@ reference genome, which is where a Kraken2 database is blind by construction.
 Richness is the count of its clusters with a non-zero read count; its
 `unassigned` row is not a cluster and is left out.
 
-**Two phylogenetic indices sit beside them**, computed by
+**Two phylogenetic indices are computed**, by
 [`scripts/R/taxprofiler_tables.R`](../pipelines/taxprofiler.md#the-feature-tables)
-off the two trees that run publishes:
+off the two trees that run publishes — but only one is charted:
 
-| Column | Tree | What it is |
+| Column | Tree | On the chart |
 |---|---|---|
-| `faith_pd` | the NCBI taxonomy over the species this run saw, branch lengths by rank depth | a taxonomic diversity |
-| `faith_pd_sgb` | the maximum-likelihood phylogeny MetaPhlAn publishes with its database | an evolutionary one |
+| `faith_pd_sgb` | the maximum-likelihood phylogeny MetaPhlAn publishes with its database | yes, as Faith's PD |
+| `faith_pd` | the NCBI taxonomy over the species this run saw, branch lengths by rank depth | no — table only |
 
 Unlike everything above them, **both read a classification database**, so both
-describe only the part of the sample that was classified. That is why each has a
-basis column beside it — `faith_pd_basis_pct` is the share of the reads reaching
-the classifier that ended up on the tree, `faith_pd_sgb_basis_pct` the share of
-MetaPhlAn's profile that did. A phylogenetic index over 40% of a sample is a
-different reading from one over 90%, and the pair is what lets someone tell them
-apart. Nonpareil's estimated coverage in the same row says how much of the
-community the *sequencing* reached, which is the other half of the caveat.
+describe only the part of the sample that was classified. Each has a basis
+column beside it: `faith_pd_sgb_basis_pct` is the share of the sample MetaPhlAn
+assigned to the species it detected, and `faith_pd_basis_pct` the share of the
+reads reaching the classifier that ended up on the taxonomy tree. A phylogenetic
+index over 40% of a sample is a different reading from one over 90%, and the
+pair is what lets someone tell them apart. Nonpareil's estimated coverage in the
+same row says how much of the community the *sequencing* reached, which is the
+other half of the caveat.
+
+**`faith_pd` is left off the chart because it measures the wrong thing.** Faith's
+PD sums branch length, so over a taxonomy it is a weighted count of the lineages
+the classifier named — which rises with database coverage rather than with how
+varied the sample is. See [the pipeline
+page](../pipelines/taxprofiler.md#diversity-and-coverage) for the correlations
+that settled it. The taxonomy tree still ships inside the BIOM, because UniFrac
+compares renormalised profiles and does not inherit that.
 
 **The unclassified reads are not on either tree, and are not put there.** There
 is nowhere to put them: both Faith's PD and UniFrac are sums over branches, and
@@ -433,8 +442,9 @@ and any one number for them would describe the run less well than saying nothing
 The distribution itself is in the MultiQC report, which is where it can be read
 as one.
 
-**taxprofiler** reports the reads the run started with, how many of them came
-through quality filtering, and how many were left once the host was taken out;
+**taxprofiler** reports the reads the run started with and how many were left
+once quality filtering and the host had each taken their cut, with fastp's four
+tests broken out behind the details link;
 the thinnest, middle and deepest sample; and the share of what reached the
 classifier that it resolved to phylum, to genus and to species. It also names
 what the reads were — the platform the samplesheet measured them into, and the

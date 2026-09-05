@@ -332,16 +332,32 @@ fastp_reports() {
 # and the classifier count: fastp counts each mate of a pair as a read of its
 # own, and a funnel whose first two bars count halves of what the bars under
 # them count is not a funnel.
+# Reads that reached quality filtering and reads that came through each of its
+# tests, summed over every report.
+#
+# fastp makes one pass and buckets a read by the first test it failed, testing
+# quality, then N content, then length, then complexity - so the buckets are
+# disjoint and taking them off the total in that order is what survived each.
+# Its own length filter covers both ends, so too_long is counted with too_short.
 fastp_totals() {
     jq -s -r '
         map({
-            mates:  (if (.summary.sequencing // "") | startswith("paired end")
-                     then 2 else 1 end),
-            before: (.summary.before_filtering.total_reads // 0),
-            passed: (.filtering_result.passed_filter_reads // 0)
+            mates:      (if (.summary.sequencing // "") | startswith("paired end")
+                         then 2 else 1 end),
+            before:     (.summary.before_filtering.total_reads // 0),
+            passed:     (.filtering_result.passed_filter_reads // 0),
+            quality:    (.filtering_result.low_quality_reads // 0),
+            ncontent:   (.filtering_result.too_many_N_reads // 0),
+            length:     ((.filtering_result.too_short_reads // 0)
+                         + (.filtering_result.too_long_reads // 0)),
+            complexity: (.filtering_result.low_complexity_reads // 0)
         })
         | "qc_total\t\(map(.before / .mates) | add | floor)\n"
-          + "qc_passed\t\(map(.passed / .mates) | add | floor)"
+          + "qc_passed\t\(map(.passed / .mates) | add | floor)\n"
+          + "qc_cut_quality\t\(map(.quality / .mates) | add | floor)\n"
+          + "qc_cut_ncontent\t\(map(.ncontent / .mates) | add | floor)\n"
+          + "qc_cut_length\t\(map(.length / .mates) | add | floor)\n"
+          + "qc_cut_complexity\t\(map(.complexity / .mates) | add | floor)"
     ' "$@"
 }
 
@@ -835,15 +851,20 @@ composition_metrics() {
         metrics+=('{"key":"effort95","title":"Effort for 95% coverage","note":"the sequencing this sample would take to reach 95% coverage","places":1,"unit":" Gbp","source":"Nonpareil"}')
     fi
 
-    # The two that do read a classification database, so they come after the
-    # three that do not. Each describes only the classified part of the sample;
-    # alpha_diversity.tsv carries the share it was computed over beside it.
+    # The one index here that reads a classification database, so it comes after
+    # the three that do not. It describes only the part of the sample MetaPhlAn
+    # detected; alpha_diversity.tsv carries that share beside it.
+    #
+    # Its counterpart over the NCBI taxonomy is published in that table but is
+    # not offered here. Faith's PD is a sum of branch length, so on a taxonomy
+    # it counts the lineages a classifier named - which rises with how much of
+    # the sample the database happens to cover. On run zo6gtknt it correlated
+    # +0.57 with the classified fraction and -0.46 with the mOTUs count, while
+    # this one correlated +0.99 with that count. The taxonomy tree is shipped in
+    # the BIOM for UniFrac, which compares renormalised profiles and does not
+    # inherit that.
     if alpha_has_column faith_pd_sgb; then
-        metrics+=('{"key":"faithsgb","title":"Faith'"'"'s PD (phylogeny)","note":"branch length of the published species phylogeny this sample covers, over the species MetaPhlAn detected","places":2,"source":"MetaPhlAn"}')
-    fi
-
-    if alpha_has_column faith_pd; then
-        metrics+=('{"key":"faith","title":"Faith'"'"'s PD (taxonomy)","note":"branch length of the NCBI taxonomy this sample covers, over the reads that were classified - a taxonomic diversity rather than an evolutionary one","places":2,"source":"'"$PROFILE_TOOL"'"}')
+        metrics+=('{"key":"faithsgb","title":"Faith'"'"'s PD","note":"branch length of the published species phylogeny this sample covers, over the species MetaPhlAn detected","places":2,"source":"MetaPhlAn"}')
     fi
 
     (( ${#metrics[@]} > 0 )) || return 1
@@ -910,10 +931,10 @@ alpha_json() {
 
             for (i = 1; i <= n; i++) out = out (i > 1 ? "," : "") json_string(name[i])
 
-            printf "%s],%s,\"alpha\":{%s,%s,%s,%s,%s,%s}", out, series("reads", 2), \
+            printf "%s],%s,\"alpha\":{%s,%s,%s,%s,%s}", out, series("reads", 2), \
                 series("diversity", 3), series("coverage", 4), \
                 series("effort95", 8), series("motus", 9), \
-                series("faith", 10), series("faithsgb", 12)
+                series("faithsgb", 12)
         }
     ' "$ALPHA_TABLE"
 }

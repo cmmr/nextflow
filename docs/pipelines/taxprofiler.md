@@ -375,7 +375,7 @@ Profiling databases come from
 | --- | --- | --- |
 | kraken2 | `pluspf_20260626` | RefSeq archaea, bacteria, viral, plasmid, human, UniVec_Core, protozoa, fungi. `db_params` is `--confidence 0.1`; `db_type` is `short;long` |
 | bracken | `pluspf_20260626_bracken` | same directory as the kraken2 row; `db_params` is `--confidence 0.1;-r 150` |
-| metaphlan | `mpa_vJun23_CHOCOPhlAnSGB_202403` | `db_type` is `short` |
+| metaphlan | `mpa_vJun23_CHOCOPhlAnSGB_202403` | `db_params` is `--unclassified_estimation`; `db_type` is `short` |
 | motus | `db_mOTU_v3.1.0` | `db_path` ends in `db_mOTU`; `db_type` is `short;long` |
 | sylph | `gtdb_r220` | `db_path` is the `.syldb` file itself, not a directory; `db_type` is `short` |
 
@@ -600,8 +600,7 @@ Overview's diversity chart is drawn from them:
 | Nonpareil diversity (Nd) | nonpareil | How varied the community is, on a log scale, from how often the same sequence recurs |
 | Observed mOTUs | mOTUs | Species-level clusters found in universal marker genes |
 | Effort for 95% coverage | nonpareil | How much sequencing that sample would take to get there |
-| Faith's PD (phylogeny) | MetaPhlAn's SGB tree | Branch length of a real phylogeny the sample covers |
-| Faith's PD (taxonomy) | Bracken on the taxonomy tree | Branch length of the NCBI taxonomy the sample covers |
+| Faith's PD | MetaPhlAn's SGB tree | Branch length of a real phylogeny the sample covers |
 | Read depth | kraken2 | The reads the estimates above were measured at |
 
 That is the order the `Index` select offers them in, so **estimated coverage is
@@ -638,16 +637,31 @@ construction. Its profiles are published and merged like any other classifier's;
 what the diversity chart takes from them is one number per sample, the count of
 clusters with a non-zero read count.
 
-**The two Faith's PDs are the exception, and carry their own caveat.** Unlike
-everything above them they do read a classification database — see [The feature
-tables](#the-feature-tables) for the two trees they are computed over — so each
-describes only the part of the sample that was classified. That is why each has
-a basis column next to it in the table:
+**Faith's PD is the exception, and carries its own caveat.** Unlike everything
+above it, it reads a classification database — see [The feature
+tables](#the-feature-tables) for the tree — so it describes only the part of the
+sample MetaPhlAn detected. `faith_pd_sgb_basis_pct` beside it is that share, and
+it is a real number rather than a constant because MetaPhlAn is run with
+`--unclassified_estimation`: without it MetaPhlAn renormalises its profile to
+100% and the column reads ~100 on every sample.
 
-| Reading | Basis |
-|---|---|
-| `faith_pd` | `faith_pd_basis_pct`, the share of the reads reaching the classifier that ended up on the taxonomy tree |
-| `faith_pd_sgb` | `faith_pd_sgb_basis_pct`, the share of MetaPhlAn's profile that is on the SGB phylogeny |
+**Its counterpart over the NCBI taxonomy is published but not charted.**
+`faith_pd` and `faith_pd_basis_pct` are in `alpha_diversity.tsv`; the Overview
+does not offer them. Faith's PD is a sum of branch length, so over a taxonomy it
+amounts to a weighted count of the lineages a classifier named — which rises
+with how much of the sample the database happens to cover rather than with how
+varied the sample is. On run `zo6gtknt` it correlated **+0.57 with the classified
+fraction and −0.46 with the mOTUs count**, while the SGB reading correlated
+**+0.99** with that same count. The sample with the fewest mOTUs and the highest
+Nonpareil coverage — the least diverse in the run by every database-free reading
+— had the highest `faith_pd`.
+
+That is the failure this pipeline already refuses Shannon and Simpson for, and
+it is why the taxonomy tree is shipped for UniFrac rather than for Faith's PD.
+WGSUniFrac validated UniFrac on such a tree, not Faith's PD: weighted UniFrac
+compares profiles that have each been renormalised, so it does not inherit the
+confound, while Faith's PD and unweighted UniFrac scale directly with how many
+taxa were named.
 
 **The unclassified reads are not on either tree, and are not put there.** Faith's
 PD and UniFrac are both sums over branches, and a read that reached no taxon has

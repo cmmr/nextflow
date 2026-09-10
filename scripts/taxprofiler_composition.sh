@@ -631,6 +631,7 @@ build_feature_tables() {
     local profile species_only=0
     local taxonomy_dir metaphlan_db metaphlan_name metaphlan_tree=""
     local metaphlan_profile="" tree="" lineage=""
+    local metaphlan_dir="" motus_profile=""
     local ids="$WORK/taxon_ids.txt"
 
     can_build_tables || return 1
@@ -685,7 +686,20 @@ build_feature_tables() {
         log "No MetaPhlAn phylogeny beside its database; no SGB table will be built."
     fi
 
-    if [[ -z "$profile" && -z "$metaphlan_profile" ]]; then
+    # What the count tables are read from, none of which needs a tree. The
+    # per-sample MetaPhlAn profiles are the only place its read and coverage
+    # estimates survive; merge_metaphlan_tables.py keeps neither. They are still
+    # here because prune_results.sh runs after this script, not before it.
+    if [[ -d "$METAPHLAN_DIR" ]] && \
+       compgen -G "$METAPHLAN_DIR/*/*_profile.txt" > /dev/null; then
+        metaphlan_dir="$METAPHLAN_DIR"
+    fi
+
+    motus_profile=$(first_match "$MOTUS_DIR"/motus_*_combined_reports.txt) \
+        || motus_profile=""
+
+    if [[ -z "$profile" && -z "$metaphlan_profile" && -z "$metaphlan_dir" \
+          && -z "$motus_profile" ]]; then
         return 1
     fi
 
@@ -695,7 +709,8 @@ build_feature_tables() {
     if ! output=$(apptainer exec -B /data -B "$WORK" "$RBIOM_CONTAINER" \
             Rscript --vanilla "$TABLES_SCRIPT" \
                 "$RESULTS_DIR" "$FAITH_TABLE" "$profile" "$species_only" \
-                "$tree" "$lineage" "$metaphlan_profile" "$metaphlan_tree" 2>&1); then
+                "$tree" "$lineage" "$metaphlan_profile" "$metaphlan_tree" \
+                "$metaphlan_dir" "$motus_profile" 2>&1); then
         warn "The feature tables could not be assembled:"$'\n'"$output"
         return 1
     fi

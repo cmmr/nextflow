@@ -11,7 +11,7 @@
 # UniFrac and Faith's PD can be computed the way they can from the 16S
 # pipeline's output.
 #
-# Two tables are built, from the two profiles that can carry a tree at all:
+# Two BIOM tables are built, from the two profiles that can carry a tree at all:
 #
 #   feature_table/feature-table.{tsv,json.biom,hdf5.biom}
 #       Bracken's species counts, keyed by NCBI taxon id, with the taxonomy
@@ -36,12 +36,30 @@
 # describes only the fraction of the sample that was classified, and that
 # fraction is what makes it readable.
 #
+# count_tables/ holds the same profiles as plain matrices, one per profiler and
+# unit, for a reader who wants counts rather than a BIOM:
+#
+#   bracken-reads.tsv, kraken2-reads.tsv
+#       Reads per species. kraken2 rows below species roll up into it and rows
+#       above it become one "<taxon> unclassified" species, so the table totals
+#       every classified read rather than the 55% that land at species.
+#
+#   metaphlan-cells.tsv, metaphlan-reads.tsv
+#       MetaPhlAn's own coverage and read estimates, merged from the per-sample
+#       profiles that -t rel_ab_w_read_stats writes. merge_metaphlan_tables.py
+#       reads only the relative abundance column, so the merged report beside
+#       these two carries percentages and neither of these does.
+#
+#   motus-cells.tsv
+#       mOTUs scaled insert counts, already per-cell: its markers are universal
+#       single-copy genes, so a count is already a count of organisms.
+#
 # Nothing is rarefied. The read depth every index was computed at is published
 # beside it, and the feature table is there to be rarefied downstream.
 #
 # Usage: taxprofiler_tables.R <results_dir> <faith_out> <profile_tsv>
 #            <species_only> <taxonomy_tree> <lineage_tsv> <metaphlan_profile>
-#            <metaphlan_tree>
+#            <metaphlan_tree> <metaphlan_dir> <motus_profile>
 #        Every path after faith_out may be empty, which leaves out whatever
 #        needed it; species_only is 1 for a kraken2 table and 0 for a bracken one
 #
@@ -54,7 +72,7 @@ args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 2)
     stop("usage: taxprofiler_tables.R <results_dir> <faith_out> <profile_tsv> ",
          "<species_only> <taxonomy_tree> <lineage_tsv> <metaphlan_profile> ",
-         "<metaphlan_tree>")
+         "<metaphlan_tree> <metaphlan_dir> <motus_profile>")
 
 argument <- function (i) if (length(args) >= i) args[[i]] else ""
 
@@ -66,8 +84,11 @@ taxonomy_tree     <- argument(5)
 lineage_tsv       <- argument(6)
 metaphlan_profile <- argument(7)
 metaphlan_tree    <- argument(8)
+metaphlan_dir     <- argument(9)
+motus_profile     <- argument(10)
 
 table_dir <- file.path(results_dir, "feature_table")
+count_dir <- file.path(results_dir, "count_tables")
 
 # The ranks taxprofiler_taxonomy_tree.sh writes, in the order it writes them
 RANKS <- c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species")
@@ -279,6 +300,198 @@ faith_of <- function (biom) {
 }
 
 
+# -- Count tables ------------------------------------------------------------
+
+# One matrix as a plain table, with the taxon it is keyed by named beside it
+write_counts <- function (file, ids, names, counts, key, what) {
+    if (nrow(counts) == 0) stop("there are no ", what, " to write")
+
+    dir.create(count_dir, recursive = TRUE, showWarnings = FALSE)
+
+    frame <- data.frame(ids, names, round(counts),
+                        check.names = FALSE, stringsAsFactors = FALSE)
+
+    colnames(frame) <- c(key, "name", colnames(counts))
+
+    utils::write.table(frame, file = file.path(count_dir, file), sep = "\t",
+                       quote = FALSE, row.names = FALSE)
+
+    message("Wrote ", file, ": ", nrow(counts), " ", what, ", ",
+            ncol(counts), " samples")
+}
+
+# A matrix rescaled so each sample totals what is named for it, which is what
+# turns a coverage into a count that still carries sequencing depth
+scale_to <- function (values, totals) {
+    scale <- totals / colSums(values)
+    scale[!is.finite(scale)] <- 0
+
+    sweep(values, 2, scale, "*")
+}
+
+# Where each row of a taxpasta table sits relative to species. A row below
+# species takes the species in its own lineage; a row above it becomes an
+# unclassified species of its own, so that no assigned read is dropped.
+species_keys <- function (table) {
+    ids   <- trimws(table$taxonomy_id)
+    ranks <- trimws(table$rank)
+    names <- trimws(table$name)
+
+    if (!all(c("id_lineage", "rank_lineage", "lineage") %in% colnames(table)))
+        stop("the profile carries no lineage columns to place its ranks with")
+
+    split_at <- function (column, at) {
+        parts <- strsplit(column, ";", fixed = TRUE)
+
+        trimws(vapply(seq_along(parts), function (i)
+            if (at[[i]] > 0 && length(parts[[i]]) >= at[[i]])
+                parts[[i]][[at[[i]]]] else NA_character_, character(1)))
+    }
+
+    at <- vapply(strsplit(table$rank_lineage, ";", fixed = TRUE),
+                 function (ranks) match("species", trimws(ranks), nomatch = 0L),
+                 integer(1))
+
+    keys   <- ids
+    labels <- names
+
+    below <- ranks != "species" & at > 0
+    if (any(below)) {
+        at_below <- ifelse(below, at, 0L)
+
+        keys[below]   <- split_at(table$id_lineage, at_below)[below]
+        labels[below] <- split_at(table$lineage, at_below)[below]
+    }
+
+    above <- ranks != "species" & at == 0
+    if (any(above)) {
+        keys[above]   <- paste0("u", ids[above])
+        labels[above] <- ifelse(nzchar(names[above]),
+                                paste(names[above], "unclassified"),
+                                "unclassified")
+    }
+
+    unplaced <- is.na(keys) | !nzchar(keys)
+    keys[unplaced]   <- paste0("u", ids[unplaced])
+    labels[unplaced] <- "unclassified"
+
+    data.frame(key = keys, label = labels, stringsAsFactors = FALSE)
+}
+
+# A taxpasta table as a counts matrix at species, keeping every assigned read
+read_at_species <- function (path) {
+    table <- utils::read.delim(path, check.names = FALSE, quote = "",
+                               colClasses = "character")
+
+    if (!"taxonomy_id" %in% colnames(table))
+        stop(basename(path), " has no taxonomy_id column")
+
+    placed <- species_keys(table)
+
+    counts <- numeric_matrix(table[setdiff(colnames(table), TAXPASTA_FIELDS)],
+                             placed$key, paste(basename(path), "names no samples"))
+
+    database <- sub("^[^_]+_", "", sub("\\.tsv$", "", basename(path)))
+    colnames(counts) <- strip_database(colnames(counts), database)
+
+    counts <- rowsum(counts, group = placed$key, reorder = FALSE)
+    labels <- placed$label[!duplicated(placed$key)]
+
+    list(counts = counts[, sort(colnames(counts)), drop = FALSE],
+         labels = labels[match(rownames(counts), placed$key[!duplicated(placed$key)])])
+}
+
+# Every per-sample MetaPhlAn profile that -t rel_ab_w_read_stats wrote, as one
+# matrix of the named column. Rows are the species clades; the UNCLASSIFIED row
+# is kept so that what the profiler could not place stays visible.
+read_metaphlan_stats <- function (dir, column) {
+    files <- list.files(dir, pattern = "_profile\\.txt$", recursive = TRUE,
+                        full.names = TRUE)
+
+    if (length(files) == 0) stop("no per-sample MetaPhlAn profile is in ", dir)
+
+    clades <- character(0)
+    columns <- list()
+
+    for (path in files) {
+        lines  <- readLines(path, warn = FALSE)
+        header <- lines[startsWith(lines, "#clade_name")]
+
+        if (length(header) == 0)
+            stop(basename(path), " carries no rel_ab_w_read_stats header")
+
+        fields <- strsplit(sub("^#", "", header[[1]]), "\t", fixed = TRUE)[[1]]
+
+        if (!column %in% fields)
+            stop(basename(path), " has no ", column, " column")
+
+        rows <- lines[!startsWith(lines, "#") & nzchar(lines)]
+        if (length(rows) == 0) next
+
+        split <- strsplit(rows, "\t", fixed = TRUE)
+        clade <- vapply(split, function (row) row[[1]], character(1))
+        value <- suppressWarnings(as.numeric(vapply(split, function (row)
+            if (length(row) >= match(column, fields))
+                row[[match(column, fields)]] else NA_character_, character(1))))
+
+        # Rows ending at s__, not the t__SGB row under each one, which repeats
+        # the same value one rank deeper
+        keep  <- grepl("\\|s__[^|]*$", clade) | clade == "UNCLASSIFIED"
+        value[is.na(value)] <- 0
+
+        sample <- sub("_profile\\.txt$", "", basename(path))
+        columns[[sample]] <- stats::setNames(value[keep], clade[keep])
+        clades <- union(clades, clade[keep])
+    }
+
+    if (length(columns) == 0) stop("every MetaPhlAn profile in ", dir, " is empty")
+
+    counts <- vapply(columns, function (values) {
+        placed <- values[clades]
+        placed[is.na(placed)] <- 0
+        placed
+    }, numeric(length(clades)))
+
+    counts <- matrix(counts, nrow = length(clades),
+                     dimnames = list(clades, names(columns)))
+
+    database <- sub("^[^_]+_", "", names(columns)[[1]])
+    colnames(counts) <- strip_database(colnames(counts),
+                                       sub("\\.metaphlan$", "", database))
+
+    counts[, sort(colnames(counts)), drop = FALSE]
+}
+
+# The merged mOTUs report, which is already one scaled insert count per marker
+# gene cluster. Rows that no sample saw are dropped.
+read_motus <- function (path) {
+    lines <- readLines(path, warn = FALSE)
+    lines <- lines[!startsWith(lines, "# ")]
+
+    if (length(lines) < 2) stop(basename(path), " carries no profile")
+
+    table <- utils::read.delim(text = sub("^#", "", lines), check.names = FALSE,
+                               quote = "", colClasses = "character")
+
+    if (ncol(table) < 3) stop(basename(path), " names no samples")
+
+    taxa <- trimws(table[[1]])
+
+    counts <- numeric_matrix(table[-(1:2)], taxa,
+                             paste(basename(path), "names no samples"))
+
+    database <- sub("_combined_reports.*$", "",
+                    sub("^motus_", "", basename(path)))
+
+    colnames(counts) <- strip_database(colnames(counts), database)
+
+    seen <- rowSums(counts) > 0
+
+    list(counts = counts[seen, sort(colnames(counts)), drop = FALSE],
+         ids    = trimws(table[[2]])[seen])
+}
+
+
 # -- The species table, on the taxonomy --------------------------------------
 
 taxonomy_faith <- NULL
@@ -361,6 +574,61 @@ if (!usable(metaphlan_profile) || !usable(metaphlan_tree)) {
 
     message("Wrote the MetaPhlAn table: ", biom$n_otus, " SGBs, ",
             biom$n_samples, " samples, on the published phylogeny")
+})
+
+
+# -- The count tables --------------------------------------------------------
+
+if (!usable(profile_tsv)) {
+    note("there is no merged taxpasta profile; no read count table")
+} else attempt("the profile count tables", function () {
+    tool   <- if (species_only) "kraken2" else "bracken"
+    placed <- read_at_species(profile_tsv)
+
+    write_counts(paste0(tool, "-reads.tsv"), rownames(placed$counts),
+                 placed$labels, placed$counts, "taxonomy_id", "species")
+})
+
+if (!usable(metaphlan_dir)) {
+    note("no per-sample MetaPhlAn profiles; no MetaPhlAn count table")
+} else attempt("the MetaPhlAn count tables", function () {
+    reads <- read_metaphlan_stats(metaphlan_dir,
+                                  "estimated_number_of_reads_from_the_clade")
+
+    write_counts("metaphlan-reads.tsv", rownames(reads),
+                 sub(".*\\|s__", "", rownames(reads)), reads,
+                 "clade_name", "clades")
+
+    # Coverage is genome copies, so it runs well below 1 and would round to
+    # nothing; it is put on the scale of the reads placed beside it. The
+    # unclassified row has no genome to be a copy of and keeps its read count.
+    attempt("metaphlan-cells.tsv", function () {
+        cover  <- read_metaphlan_stats(metaphlan_dir, "coverage")
+        shared <- intersect(rownames(reads), rownames(cover))
+
+        cover <- cover[shared, colnames(reads), drop = FALSE]
+        seen  <- reads[shared, colnames(reads), drop = FALSE]
+
+        placed <- rownames(cover) != "UNCLASSIFIED"
+        cells  <- cover
+
+        cells[placed, ]  <- scale_to(cover[placed, , drop = FALSE],
+                                     colSums(seen[placed, , drop = FALSE]))
+        cells[!placed, ] <- seen[!placed, , drop = FALSE]
+
+        write_counts("metaphlan-cells.tsv", rownames(cells),
+                     sub(".*\\|s__", "", rownames(cells)), cells,
+                     "clade_name", "clades")
+    })
+})
+
+if (!usable(motus_profile)) {
+    note("no merged mOTUs profile; no mOTUs count table")
+} else attempt("motus-cells.tsv", function () {
+    profile <- read_motus(motus_profile)
+
+    write_counts("motus-cells.tsv", profile$ids, rownames(profile$counts),
+                 profile$counts, "ncbi_tax_id", "mOTUs")
 })
 
 

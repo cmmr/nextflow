@@ -2,9 +2,16 @@
 
 Shotgun metagenomic profiling with
 [nf-core/taxprofiler](https://nf-co.re/taxprofiler), running kraken2, bracken,
-metaphlan, mOTUs and sylph over the same lab samplesheet the ampliseq pipeline
-takes, with nonpareil measuring how much of each community was sequenced at all
-and a BIOM feature table carrying a tree out to the requester.
+metaphlan and mOTUs over the same lab samplesheet the ampliseq pipeline takes,
+with nonpareil measuring how much of each community was sequenced at all, and a
+BIOM feature table carrying a tree out to the requester alongside plain count
+tables in both reads and genome-size-corrected cells.
+
+HUMAnN then answers the other half of the question — what those communities can
+do — over the reads taxprofiler already cleaned and the profiles it already
+computed. taxprofiler has no functional profiling of any kind, so that is a
+second workflow in this repository rather than a taxprofiler parameter; see
+[Functional profiling](#functional-profiling).
 
 Everything here is taxprofiler-specific. For how a request becomes a run at all,
 see the [README](../index.md).
@@ -20,30 +27,40 @@ see the [README](../index.md).
 | MetaPhlAn database | **mpa_vJun23_CHOCOPhlAnSGB_202403** | `db/metaphlan/…` (33 GB) |
 | MetaPhlAn SGB phylogeny | same release, 36,273 tips | `db/metaphlan/…/mpa_vJun23_CHOCOPhlAnSGB_202403.nwk` (1.2 MB) |
 | mOTUs database | **db_mOTU_v3.1.0** | `db/motus/db_mOTU_v3.1.0/db_mOTU` (3.5 GB) |
-| sylph database | **GTDB r220**, 113,104 species at `c=200` | `db/sylph/gtdb-r220-c200-dbv1.syldb` (13 GB) |
-| sylph taxonomy | `gtdb_r220_metadata.tsv.gz` | `db/sylph/` (12 MB) |
+| HUMAnN | **3.9** | pinned by container digest in `workflows/humann/main.nf` |
+| ChocoPhlAn pangenomes | **v201901_v31** | `db/humann/v201901b/chocophlan` (16 GB) |
+| UniRef90 DIAMOND index | **v201901b**, annotated | `db/humann/v201901b/uniref90` (34 GB) |
+| HUMAnN utility mapping | **v201901b** | `db/humann/v201901b/utility_mapping` (6 GB) |
 | Host — none | PhiX only (`GCF_000819615.1`) | `db/hostremoval/phix` |
 | Host — human | T2T-CHM13v2.0 (`GCF_009914755.1`) + PhiX | `db/hostremoval/chm13v2phix` (14 GB) |
 | Host — mouse | GRCm39 (`GCF_000001635.27`) + PhiX | `db/hostremoval/grcm39phix` (13 GB) |
 
 Tool versions come from taxprofiler 2.0.1 and are not ours to choose: kraken2
-2.1.5, bracken 3.1, metaphlan 4.1.1, motus 3.1.0, sylph 0.7.0, sylph-tax 1.2.0,
-nonpareil 3.5.5. Nonpareil
+2.1.5, bracken 3.1, metaphlan 4.1.1, motus 3.1.0, nonpareil 3.5.5. Nonpareil
 needs no database of its own — it measures redundancy in the reads themselves.
 The bowtie2 and minimap2 builds used for the host references are recorded in
-each reference's `manifest.json`.
+each reference's `manifest.json`. HUMAnN is ours to choose and is pinned to the
+BioContainer for 3.9, which brings its own bowtie2 and DIAMOND.
 
 Every database was fetched fresh by the scripts in
 [Cluster setup](#cluster-setup) rather than reused from elsewhere on the cluster,
 and each carries a `manifest.json` naming its source URLs, checksums and fetch
 date.
 
-**Three pins are deliberate and should not be bumped casually:**
+**Four pins are deliberate and should not be bumped casually:**
 
 - **MetaPhlAn's database.** Its own `mpa_latest` marker names
   `mpa_vJan26_CHOCOPhlAnSGB_202605`, which requires MetaPhlAn 4.2. taxprofiler
-  2.0.1 pins 4.1.1, whose newest supported database is the one above. Moving
-  forward needs a newer taxprofiler, not a newer database.
+  2.0.1 pins 4.1.1, whose newest supported database is the one above. This pin is
+  now load-bearing for two steps rather than one: HUMAnN 3.9 accepts a MetaPhlAn
+  profile only if it names `vJun23`, so moving forward needs a newer taxprofiler
+  *and* a stable HUMAnN 4 — and there isn't one. HUMAnN's newest release is 3.9,
+  from February 2024; 4.0 has been in alpha since October 2024.
+- **HUMAnN's databases.** `v201901_v31` and `v201901b` look stale and are not:
+  the `_v31` suffix is the bioBakery 3.1 pangenome catalogue, and HUMAnN 3.9
+  refuses a ChocoPhlAn directory holding any file whose name does not carry that
+  string. Nothing else may be written into that directory for the same reason —
+  a README beside the pangenomes is enough to make every HUMAnN call exit.
 - **mOTUs' database.** mOTUs checks the version recorded inside the database
   against its own before it profiles anything, and taxprofiler 2.0.1 runs
   `MOTUS_PROFILE` in the motus 3.1.0 container. `db_mOTU_v3.1.0` is what that
@@ -198,6 +215,10 @@ lab sheet into the six-column CSV taxprofiler wants — `sample`, `run_accession
 - **Bracken's read length is measured**, not assumed — see
   [Databases](#databases).
 
+[`taxprofiler_humann.sh`](../../scripts/taxprofiler_humann.sh) runs first among
+the post-process steps, since the one after it publishes what it wrote and
+deletes the reads it read. See [Functional profiling](#functional-profiling).
+
 [`taxprofiler_upload.sh`](../../scripts/taxprofiler_upload.sh) summarises the
 classifier reports, prunes and indexes the results folders, copies them to
 `s3://$AWS_S3_BUCKET/nxf/<uid>/`, renders the shared
@@ -222,9 +243,10 @@ guest collection is a `zip` into place on the cluster's own disk, and the
 requester fetches them at the cluster's own bandwidth.
 
 **The reads in that zip are the raw ones, and only those.**
-`save_analysis_ready_fastqs` would add the trimmed, complexity-filtered,
-host-depleted set beside them; it is off. What a requester wants back is the
-data as it was sequenced — the processed reads are reproducible from it and
+`save_analysis_ready_fastqs` is on, but only so that HUMAnN profiles exactly the
+reads the classifiers saw; `prune.conf` deletes that set once HUMAnN has read it,
+before anything is indexed, zipped or uploaded. What a requester wants back is
+the data as it was sequenced — the processed reads are reproducible from it and
 from the published parameters, and a second copy of every FASTQ doubles a
 download that is already the largest thing a run produces.
 
@@ -238,6 +260,7 @@ deletions empty goes with them.
 
 | Deleted | Why |
 |---|---|
+| `analysis_ready_fastqs/` | The trimmed, filtered, depleted and merged reads, published only so that HUMAnN could be run over exactly what the classifiers saw. By the time this runs it already has been — see [Functional profiling](#functional-profiling). |
 | `kraken2/*/`, `bracken/*/`, `metaphlan/*/`, `motus/*/` | The per-sample profiles. Each is one column of the merged table published in the folder above it, and of the taxpasta table beside that: a Kraken2 sample report is the `N_all`/`N_lvl` pair of `kraken2_*_combined_reports.txt`, a mOTUs `.out` is one column of `motus_*_combined_reports.txt` with the same 34,344 rows in the same order. `metaphlan/*/` also holds MetaPhlAn's alignments — its record of which read hit which marker gene, kept only so MetaPhlAn can be re-run without aligning again, and on run `vbnhm2tf` 1,209 MB of 1,381 MB. |
 | `kraken2/kraken2_*-bracken_combined_reports.txt`, `taxpasta/kraken2_*-bracken.tsv` | nf-core/taxprofiler names Bracken's kraken-style outputs `<db>-bracken`, but what it aggregates there is Kraken2's own clade counts. The two combined reports are byte-identical below their headers, and the two taxpasta tables carry the same value for every taxon in every sample. The plain-named one is kept. |
 | `fastp/*.fastp.json`, `fastp/*.fastp.log` | Every number in the HTML report beside it, written for a machine; and what fastp printed while it ran, which MultiQC read. |
@@ -249,12 +272,24 @@ deletions empty goes with them.
 | `fastqc/*/*_fastqc.zip` | The same measurements as the `_fastqc.html` published beside it, which is also what MultiQC read. |
 | one of `krona/*.html` | See below. |
 
-**sylph's per-sample files are kept.** The rule for deleting a set of
-per-sample profiles is that a merged file beside them carries the same numbers,
-and sylph's does not: the merged table is one column of whichever abundance
-`sylph_data_type` named, while each `.sylphmpa` also carries the containment ANI
-and the effective coverage the detection was called on — which is what says
-whether to believe it. They are hundreds of kilobytes, not gigabytes.
+**Three sets of per-sample files are kept**, all for the same reason: the rule
+for deleting them is that a merged file beside them carries the same numbers,
+and in these three cases none does.
+
+MetaPhlAn's per-sample profiles carry a `coverage` and an
+`estimated_number_of_reads_from_the_clade` column that
+`merge_metaphlan_tables.py` drops — it reads `relative_abundance` and no other
+column — so the merged report is percentages and these are where the counts
+live. The `.bowtie2out.txt` and per-sample `.biom` beside them still go; the
+alignments alone were 1.2 GB of a 1.4 GB folder.
+
+Kraken2's per-sample reports carry the distinct-minimizer count that
+`--report-minimizer-data` adds, which no merged table has. The `_standardized`
+copy cut down from each one goes, since that is what was merged.
+
+mOTUs' `.mgc` files are the read count per marker gene cluster that each profile
+is the median over — the per-marker evidence behind a call. The `.out` and
+`.log` beside them go.
 
 **`feature_table/` is not touched either.** Nothing in it is a second encoding
 of something else published here: the tables in it carry a tree, and the
@@ -316,8 +351,8 @@ offer: one file three ways rather than three files. It is there because a
 requester computing UniFrac or Faith's PD needs the object with the tree in it,
 and nothing else on the page is that.
 
-The merged MetaPhlAn, mOTUs and sylph profiles, and `alpha_diversity.tsv`, are
-all published — they are just not what this list is for. It is the shortest
+The merged MetaPhlAn and mOTUs profiles, the count tables, and
+`alpha_diversity.tsv`, are all published — they are just not what this list is for. It is the shortest
 route to the file a requester came for, and every row added to it makes that
 route longer. The file index carries each of them under the heading that says
 what it is for, and the second-opinion profiles and the numbers behind a plot
@@ -375,9 +410,8 @@ Profiling databases come from
 | --- | --- | --- |
 | kraken2 | `pluspf_20260626` | RefSeq archaea, bacteria, viral, plasmid, human, UniVec_Core, protozoa, fungi. `db_params` is `--confidence 0.1`; `db_type` is `short;long` |
 | bracken | `pluspf_20260626_bracken` | same directory as the kraken2 row; `db_params` is `--confidence 0.1;-r 150` |
-| metaphlan | `mpa_vJun23_CHOCOPhlAnSGB_202403` | `db_params` is `--unclassified_estimation`; `db_type` is `short` |
+| metaphlan | `mpa_vJun23_CHOCOPhlAnSGB_202403` | `db_params` is `--unclassified_estimation -t rel_ab_w_read_stats`; `db_type` is `short` |
 | motus | `db_mOTU_v3.1.0` | `db_path` ends in `db_mOTU`; `db_type` is `short;long` |
-| sylph | `gtdb_r220` | `db_path` is the `.syldb` file itself, not a directory; `db_type` is `short` |
 
 **Kraken2 runs at `--confidence 0.1`, not at its default of 0.** At the default
 a single distinguishing k-mer places a read at a leaf, which against a database
@@ -393,29 +427,21 @@ It goes on **both** rows. Running kraken2 and bracken makes taxprofiler classify
 every sample twice, once per row, and on the bracken row it must sit *before*
 the semicolon, which is where that row's kraken2 parameters live.
 
-**sylph profiles against GTDB rather than RefSeq.** PlusPF is RefSeq-derived and
-therefore blind by construction to the lineages that exist only as
-metagenome-assembled genomes; sylph's prebuilt database is 113,104 GTDB r220
-species representatives, and it calls a species present from containment ANI
-rather than from k-mer hits alone. It profiles the whole of that in about 15 GB
-of RAM and minutes per sample, which is why it is worth a fifth profiler when a
-fifth Kraken2-shaped classifier would not be.
+**MetaPhlAn runs at `-t rel_ab_w_read_stats`, not at its default.** The default
+`rel_ab` reports one number per clade, a relative abundance. This analysis type
+reports three: that abundance, the marker `coverage` behind it, and
+`estimated_number_of_reads_from_the_clade`, which is that coverage multiplied by
+the clade's genome length. Coverage is genome copies, so it is an organism
+count; the read estimate is a read count. Both are needed and neither is in the
+default output. It is a flag rather than a step, so it costs no runtime, and in
+MetaPhlAn 4.1.1 it still writes the `--biom` file the module asks for.
 
-Three things about it are different from everything else here, and the file
-index says so:
-
-- **Its names are GTDB lineages**, not NCBI ones. The same organism can carry a
-  different name here than in the Bracken table beside it.
-- **taxpasta does not support sylph**, so there is no `taxpasta/sylph_*.tsv`.
-  taxprofiler runs `sylph-tax merge` itself and publishes
-  `sylph/sylph_gtdb_r220_combined_reports.tsv` in MetaPhlAn-style lineage
-  format.
-- **There is no Krona chart for it.** taxprofiler draws Krona for kraken2,
-  bracken, centrifuge, kaiju and malt only.
-
-Its `db_type` is `short`. sylph can read long reads, but its defaults are tuned
-for short ones and a long-read run would need its identity thresholds set; a
-`short` row is skipped on a long-read run rather than answered badly.
+What it does not survive is the merge. `merge_metaphlan_tables.py` selects
+`clade_name` and `relative_abundance` and no other column, so
+`metaphlan_*_combined_reports.txt` is percentages however MetaPhlAn was run.
+`count_tables/metaphlan-cells.tsv` and `metaphlan-reads.tsv` are the per-sample
+profiles merged by `scripts/R/taxprofiler_tables.R` instead, which is why
+`prune.conf` keeps those profiles.
 
 **The mOTUs `db_path` has to end in a directory called `db_mOTU`.** mOTUs
 resolves its own files relative to that name, so the release directory holds one
@@ -583,6 +609,52 @@ was already built for the 16S pipeline. A run missing any piece publishes the
 tables it can and reports what it left out, rather than failing the upload.
 
 
+## The count tables
+
+The BIOM files carry a tree, which is what constrains them: every feature has to
+be a tip, so anything the tree has no place for is left out. `count_tables/`
+carries no tree and so has no such constraint. It is the same profiles as plain
+matrices — one row per taxon, one column per sample, whole numbers — written by
+the same R script.
+
+| File | Cell is | Comes from |
+|---|---|---|
+| `bracken-reads.tsv` | reads | `taxpasta/bracken_*.tsv` |
+| `kraken2-reads.tsv` | reads | `taxpasta/kraken2_*.tsv`, every rank placed at species |
+| `metaphlan-cells.tsv` | organisms | MetaPhlAn's `coverage` column |
+| `metaphlan-reads.tsv` | reads | MetaPhlAn's `estimated_number_of_reads_from_the_clade` |
+| `motus-cells.tsv` | organisms | mOTUs' scaled insert counts, unchanged |
+
+**Reads and cells are not the same measurement.** A read count is what the
+sequencer produced; an organism count is what was in the sample. They differ by
+genome length: a fungus with a genome ten times a gut bacterium's sheds ten
+times the reads per cell. Rarefaction wants reads, since it models drawing reads
+from a pool and the per-sample totals have to be sequencing effort. Comparing
+species *within* a sample wants cells.
+
+**Every column here is a number its own profiler reported.** MetaPhlAn measures
+marker coverage before it measures anything else, and coverage is genome copies;
+mOTUs counts universal single-copy marker genes, so its scaled insert counts are
+per-organism by construction. Neither needs a genome length applied from
+outside, and neither gets one. Kraken2 and Bracken count reads and know nothing
+about genome size, so they publish reads and nothing else — converting them
+would mean joining an external genome size table onto the profile, which is a
+step nf-core/taxprofiler does not take and neither does this pipeline.
+
+**`kraken2-reads.tsv` accounts for every classified read.** Kraken2 assigns to
+whatever rank the evidence supports, and on that same run only 55% of classified
+reads landed at species — 25% stopped at genus, 7.5% at family. Filtering to
+species rows would silently drop 45% of the data. Instead, reads assigned below
+species roll up into the species in their own lineage, and reads assigned at
+genus or above become a synthetic `<taxon> unclassified` species keyed `u<taxid>`.
+Column totals are preserved exactly. This is what `taxpasta_add_idlineage` is
+turned on for. Bracken needs none of it — Bracken's whole job is redistributing
+those reads down, and its table is 100% species already.
+
+The BIOM files do not get this treatment: a `u<taxid>` feature has no tip on the
+NCBI taxonomy tree. `feature_table/` stays as it was, and `count_tables/` is
+where the complete numbers are.
+
 ## Diversity and coverage
 
 **Shannon, Simpson and Pielou are not reported for a shotgun run.** They were,
@@ -724,6 +796,127 @@ output still gets its composition plotted; the Overview simply drops its
 diversity half rather than plotting read depth and calling it diversity.
 
 
+## Functional profiling
+
+nf-core/taxprofiler has no functional profiling — its `run_*` parameters cover
+fourteen classifiers and nothing else — so HUMAnN 3.9 runs as a second Nextflow
+workflow in this repository, [`workflows/humann`](../../workflows/humann/main.nf),
+driven by [`taxprofiler_humann.sh`](../../scripts/taxprofiler_humann.sh) as the
+first post-process step. It is a workflow rather than a loop in that script
+because HUMAnN is hours per sample: a loop would serialise it inside the
+2-core job the post-process stage runs in, where a workflow gets the same
+Slurm-level parallelism taxprofiler itself does.
+
+Everything it writes lands in `results/humann/`, which the dashboard's File
+Explorer carries as its own **Functional profiles** section.
+
+### What HUMAnN is doing
+
+Three tiers, in order:
+
+1. **Prescreen.** MetaPhlAn decides which species are present.
+2. **Nucleotide search.** bowtie2 maps the reads against a database assembled on
+   the spot from *only those species'* ChocoPhlAn pangenomes.
+3. **Translated search.** DIAMOND `blastx` sends whatever is left against
+   UniRef90.
+
+Two consequences are worth stating plainly, because both are easy to read the
+wrong way off the output:
+
+- **HUMAnN cannot find a taxon MetaPhlAn missed.** Step 2 never looks outside
+  the gate step 1 set. The `g__…s__…` labels in a by-taxon table are inherited
+  from the pangenome the sequence came from, not classified from the read. It is
+  not a second opinion on the taxonomy.
+- **This is capacity, not activity.** A pathway present in the DNA says the
+  community *can* run it. Whether it does needs RNA.
+
+**`--taxonomic-profile` hands HUMAnN the profile taxprofiler already computed**,
+so it skips its own MetaPhlAn pass. That roughly halves the marginal cost, and it
+makes the taxonomy stratifying the by-taxon tables the same taxonomy the run
+publishes as its taxonomic deliverable.
+
+**The profile is rewritten before HUMAnN sees it,** and this is the part not to
+delete. taxprofiler runs MetaPhlAn with `-t rel_ab_w_read_stats`, which the
+[count tables](#the-count-tables) need. HUMAnN 3.9 reads the abundance out of the
+*second-to-last* column of whatever it is handed — which in that layout is
+`coverage`, not `relative_abundance`. Given the profile unchanged it does not
+fail: it reads a species at 12% as being at 0.05%, drops nearly all of them below
+its 0.01% prescreen threshold, and builds a pangenome database out of almost
+nothing. `taxprofiler_humann.sh` rewrites each profile into the column layout
+`-t rel_ab` writes, keeping the comment lines — HUMAnN 3.9 exits unless one of
+them names `vJun23`, which is also how it picks the right profile on a run given
+two MetaPhlAn databases.
+
+**Illumina samples only.** Both of HUMAnN's search tiers are short-read
+aligners, so long-read samples are passed over and named in the run's notes.
+
+### What it publishes
+
+Eighteen tables, which are three primary outputs crossed through two
+vocabularies, two normalisations and two stratifications:
+
+| | Reads per kilobase | Relative abundance |
+|---|---|---|
+| UniRef90 gene families | `gene-families-rpk.tsv` | `gene-families-relab.tsv` |
+| Level-4 EC numbers | `ec-rpk.tsv` | `ec-relab.tsv` |
+| KEGG Orthology | `ko-rpk.tsv` | `ko-relab.tsv` |
+| MetaCyc pathways | `pathway-abundance-rpk.tsv` | `pathway-abundance-relab.tsv` |
+| MetaCyc pathway coverage | `pathway-coverage.tsv` | — not an amount |
+
+and a `-by-taxon.tsv` beside each of the nine, holding the same values split
+among the species HUMAnN attributed them to. Coverage is a confidence between 0
+and 1 rather than a rate, so it is not normalised.
+
+**Sample columns are named after the samples.** HUMAnN appends what the column
+measures to each one — `_Abundance-RPKs`, `_Abundance-RELAB`, `_Coverage` — and
+the file name says that already, so the header is rewritten to bare sample names.
+That makes these tables key the same way as `count_tables/` and the taxpasta
+tables.
+
+**KEGG modules and KEGG pathways are not produced.** Only the KO *identifier*
+mapping is distributed with HUMAnN; the module and pathway definitions are
+licence-restricted. `ko-rpk.tsv` is gene families summed onto KO identifiers and
+is free of that — it is the mapping, not the pathway hierarchy.
+
+**EC and KO are renamed; gene families are not.** Both name maps ship inside
+HUMAnN itself and turn an unreadable identifier into a readable one over a table
+small enough to scan. Naming UniRef90 accessions needs a 1 GB mapping and makes
+the largest table here larger still.
+
+`alignment-summary.tsv` is how far HUMAnN got with each sample, read off the
+per-sample logs published in `humann/logs/`: how many species the prescreen put
+in that sample's pangenome database, what share of reads was still unaligned
+after each search tier, and how many gene families it ended with. **A sample
+missing from that table is one HUMAnN could not finish** — see below.
+
+### What it costs, and what happens when it doesn't finish
+
+Translated search dominates, and it scales with the *unmapped* fraction rather
+than with depth, so the cost is uneven in a way worth knowing before quoting a
+turnaround: a 70M-read stool sample is expensive, and a swab left with 600K reads
+after host depletion is nearly free — and produces a functional profile that does
+not mean much. Nothing here subsamples. Deciding a depth floor, or a cap on
+input reads, is a policy question rather than a code one.
+
+**One sample that cannot be finished is not a failed run.**
+[`workflows/humann/nextflow.config`](../../workflows/humann/nextflow.config)
+retries a HUMAnN task once with more memory and more time, then ignores it, and
+the tables are built from the samples that did finish — the same treatment
+`NONPAREIL_NONPAREIL` gets, and for the same reason.
+
+**Nothing in this step is fatal to the run either.** Missing databases, missing
+reads, an unreadable profile, or the workflow failing outright all leave the
+taxonomic half published exactly as it would have been: the `humann/` entries in
+[`outputs.conf`](../../templates/taxprofiler/outputs.conf) match nothing and are
+left out, so the dashboard simply carries no Functional profiles section. What
+went wrong is appended to the run's `.notes`, which `wrike_followup.sh` reports
+back on the Wrike task.
+
+**Watch the wall clock.** `wrike_job.sh` is submitted with `--time=48:00:00`, and
+that budget now covers taxprofiler *and* HUMAnN. A large run of deep stool
+samples is the case that would reach it.
+
+
 ## Resource limits
 
 taxprofiler has its own
@@ -733,22 +926,25 @@ template, which dropped `params.max_cpus` / `max_memory` / `max_time` in favour
 of `process.resourceLimits`; the `params` block in `config/slurm.config` sets
 nothing taxprofiler reads.
 
-Kraken2, MetaPhlAn, mOTUs, sylph and the host-depletion aligner are sized
+Kraken2, MetaPhlAn, mOTUs and the host-depletion aligner are sized
 against the node rather than left on nf-core's `process_high` label. 16 cpus each puts two of
 any of them on a 32-core node with no cores stranded. Kraken2's memory is the
 figure to watch: it reads `hash.k2d` into its own heap, 110 GB for PlusPF, so the
 reservation is 128 GB.
-
-**sylph is the cheap one.** It holds the 13 GB GTDB sketch plus the sample's
-own, and the published figure for profiling the whole of GTDB-r220 is about
-15 GB; 32 GB is that with room. `SYLPHTAX_TAXPROF` and `SYLPHTAX_MERGE` join a
-profile against a 12 MB table and are given one core.
 
 **Nonpareil is given a memory reservation it will actually use.** The module
 passes `task.memory` straight to nonpareil's `-R`, which is the ceiling nonpareil
 sizes its k-mer table against, so the 64 GB reserved for it is a budget rather
 than a headroom estimate. Reserving less is a coarser estimate rather than a
 failed task.
+
+The HUMAnN workflow has its own
+[`workflows/humann/nextflow.config`](../../workflows/humann/nextflow.config),
+auto-loaded from the workflow's directory, with the same executor, the same
+image cache and the same node sizing. `HUMANN_PROFILE` is reserved 16 cpus and
+64 GB, doubling on a retry: the reservation is for DIAMOND against the 34 GB
+UniRef90 index, and HUMAnN is left on its default `--memory-use minimum` so
+DIAMOND blocks that index rather than holding it whole.
 
 Nothing copies a database. Nextflow stages inputs as absolute symlinks
 (`stageInMode` defaults to `symlink`) and `scratch` copies only declared
@@ -764,14 +960,15 @@ nothing. They drive two scripts —
 databases and
 [`build_host_reference.sh`](../../scripts/build_host_reference.sh) for the host
 references — each of which verifies every download against a checksum and
-writes a manifest beside its output. Two files have no publisher checksum to
+writes a manifest beside its output. Four files have no publisher checksum to
 verify against: the MetaPhlAn phylogeny, pinned in the script by the md5 of the
-file as fetched, and the sylph sketch, pinned by its byte size with the sha256
-of what arrived recorded in its manifest. Each is a Slurm job; run them
-from the login node. Steps 1–4 and 5–7 are
+file as fetched, and the three HUMAnN archives, whose md5s are recorded in the
+manifest rather than checked — what verifies those is their contents, including
+the two checks HUMAnN itself makes on a ChocoPhlAn directory. Each is a Slurm
+job; run them from the login node. Steps 1–4 and 5–7 are
 independent of each other and can run concurrently.
 
-Total: about 161 GB of profiling database and 19 GB of host references — each
+Total: about 217 GB of profiling database and 19 GB of host references — each
 mammalian reference is ~14 GB, being a 3 GB FASTA, a 4 GB bowtie2 index and a
 7 GB minimap2 index — and roughly four hours of wall time dominated by the two
 mammalian bowtie2 builds. Nonpareil has no setup step: it needs no database.
@@ -814,16 +1011,22 @@ refuses to profile without it.
 sbatch --job-name=db-motus --cpus-per-task=4 --mem=8G --time=24:00:00 --output=/data/prod/nextflow/log/db_%j.out /data/prod/nextflow/scripts/fetch_taxprofiler_db.sh motus
 ```
 
-### 4. sylph — GTDB r220
+### 4. HUMAnN — ChocoPhlAn, UniRef90 and the utility mapping
 
-13 GB of k-mer sketch from Carnegie Mellon, plus the 12 MB sylph-tax metadata
-table from Zenodo. The sketch is served without a checksum, so the script pins
-its byte size and records the sha256 of what arrived in the manifest; the
-metadata table is verified against Zenodo's own md5.
+Three archives, about 38 GB down and 56 GB unpacked, needing ~130 GB free while
+each archive and its extracted copy coexist. The publisher lists no checksums, so
+the script records the md5 of what arrived and then checks the contents: every
+ChocoPhlAn filename must carry `v201901_v31`, there must be at least one
+`g__*s__*` pangenome, UniRef90 must have a `.dmnd`, and the mapping directory
+must hold the two files `humann_regroup_table` is called with.
 
 ```bash
-sbatch --job-name=db-sylph --cpus-per-task=4 --mem=8G --time=24:00:00 --output=/data/prod/nextflow/log/db_%j.out /data/prod/nextflow/scripts/fetch_taxprofiler_db.sh sylph
+sbatch --job-name=db-humann --cpus-per-task=4 --mem=8G --time=24:00:00 --output=/data/prod/nextflow/log/db_%j.out /data/prod/nextflow/scripts/fetch_taxprofiler_db.sh humann
 ```
+
+Nothing else may be written into `db/humann/v201901b/chocophlan` — HUMAnN 3.9
+exits if it finds a file there whose name does not carry `v201901_v31`, and a
+directory holding two ChocoPhlAn versions at once is the failure people hit most.
 
 ### 5. Host reference — PhiX only
 

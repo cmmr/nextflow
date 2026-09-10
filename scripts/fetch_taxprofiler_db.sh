@@ -7,10 +7,14 @@
 #
 # One-time cluster setup, run once per database rather than as part of any
 # pipeline. Downloads a database, verifies every file against a checksum, and
-# writes a manifest recording what was fetched and from where. Two files have no
-# publisher checksum: the MetaPhlAn phylogeny, pinned below by the md5 of the
-# file as fetched, and the sylph sketch, pinned by its byte size with the sha256
-# of what arrived recorded in its manifest.
+# writes a manifest recording what was fetched and from where.
+#
+# Two publishers list no checksum. The MetaPhlAn phylogeny is pinned below by
+# the md5 of the file as fetched. The three HUMAnN archives have their md5
+# computed here and recorded in the manifest rather than checked against a
+# published value; what verifies those is their contents - the same two checks
+# HUMAnN itself makes on a ChocoPhlAn directory, and the presence of every other
+# file a run goes on to read.
 #
 # Everything taxprofiler reads is fetched fresh by this script even when a copy
 # already exists elsewhere on the cluster, so that every database a run touches
@@ -27,10 +31,7 @@
 #   <release>/                the database, as the pipeline reads it
 #   <release>.manifest.json   source URLs, checksums, sizes, and when it was fetched
 #
-# sylph is the exception to the directory: its database is one .syldb file, with
-# the sylph-tax metadata table beside it.
-#
-# Usage:     fetch_taxprofiler_db.sh <kraken2|metaphlan|motus|sylph>
+# Usage:     fetch_taxprofiler_db.sh <kraken2|metaphlan|motus|humann>
 #
 #            Submit it rather than running it on the login node; the downloads
 #            are large and slow:
@@ -91,23 +92,33 @@ readonly MOTUS_MD5="f841c36150025af837f7a9a358c9a3c3"
 # directory holds it rather than being it.
 readonly MOTUS_DB_DIR="db_mOTU"
 
-# sylph, profiling against GTDB rather than RefSeq. The .syldb is a k-mer sketch
-# of every GTDB r220 species representative at c=200, which is the compression
-# the publisher recommends for short reads; the metadata table is what sylph-tax
-# turns sylph's genome accessions into lineages with.
+# HUMAnN 3.9's three databases, which it reads as three separate directories and
+# which are fetched together as one release: the ChocoPhlAn pangenomes its
+# nucleotide search maps against, the UniRef90 DIAMOND index its translated
+# search falls back to, and the mapping files humann_regroup_table needs to put
+# gene families on EC and KO.
 #
-# The sketch is served without a checksum, so its size is pinned instead and the
-# sha256 of what arrived goes in the manifest. The metadata table is on Zenodo,
-# which publishes an md5.
-readonly SYLPH_RELEASE="gtdb-r220-c200-dbv1"
-readonly SYLPH_URL="https://faust.compbio.cs.cmu.edu/sylph-stuff/$SYLPH_RELEASE.syldb"
-readonly SYLPH_BYTES=14061572967
-readonly SYLPH_TAXONOMY="gtdb_r220_metadata.tsv.gz"
-readonly SYLPH_TAXONOMY_URL="https://zenodo.org/records/14320496/files/$SYLPH_TAXONOMY"
-readonly SYLPH_TAXONOMY_MD5="ad14ff1636ad93506da1f46b65494fb8"
+# v201901_v31 is not a stale pin. HUMAnN 3.9 refuses a ChocoPhlAn directory
+# holding any file whose name does not carry that string, and the _v31 suffix is
+# the bioBakery 3.1 pangenome catalogue rather than the 2019 the number reads as.
+# There is no newer release for HUMAnN 3.9, and 3.9 is its newest stable version.
+readonly HUMANN_RELEASE="v201901b"
+readonly HUMANN_BASE="http://huttenhower.sph.harvard.edu/humann_data"
+readonly HUMANN_CHOCOPHLAN_URL="$HUMANN_BASE/chocophlan/full_chocophlan.v201901_v31.tar.gz"
+readonly HUMANN_UNIREF_URL="$HUMANN_BASE/uniprot/uniref_annotated/uniref90_annotated_v201901b_full.tar.gz"
+readonly HUMANN_MAPPING_URL="$HUMANN_BASE/full_mapping_v201901b.tar.gz"
+
+# The string HUMAnN checks every ChocoPhlAn filename for before it will run
+readonly HUMANN_CHOCOPHLAN_VERSION="v201901_v31"
+
+# The three directory names workflows/humann/main.nf is pointed at
+readonly HUMANN_CHOCOPHLAN_DIR="chocophlan"
+readonly HUMANN_UNIREF_DIR="uniref90"
+readonly HUMANN_MAPPING_DIR="utility_mapping"
+
 
 if [[ $# -ne 1 ]]; then
-    fail "Usage: $0 <kraken2|metaphlan|motus|sylph>"
+    fail "Usage: $0 <kraken2|metaphlan|motus|humann>"
 fi
 
 TOOL="$1"
@@ -151,6 +162,22 @@ download_verified() {
     if [[ "$actual_md5" != "$expected_md5" ]]; then
         fail "Checksum mismatch on ${url##*/}: expected $expected_md5, got $actual_md5."
     fi
+}
+
+# Download one file and record what arrived, for a publisher that lists no
+# checksum. The md5 goes into the manifest as a description of this copy rather
+# than as a check on it; what verifies these downloads is the content checks
+# each fetch function makes after extracting.
+download_recorded() {
+    local url="$1"
+    local dest="$2"
+
+    log "Downloading ${url##*/}; the publisher lists no checksum for it..."
+    if ! curl -sSL --fail --retry 3 -o "$dest" "$url"; then
+        fail "Could not download $url"
+    fi
+
+    md5sum "$dest" | cut -d" " -f1
 }
 
 # One manifest entry per downloaded archive
@@ -362,51 +389,6 @@ fetch_metaphlan() {
     log "  manifest: $manifest"
 }
 
-fetch_sylph() {
-    local out_dir="$NEXTFLOW_DIR/db/sylph"
-    local sketch="$out_dir/$SYLPH_RELEASE.syldb"
-    local taxonomy="$out_dir/$SYLPH_TAXONOMY"
-    local manifest="$out_dir/$SYLPH_RELEASE.manifest.json"
-
-    [[ -e "$sketch" ]] && fail "$sketch already exists; remove it to re-fetch."
-
-    mkdir -p "$out_dir"
-    require_free_space "$out_dir" 20
-
-    download_verified "$SYLPH_TAXONOMY_URL" "$taxonomy" "$SYLPH_TAXONOMY_MD5"
-    record_source "$SYLPH_TAXONOMY_URL" "$SYLPH_TAXONOMY_MD5" "$(stat -c%s "$taxonomy")"
-
-    # Downloaded straight into place: 13 GB has nowhere else to go, and a
-    # partial file is caught by the size check below rather than by a checksum
-    log "Downloading $SYLPH_RELEASE.syldb (13 GB)..."
-    if ! curl -sSL --fail --retry 3 -o "$sketch" "$SYLPH_URL"; then
-        rm -f "$sketch"
-        fail "Could not download $SYLPH_URL"
-    fi
-
-    local bytes
-    bytes=$(stat -c%s "$sketch")
-
-    if [[ "$bytes" != "$SYLPH_BYTES" ]]; then
-        rm -f "$sketch"
-        fail "$SYLPH_RELEASE.syldb came back $bytes bytes; $SYLPH_BYTES were expected."
-    fi
-
-    log "Hashing $SYLPH_RELEASE.syldb..."
-    local sha256
-    sha256=$(sha256sum "$sketch" | cut -d" " -f1)
-
-    record_source "$SYLPH_URL" "sha256:$sha256" "$bytes"
-
-    write_manifest "$SYLPH_RELEASE" "$out_dir" "$manifest" \
-        "sylph sketch of the GTDB r220 species representatives at c=200, and the sylph-tax metadata table that names them. The sketch is published without a checksum, so the sha256 recorded here is of the file as fetched; its size is pinned in the script."
-
-    log "Fetched $SYLPH_RELEASE:"
-    log "  db_path:        $sketch"
-    log "  sylph_taxonomy: $taxonomy"
-    log "  manifest:       $manifest"
-}
-
 fetch_motus() {
     local release_dir="$NEXTFLOW_DIR/db/motus/$MOTUS_RELEASE"
     local out_dir="$release_dir/$MOTUS_DB_DIR"
@@ -470,10 +452,88 @@ fetch_motus() {
     log "  manifest: $manifest"
 }
 
+# One HUMAnN archive into its own directory under the release, and the archive
+# deleted straight after: all three unpack alongside each other and the disk
+# only just holds them.
+fetch_humann_part() {
+    local url="$1" out_dir="$2"
+    local archive="$WORK_DIR/${url##*/}"
+    local md5
+
+    md5=$(download_recorded "$url" "$archive")
+    record_source "$url" "$md5" "$(stat -c%s "$archive")"
+
+    log "Extracting ${url##*/}; this takes a while..."
+    mkdir -p "$out_dir"
+
+    if ! tar -xzf "$archive" -C "$out_dir"; then
+        rm -f "$archive"
+        fail "Could not extract ${url##*/}."
+    fi
+
+    rm -f "$archive"
+}
+
+fetch_humann() {
+    local release_dir="$NEXTFLOW_DIR/db/humann/$HUMANN_RELEASE"
+    local manifest="$NEXTFLOW_DIR/db/humann/$HUMANN_RELEASE.manifest.json"
+    local chocophlan="$release_dir/$HUMANN_CHOCOPHLAN_DIR"
+    local uniref="$release_dir/$HUMANN_UNIREF_DIR"
+    local mapping="$release_dir/$HUMANN_MAPPING_DIR"
+
+    [[ -e "$release_dir" ]] && fail "$release_dir already exists; remove it to re-fetch."
+
+    mkdir -p "$NEXTFLOW_DIR/db/humann"
+    require_free_space "$NEXTFLOW_DIR/db/humann" 130
+
+    fetch_humann_part "$HUMANN_CHOCOPHLAN_URL" "$chocophlan"
+    fetch_humann_part "$HUMANN_UNIREF_URL"     "$uniref"
+    fetch_humann_part "$HUMANN_MAPPING_URL"    "$mapping"
+
+    # HUMAnN's own two checks on a ChocoPhlAn directory, made here so a bad
+    # download fails at setup rather than on the first sample of a run. The
+    # version check is why nothing else may be written into this directory - a
+    # README beside the pangenomes is enough to make every HUMAnN call exit.
+    local pangenomes=0 path
+
+    for path in "$chocophlan"/*; do
+        [[ -e "$path" ]] || fail "The ChocoPhlAn download is empty."
+
+        [[ "${path##*/}" == *"$HUMANN_CHOCOPHLAN_VERSION"* ]] \
+            || fail "ChocoPhlAn holds ${path##*/}, which is not $HUMANN_CHOCOPHLAN_VERSION; HUMAnN would refuse it."
+
+        [[ "${path##*/}" == g__*s__* ]] && pangenomes=$((pangenomes + 1))
+    done
+
+    (( pangenomes > 0 )) \
+        || fail "The ChocoPhlAn download carries no g__*s__* pangenome; it is incomplete."
+
+    compgen -G "$uniref"/*.dmnd > /dev/null \
+        || fail "The UniRef90 download carries no DIAMOND index; it is incomplete."
+
+    # Every mapping file the run reads: the two humann_regroup_table is called
+    # with, and the UniRef90 names humann_rename_table would want
+    local required
+    for required in map_level4ec_uniref90.txt.gz map_ko_uniref90.txt.gz \
+                    map_uniref90_name.txt.bz2; do
+        [[ -r "$mapping/$required" ]] \
+            || fail "The utility mapping download is missing $required; it is incomplete."
+    done
+
+    write_manifest "$HUMANN_RELEASE" "$release_dir" "$manifest" \
+        "The three databases HUMAnN 3.9 reads: ChocoPhlAn $HUMANN_CHOCOPHLAN_VERSION pangenomes ($pangenomes species), the annotated UniRef90 DIAMOND index, and the full utility mapping. The publisher lists no checksums; the md5 recorded for each archive is the copy fetched here. HUMAnN 3.9 refuses a ChocoPhlAn directory holding any file whose name does not carry $HUMANN_CHOCOPHLAN_VERSION, so nothing else may be written into $HUMANN_CHOCOPHLAN_DIR."
+
+    log "Fetched HUMAnN $HUMANN_RELEASE:"
+    log "  chocophlan:      $chocophlan ($pangenomes pangenomes)"
+    log "  uniref90:        $uniref"
+    log "  utility_mapping: $mapping"
+    log "  manifest:        $manifest"
+}
+
 case "$TOOL" in
     kraken2)   fetch_kraken2 ;;
     metaphlan) fetch_metaphlan ;;
     motus)     fetch_motus ;;
-    sylph)     fetch_sylph ;;
-    *)         fail "Unknown database '$TOOL'. Use kraken2, metaphlan, motus or sylph." ;;
+    humann)    fetch_humann ;;
+    *)         fail "Unknown database '$TOOL'. Use kraken2, metaphlan, motus or humann." ;;
 esac

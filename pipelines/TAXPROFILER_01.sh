@@ -1,8 +1,9 @@
 
-# Shotgun metagenomics: fastp trimming, then kraken2, bracken, metaphlan, mOTUs
-# and sylph, with nonpareil measuring how much of each community was sequenced.
-# Which host is depleted first is the request form's follow-up answer, recorded
-# by wrike_task_handler.sh; PhiX alone when the form never asked.
+# Shotgun metagenomics: fastp trimming, then kraken2, bracken, metaphlan and
+# mOTUs, with nonpareil measuring how much of each community was sequenced, and
+# HUMAnN afterwards for what those communities can do. Which host is depleted
+# first is the request form's follow-up answer, recorded by
+# wrike_task_handler.sh; PhiX alone when the form never asked.
 PIPELINE_NAME="taxprofiler_01"
 
 # The commit the 2.0.1 tag points at, pinned rather than the tag itself so that a
@@ -57,12 +58,19 @@ params_set run_bracken                      true
 params_set run_metaphlan                    true
 params_set run_motus                        true
 
-# GTDB rather than RefSeq, so the run sees the species representatives that
-# exist only as metagenome-assembled genomes. Minutes per sample against the
-# hours the other profilers take.
-params_set run_sylph                        true
-params_set sylph_data_type                  "relative_abundance"
-params_set sylph_taxonomy                   "$NEXTFLOW_DIR/db/sylph/gtdb_r220_metadata.tsv.gz"
+# Distinct-minimizer columns in the kraken2 report. Downstream steps are given
+# the standard report instead, which taxprofiler derives when this is on.
+params_set kraken2_save_minimizers          true
+
+# The marker gene cluster read counts the mOTUs profile is computed from
+params_set motus_save_mgc_read_counts       true
+
+# The reads as they reached the classifiers - trimmed, complexity-filtered,
+# host-depleted and run-merged. Kept because HUMAnN is run over exactly those:
+# a functional profile taken from a different read set than the taxonomic one
+# would not describe the same sample. taxprofiler_upload.sh deletes them once
+# HUMAnN has read them, so they are neither published nor in the download.
+params_set save_analysis_ready_fastqs       true
 
 params_set run_krona                        true
 params_set run_profile_standardisation      true
@@ -75,6 +83,10 @@ params_set taxpasta_add_rank                true
 # to any rank without joining back to a taxonomy dump they do not have.
 params_set taxpasta_add_lineage             true
 params_set taxpasta_add_ranklineage         true
+
+# The id lineage as well, which the table builder rolls strain rows up and pads
+# genus-and-above rows down with.
+params_set taxpasta_add_idlineage           true
 
 # How varied each sample was, which no classifier here answers honestly: half a
 # WGS sample's reads reach no taxon, so an index computed over the half a
@@ -131,6 +143,9 @@ PRE_PROCESS_CMDS=(
     "$NEXTFLOW_DIR/scripts/taxprofiler_samplesheet.sh"
 )
 
+# HUMAnN first, since taxprofiler_upload.sh publishes what it wrote and deletes
+# the reads it read
 POST_PROCESS_CMDS=(
+    "$NEXTFLOW_DIR/scripts/taxprofiler_humann.sh"
     "$NEXTFLOW_DIR/scripts/taxprofiler_upload.sh"
 )

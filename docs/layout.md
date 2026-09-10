@@ -42,12 +42,21 @@ scripts/
                            feature tables. Run by taxprofiler_upload.sh.
   taxprofiler_taxonomy_tree.sh  The NCBI taxonomy over the taxa one run saw, as a
                            tree with branch lengths. Run by the above.
+  taxprofiler_humann.sh    Functional profiling for a finished taxprofiler run;
+                           pairs samples with their reads and profiles and runs
+                           workflows/humann. First POST_PROCESS_CMDS entry.
   taxprofiler_upload.sh       POST_PROCESS_CMDS for the taxprofiler pipelines.
   build_host_reference.sh     Builds a host-depletion reference. Setup, not part of a run.
   build_16s_reference.sh      Builds the 16S landmarks the region detector aligns to. Likewise.
-  fetch_taxprofiler_db.sh     Downloads a taxprofiler database. Likewise.
+  fetch_taxprofiler_db.sh     Downloads a taxprofiler or HUMAnN database. Likewise.
 
 pipelines/            One file per pipeline; see docs/pipelines/index.md.
+workflows/            Nextflow workflows this repository defines itself, for
+                      steps no nf-core pipeline covers. One directory per
+                      workflow, holding its main.nf and the nextflow.config
+                      nextflow auto-loads beside it.
+  humann/             HUMAnN 3.9 over a finished taxprofiler run; see
+                      docs/pipelines/taxprofiler.md.
 nix/                  Container images this system builds for itself, one .nix
                       file per image; see docs/operations/nix.md. sandbox/ is the
                       nix installation they are built in and is not tracked.

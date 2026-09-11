@@ -178,9 +178,12 @@ fi
 # HUMAnN reads the abundance from the left of. Comment lines are carried
 # through, since the first of them is what tells HUMAnN which database this is.
 #
+# MetaPhlAn 4 names the taxon id column "clade_taxid" under -t
+# rel_ab_w_read_stats and "NCBI_tax_id" under -t rel_ab, so either is taken.
+#
 # Prints nothing and returns non-zero when the profile carries no
-# relative_abundance column, which is what a file that is not a MetaPhlAn
-# profile looks like from here.
+# relative_abundance or taxon id column, which is what a file that is not a
+# MetaPhlAn profile looks like from here.
 rewrite_profile() {
     local source="$1" destination="$2"
 
@@ -192,7 +195,10 @@ rewrite_profile() {
                 column[field] = i
             }
 
-            if (!column["relative_abundance"] || !column["NCBI_tax_id"]) exit 1
+            abundance = column["relative_abundance"]
+            taxid = column["clade_taxid"] ? column["clade_taxid"] : column["NCBI_tax_id"]
+
+            if (!abundance || !taxid) exit 1
 
             print "#clade_name", "NCBI_tax_id", "relative_abundance", "additional_species"
             next
@@ -200,8 +206,8 @@ rewrite_profile() {
 
         /^#/ { print; next }
 
-        column["relative_abundance"] {
-            print $1, $(column["NCBI_tax_id"]), $(column["relative_abundance"]), ""
+        abundance {
+            print $1, $taxid, $abundance, ""
             rows++
         }
 

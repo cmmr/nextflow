@@ -29,7 +29,7 @@
 # made - the request as it was read, every parameter as resolved, and how the run
 # went. Anything that must not be published belongs in secrets/.env instead.
 #
-# Defines: RUN_STATE_FILE, RUN_STATE_KEY, state_init, state_present,
+# Defines: RUN_STATE_FILE, RUN_STATE_KEY, PROGRESS_STATE_KEY, state_init, state_present,
 #          state_update, state_get, state_get_json, state_get_tsv, state_has,
 #          state_set, state_set_json, state_set_number, state_set_tsv,
 #          state_append, state_unset, publish_run_state, set_run_status,
@@ -48,6 +48,14 @@ RUN_STATE_LOCK=".run_state.lock"
 # rerun is rebuilt from and what survives the dashboard's expiry.
 RUN_STATE_KEY="run_state.json"
 RUN_STATE_SCHEMA=1
+
+# The second file published at that prefix, which is the run as the progress
+# page reads it rather than the run's own record: the dial, the rows, the clocks
+# and the sentences around them, rewritten while the run goes so that the page
+# itself is uploaded once. Named here because two scripts write it -
+# nextflow_progress.sh for as long as the run lasts, and publish_results once
+# more when the report lands on top of the page.
+PROGRESS_STATE_KEY="progress.json"
 
 # Attempts at one write, and seconds between them
 RUN_STATE_TRIES=5

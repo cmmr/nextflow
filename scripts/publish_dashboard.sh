@@ -86,7 +86,9 @@
 # the bucket serves: unpack it, open the index.html in it, and every link still
 # resolves.
 # publish_results then uploads the folder, landing the pages last so that
-# nothing they frame is still arriving.
+# nothing they frame is still arriving - and finally retires the progress page
+# index.html has just replaced, by writing "final" over the state file that page
+# was following, which sends a browser still watching the run for the report.
 #
 # The file index comes from the catalog - templates/<pipeline>/outputs.conf -
 # which names paths, globs and folders in the order they should be read, grouped
@@ -112,8 +114,8 @@
 #          publish_results, DASHBOARD_PAGES, TEXT_EXTENSIONS,
 #          DOWNLOAD_EXTENSIONS
 # Requires: aws, GNU find; the escape_html/escape_url/human_size/render_template
-#           helpers from utilities.sh
-# Env:      NEXTFLOW_DIR
+#           and warn helpers from utilities.sh
+# Env:      NEXTFLOW_DIR, and PROGRESS_STATE_KEY from run_state.sh
 
 # Extensions uploaded as text rather than left for aws to type from the name.
 # Without this a browser is handed a table as an application/octet-stream and
@@ -1142,4 +1144,15 @@ publish_results() {
             return 1
         fi
     done
+
+    # The progress page that index.html has just replaced was following the
+    # state file beside it, so the last thing that file tells it is to ask for
+    # the page again - which is how a reader watching the run is handed the
+    # report without touching anything. A browser that is not on that page has
+    # nothing to read this, so it warns rather than fails.
+    printf '{"state":"final"}\n' \
+        | aws s3 cp - "$dest/$PROGRESS_STATE_KEY" \
+            --content-type "application/json" --cache-control "no-cache" \
+            > /dev/null 2>&1 \
+        || warn "Could not retire the progress page's state file at $dest."
 }

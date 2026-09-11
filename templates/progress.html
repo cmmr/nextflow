@@ -2,15 +2,24 @@
 <!--
   progress.html - Live progress page for a running pipeline.
 
-  Rendered by scripts/nextflow_progress.sh every ten seconds while a job runs,
-  and uploaded to the same key the finished dashboard later takes
-  (s3://$AWS_S3_BUCKET/nxf/<run_id>/index.html) - so a reader who opens the
-  results link early watches the run, and is handed the report when it lands.
+  Rendered by scripts/nextflow_progress.sh and uploaded to the same key the
+  finished dashboard later takes (s3://$AWS_S3_BUCKET/nxf/<run_id>/index.html) -
+  so a reader who opens the results link early watches the run, and is handed the
+  report when it lands.
 
-  The meta refresh is what makes this live, and the renderer leaves it out of a
-  page there is no point asking for again: the finished dashboard carries none,
-  and neither does a failed run's page, so in both cases the last refresh a
-  reader's browser makes is the one that stops it polling.
+  What is here is only the shell: the run's name, the frame it is presented in,
+  and the script at the foot. Nothing that moves while the run goes is written
+  into it, so the renderer uploads this page once and afterwards keeps only
+  progress.json beside it up to date - a couple of kilobytes rather than this
+  whole page with its inlined head. The script asks for that file on a fixed
+  beat and writes each of its fields into the element of the same name.
+
+  The state file also says what the page should do once it has read it. While
+  the run is going it says live and the page keeps asking; a run that has failed
+  says failed and the page stops, since there is no point asking again for a
+  page that has nothing more to say. When the report is published over this
+  page, publish_results leaves a state file saying final, and the page asks for
+  itself again - which is how a reader watching the run is handed the results.
 
   The dial on the left is every task of the run taken together, and the bars
   beside it are the run's steps in the order they run, each nextflow run's
@@ -22,9 +31,9 @@
 
   Under that dial are the run's Slurm jobs, running and queued, and under those
   its clocks: how long the run has been going and how much cpu time it has held.
-  The clocks are read when the page is rendered rather than counted up in the
-  browser, so they step forward with each refresh. A run that is over says none
-  and none, and keeps the last clocks it had; both blocks are left out only when
+  The clocks are read when the state file is written rather than counted up in
+  the browser, so they step forward with it. A run that is over says none and
+  none, and keeps the last clocks it had; both blocks are left out only when
   squeue cannot be asked at all.
 
   A run that has failed carries a panel of its own under the card: the
@@ -35,23 +44,19 @@
   The head is shared with the dashboard and is inlined from
   templates/tailwind.html.
 
-  Placeholders are COMMON_HEAD, REFRESH, TASK_NAME, RUN_ID, STATUS_PILL, STAGE,
-  PAGE_NOTE, PERCENT, ARC, TASKS, CLUSTER, TIMERS, FAILURE, FOOTNOTE, UPDATED
-  and ROWS, each wrapped in doubled underscores. ARC is the whole style of the
-  dial's arc, since an arc of nothing has to lose the round cap that would
-  otherwise draw it as a dot. REFRESH is the whole meta tag, since a page there
-  is no point asking for again carries no such tag at all rather than one set to
-  nothing. They are deliberately not spelled that way in this comment - the
-  renderer substitutes the whole file, comment included, and would paste the
-  entire process table in here too. The task name is user-authored text and is HTML-escaped on the way
-  in; REFRESH, STATUS_PILL, CLUSTER, TIMERS, FAILURE and ROWS are markup the
-  renderer escaped itself.
+  Placeholders are COMMON_HEAD, TASK_NAME, RUN_ID, STATE_FILE, INTERVAL, ARC and
+  STARTING, each wrapped in doubled underscores - every one of them fixed for
+  the life of the run, which is what lets the page be uploaded once. ARC is the
+  whole style of the dial's arc at nothing, since an arc of nothing has to lose
+  the round cap that would otherwise draw it as a dot. They are deliberately not
+  spelled that way in this comment - the renderer substitutes the whole file,
+  comment included. The task name is user-authored text and is HTML-escaped on
+  the way in.
 -->
 <html class="light h-full" lang="en">
 <head>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
-__REFRESH__
 <title>__TASK_NAME__ - Alkek Center for Metagenomics and Microbiome Research</title>
 __COMMON_HEAD__
 <style>
@@ -62,15 +67,21 @@ __COMMON_HEAD__
 .dial.tasks circle { stroke-width: 10; }
 
 /* A process with tasks in flight, as a bar that is visibly working. The stripes
-   run at 45 degrees, so one period along the bar is 12px * sqrt 2. */
+   run at 45 degrees, so one period along the bar is 12px * sqrt 2, and the
+   gradient is cut to exactly that and tiled: left at its default size it is one
+   bar wide, and sliding it left exposes its own next copy, which meets it
+   mid-stripe at every width but a multiple of the period. That seam is what
+   crawls up the left end of a bar. Sliding by exactly one tile then repeats
+   what is already there, so the loop closes without a step. */
 .stripe {
   background-image: repeating-linear-gradient(45deg,
     rgba(255, 255, 255, 0.38) 0 6px, rgba(255, 255, 255, 0) 6px 12px);
+  background-size: 16.9706px 100%;
   animation: barber 900ms linear infinite;
 }
 @keyframes barber {
   from { background-position: 0 0; }
-  to   { background-position: 17px 0; }
+  to   { background-position: 16.9706px 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -83,15 +94,19 @@ __COMMON_HEAD__
 <header class="bg-primary text-on-primary shadow-md shrink-0">
 <div class="flex flex-wrap justify-between items-center gap-y-2 w-full px-margin-page py-3">
 <div class="text-[17px] leading-6 font-bold tracking-[0.14em] text-on-primary">CMMR</div>
-__STATUS_PILL__
+<div class="contents" id="status_pill"></div>
 </div>
 </header>
 
 <main class="flex-1 w-full max-w-5xl mx-auto p-margin-page flex flex-col gap-4">
 <div class="shrink-0 min-w-0">
 <h1 class="font-headline-lg text-headline-lg font-bold tracking-tight text-primary">__TASK_NAME__</h1>
-<p class="font-body-sm text-body-sm text-on-surface-variant mt-1">__STAGE__ __PAGE_NOTE__</p>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1"><span id="stage"></span> <span id="page_note"></span></p>
 </div>
+
+<noscript>
+<p class="font-body-sm text-body-sm text-on-surface-variant">This page follows the run as it goes, which needs JavaScript. Without it, reload the page to see where the run has got to.</p>
+</noscript>
 
 <div class="bg-surface-container-lowest border border-outline-variant rounded-xl shadow-sm p-padding-card flex flex-col md:flex-row gap-6 items-center md:items-start">
 <!-- Every task of the run, in one dial -->
@@ -100,17 +115,17 @@ __STATUS_PILL__
 <div class="relative w-[136px] h-[136px]">
 <svg class="dial tasks w-full h-full" viewBox="0 0 120 120">
 <circle class="text-surface-variant" cx="60" cy="60" r="54" stroke="currentColor"></circle>
-<circle class="text-bio-growth" cx="60" cy="60" r="54" stroke="currentColor" style="__ARC__"></circle>
+<circle class="text-bio-growth" cx="60" cy="60" id="arc" r="54" stroke="currentColor" style="__ARC__"></circle>
 </svg>
 <div class="absolute inset-0 flex flex-col items-center justify-center">
-<span class="font-headline-lg text-headline-lg font-bold text-primary leading-none">__PERCENT__%</span>
+<span class="font-headline-lg text-headline-lg font-bold text-primary leading-none" id="percent">0%</span>
 <span class="font-label-caps text-label-caps text-on-surface-variant mt-1">Complete</span>
 </div>
 </div>
-<p class="font-body-sm text-body-sm text-on-surface-variant text-center">__TASKS__</p>
+<p class="font-body-sm text-body-sm text-on-surface-variant text-center" id="tasks"></p>
 </div>
-__CLUSTER__
-__TIMERS__
+<div class="contents" id="cluster"></div>
+<div class="contents" id="timers"></div>
 </div>
 
 <!-- One bar per process nextflow has started -->
@@ -121,19 +136,86 @@ __TIMERS__
 <span class="w-9 text-right shrink-0">%</span>
 <span class="w-24 text-right shrink-0 hidden sm:block">Tasks</span>
 </div>
-__ROWS__
+<div id="rows">
+<p class="font-body-sm text-body-sm text-on-surface-variant">__STARTING__</p>
+</div>
 </div>
 </div>
 
-__FAILURE__
+<div class="contents" id="failure"></div>
 </main>
 
 <footer class="shrink-0 bg-surface-container border-t border-outline-variant w-full">
 <div class="flex flex-col md:flex-row justify-between items-center gap-1 px-margin-page py-3 w-full max-w-5xl mx-auto">
-<div class="text-on-surface-variant font-body-sm text-body-sm text-center md:text-left">__FOOTNOTE__</div>
-<div class="text-on-surface-variant font-body-sm text-body-sm">Updated __UPDATED__ &middot; __RUN_ID__</div>
+<div class="text-on-surface-variant font-body-sm text-body-sm text-center md:text-left" id="footnote"></div>
+<div class="text-on-surface-variant font-body-sm text-body-sm">Updated <span id="updated"></span> &middot; __RUN_ID__</div>
 </div>
 </footer>
+
+<script>
+(function () {
+  // The state file beside this page, and how often to ask for it. The renderer
+  // writes it on the same beat and uploads it again only when it has changed,
+  // so asking on time costs one small object and usually an unchanged one.
+  var SOURCE = "__STATE_FILE__";
+  var INTERVAL = __INTERVAL__;
+
+  // Every field of that file is written into the element of the same name.
+  // These are the fragments the renderer built, which go in as markup - it
+  // escaped everything that went into them - and the rest go in as text.
+  var MARKUP = ["status_pill", "cluster", "timers", "rows", "failure"];
+  var TEXT = ["stage", "page_note", "tasks", "footnote", "updated"];
+
+  function write(state) {
+    var i, element;
+
+    for (i = 0; i < MARKUP.length; i++) {
+      element = document.getElementById(MARKUP[i]);
+      if (element) element.innerHTML = state[MARKUP[i]] || "";
+    }
+
+    for (i = 0; i < TEXT.length; i++) {
+      element = document.getElementById(TEXT[i]);
+      if (element) element.textContent = state[TEXT[i]] || "";
+    }
+
+    // The dial, which is a reading and the arc drawn from it rather than markup
+    document.getElementById("percent").textContent = (state.percent || 0) + "%";
+    document.getElementById("arc").setAttribute("style", state.arc || "");
+  }
+
+  function ask() {
+    // Stamped, and asked for uncached, so nothing between this page and the
+    // bucket can answer with a state the run has already left behind
+    fetch(SOURCE + "?t=" + Date.now(), { cache: "no-store" })
+      .then(function (response) {
+        if (!response.ok) throw new Error(response.status);
+        return response.json();
+      })
+      .then(function (state) {
+        // The report has landed on top of this page, so asking for the page
+        // again is what hands the reader the results
+        if (state.state === "final") {
+          location.reload();
+          return;
+        }
+
+        write(state);
+
+        // A run that has ended has nothing more to say, and this is the last
+        // thing the page asks for
+        if (state.state === "live") setTimeout(ask, INTERVAL);
+      })
+      .catch(function () {
+        // Mid-upload, or the network blinked. The run is still going as far as
+        // this page knows, so ask again on the same beat.
+        setTimeout(ask, INTERVAL);
+      });
+  }
+
+  ask();
+})();
+</script>
 
 </body>
 </html>

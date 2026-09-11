@@ -9,9 +9,19 @@
 # later occupy, s3://$AWS_S3_BUCKET/$S3_RUN_PREFIX/<run_id>/index.html, and puts
 # the run's whole state beside it as run_state.json at the same prefix. A reader
 # who opens the results link before the run finishes therefore watches it work,
-# and is handed the report once ampliseq_upload.sh overwrites this file. The
-# progress page refreshes itself every ten seconds; the report does not, so a
-# browser stops polling on its own the moment the run lands.
+# and is handed the report once ampliseq_upload.sh overwrites this file.
+#
+# The page itself holds nothing that moves, and is uploaded once: what it reads
+# while the run goes is progress.json, a third object at the same prefix holding
+# the dial, the rows, the clocks and the sentences around them. Both are written
+# every ten seconds and each is uploaded only when its digest has changed, so a
+# run costs one page and then a couple of kilobytes whenever it actually moves -
+# rather than the whole page, head and all, six times a minute.
+#
+# progress.json also carries what the page should do once it has read it: "live"
+# while the run is going, "failed" once it is over, and "final" - written by
+# publish_results, not here - when the report has landed on top of the page,
+# which is what sends a reader's browser for it.
 #
 # A run that has failed carries its logs on the page as well: nextflow's error
 # block, the debug log beside it, and the command that was run, so a requester
@@ -44,11 +54,11 @@
 #            being handled - the first of those calls creates the run's S3 prefix
 #            - and wrike_job.sh, backgrounded from its first stage until its
 #            last, which publishes the results over this page
-# Requires:  aws, awk; squeue and sacct for the cluster counts and the clocks,
-#            each optional
-# Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, and the log/warn helpers,
-#            is_valid_uid, run_cpu_seconds and the run_state helpers, all
-#            sourced from .env
+# Requires:  aws, awk, jq, md5sum; squeue and sacct for the cluster counts and
+#            the clocks, each optional
+# Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, PROGRESS_STATE_KEY, and
+#            the log/warn helpers, is_valid_uid, run_cpu_seconds and the
+#            run_state helpers, all sourced from .env
 #
 # Run from inside the run directory, whose name is the run ID.
 
@@ -76,13 +86,24 @@ readonly NEXTFLOW_CMD="nextflow_command.sh"
 
 readonly DEFAULT_INTERVAL=10
 
-# How long a reader's browser waits before asking for the page again, which
+# How long a reader's browser waits before asking for the state file again, which
 # matches the interval above so that what it gets back has changed.
-readonly REFRESH_SECONDS=10
+readonly POLL_SECONDS=10
+
+# How long the circle the dial's arc is drawn on is, which is what a share of the
+# run has to be turned into to draw it
+readonly DIAL_CIRCUMFERENCE=339.292
+
+# The digest of what was last uploaded under each name, so that a file which has
+# not changed is not sent again. Written in the run directory, which lasts as
+# long as the run does and is new for every one of them - so the first publish
+# of a run always sends both, whatever is at the prefix already.
+readonly PAGE_DIGEST=".progress_page.md5"
+readonly STATE_DIGEST=".progress_state.md5"
 
 # How much of a log a failed run's page carries. Enough for nextflow's error
 # block, which runs to a few dozen lines, without pasting a whole run's output
-# into an object a browser reloads.
+# into an object a browser asks for on a beat.
 readonly LOG_TAIL_LINES=200
 
 # Shown before any process has been given a task, which can take a couple of
@@ -95,6 +116,41 @@ if ! is_valid_uid "$RUN_ID"; then
 fi
 
 readonly S3_INDEX="s3://$AWS_S3_BUCKET/$S3_RUN_PREFIX/$RUN_ID/index.html"
+readonly S3_STATE="s3://$AWS_S3_BUCKET/$S3_RUN_PREFIX/$RUN_ID/$PROGRESS_STATE_KEY"
+
+# Put the body on stdin at a key, unless the last thing put there was the same.
+# The digest of that last upload is kept in the file named third, so the page -
+# which never changes after the first publish - is sent once, and the state file
+# only when the run has actually moved.
+#
+# no-cache because both are rewritten under the same name and a reader watching
+# a run must be answered with what the run is doing now, not what CloudFront
+# last saw it doing.
+upload_if_changed() {
+    local key="$1" type="$2" digest="$3"
+    local body sum
+
+    # Nothing at all is what a renderer that gave up prints, and it must not
+    # land on top of a page a reader is watching
+    body=$(cat)
+    [[ -n "$body" ]] || return 1
+
+    sum=$(printf '%s\n' "$body" | md5sum) || return 1
+    sum=${sum%% *}
+
+    if [[ -r "$digest" && "$(<"$digest")" == "$sum" ]]; then
+        return 0
+    fi
+
+    # --content-type because reading the body from stdin leaves aws nothing to
+    # guess from, and a page served as binary downloads instead of rendering.
+    printf '%s\n' "$body" \
+        | aws s3 cp - "$key" --content-type "$type" --cache-control "no-cache" \
+            > /dev/null \
+        || return 1
+
+    printf '%s' "$sum" > "$digest"
+}
 
 # Turn the newest block of one nextflow run's progress lines, out of the console
 # output named first, into table rows. Each block lists every process that has
@@ -526,15 +582,18 @@ failure_report() {
     printf '</div>'
 }
 
-# The refresh that makes the page live, for as long as it is. A failed run is
-# over and has nothing more to say, so its page is published without one and the
-# reader's browser stops asking - the same way the finished dashboard does.
-page_refresh() {
+# What the page does once it has read this state file: keeps asking while the
+# run is going, and stops on a run that has ended and has nothing more to say.
+# The third answer, "final", is not written here - publish_results writes it over
+# this file when the report lands on top of the page, which is what sends a
+# reader's browser for the report.
+page_state() {
     if [[ "${1,,}" == "failed" ]]; then
+        printf 'failed'
         return 0
     fi
 
-    printf '<meta content="%s" http-equiv="refresh">' "$REFRESH_SECONDS"
+    printf 'live'
 }
 
 # What this page is going to become, said after the stage under the run's name.
@@ -552,13 +611,13 @@ page_note() {
 # next - and for a failed run, that it is not going to do anything.
 page_footnote() {
     if [[ "${1,,}" == "failed" ]]; then
-        printf 'This run did not finish, and this page has stopped refreshing.'
+        printf 'This run did not finish, and this page has stopped updating.'
         printf ' What the pipeline reported is above.'
         return 0
     fi
 
-    printf 'This page refreshes itself every %s seconds, and is replaced by the' \
-        "$REFRESH_SECONDS"
+    printf 'This page updates itself every %s seconds, and is replaced by the' \
+        "$POLL_SECONDS"
     printf ' results when the run finishes.'
 }
 
@@ -591,7 +650,7 @@ status_pill() {
 
 publish_once() {
     local status="${1:-}"
-    local page rows task_name totals tasks_done tasks_total percent arc tasks
+    local rows task_name totals tasks_done tasks_total percent arc tasks
     local stage counts running pending elapsed cpu clusters timers failure
 
     if [[ ! -r "$PROGRESS_TEMPLATE" ]]; then
@@ -662,7 +721,7 @@ publish_once() {
         tasks="$tasks_done of $tasks_total tasks"
     fi
 
-    arc=$(dial_arc "$percent" 339.292)
+    arc=$(dial_arc "$percent" "$DIAL_CIRCUMFERENCE")
 
     # What this run holds on the cluster, and how long it has been holding it,
     # which is the other thing a reader waiting on a queue wants to know
@@ -703,29 +762,42 @@ publish_once() {
         failure=$(failure_report) || failure=""
     fi
 
-    # Rows are never escaped - render_rows emits the markup itself, having
-    # escaped everything that came out of the log.
-    page=$(render_template "$PROGRESS_TEMPLATE" \
-        TASK_NAME   "$(escape_html "$task_name")" \
-        RUN_ID      "$RUN_ID" \
-        STATUS_PILL "$(status_pill "$status")" \
-        REFRESH     "$(page_refresh "$status")" \
-        FOOTNOTE    "$(page_footnote "$status")" \
-        STAGE       "$(escape_html "$stage")" \
-        PAGE_NOTE   "$(page_note "$status")" \
-        PERCENT     "$percent" \
-        ARC         "$arc" \
-        TASKS       "$(escape_html "$tasks")" \
-        CLUSTER     "$clusters" \
-        TIMERS      "$timers" \
-        FAILURE     "$failure" \
-        UPDATED     "$(date '+%B %-d, %Y at %-I:%M %p %Z')" \
-        ROWS        "$rows") || return 1
+    # The page itself, which carries only what is fixed for the whole run: the
+    # run's name, the dial at nothing, and the script that reads the state file
+    # written below. Sent once - every publish after the first renders the same
+    # bytes and sends nothing.
+    render_template "$PROGRESS_TEMPLATE" \
+        TASK_NAME  "$(escape_html "$task_name")" \
+        RUN_ID     "$RUN_ID" \
+        STATE_FILE "$PROGRESS_STATE_KEY" \
+        INTERVAL   "$(( POLL_SECONDS * 1000 ))" \
+        ARC        "$(dial_arc 0 "$DIAL_CIRCUMFERENCE")" \
+        STARTING   "$STARTING_MESSAGE" \
+        | upload_if_changed "$S3_INDEX" "text/html" "$PAGE_DIGEST" \
+        || return 1
 
-    # --content-type because reading the body from stdin leaves aws nothing to
-    # guess from, and a page served as binary downloads instead of rendering.
-    printf '%s\n' "$page" \
-        | aws s3 cp - "$S3_INDEX" --content-type "text/html" > /dev/null \
+    # And everything that moves, as the object that page asks for. The five
+    # fragments go in as the renderers built them - each escaped whatever came
+    # out of a log or a task name on its way in, and the page writes them as
+    # markup - while the rest go in as they were read and the page writes them
+    # as text.
+    jq -n \
+        --arg     state       "$(page_state "$status")" \
+        --arg     status_pill "$(status_pill "$status")" \
+        --arg     stage       "$stage" \
+        --arg     page_note   "$(page_note "$status")" \
+        --argjson percent     "$percent" \
+        --arg     arc         "$arc" \
+        --arg     tasks       "$tasks" \
+        --arg     cluster     "$clusters" \
+        --arg     timers      "$timers" \
+        --arg     rows        "$rows" \
+        --arg     failure     "$failure" \
+        --arg     footnote    "$(page_footnote "$status")" \
+        --arg     updated     "$(date '+%B %-d, %Y at %-I:%M %p %Z')" \
+        '{$state, $status_pill, $stage, $page_note, $percent, $arc, $tasks,
+          $cluster, $timers, $rows, $failure, $footnote, $updated}' \
+        | upload_if_changed "$S3_STATE" "application/json" "$STATE_DIGEST" \
         || return 1
 
     # The run's own record, refreshed with the page it explains, so a reader

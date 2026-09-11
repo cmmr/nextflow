@@ -329,9 +329,24 @@ after the pruning, so none of them can describe a file a reader cannot fetch.
 **That page starts as a live progress view.**
 [`nextflow_progress.sh`](../../scripts/nextflow_progress.sh), backgrounded by
 `wrike_job.sh` from the moment the job starts, renders
-[`templates/progress.html`](../../templates/progress.html) to the *same key*
-every ten seconds — so a requester who opens the results link early watches the
-pipeline work. The final upload overwrites it.
+[`templates/progress.html`](../../templates/progress.html) to the *same key* —
+so a requester who opens the results link early watches the pipeline work. The
+final upload overwrites it.
+
+**The page is uploaded once, and what moves is a file beside it.** Everything
+that changes while the run goes — the dial, the rows, the counts, the clocks,
+the sentences around them — is written as `progress.json` at the same prefix,
+and the page asks for that every ten seconds and writes each of its fields into
+the element of the same name. Both are rendered on that beat and each is
+uploaded only when its digest has changed, so the page goes up once and a run
+that is sitting in a queue costs nothing at all — where re-rendering the whole
+page meant sending its inlined head, the Tailwind theme and every row of the
+table six times a minute whether or not anything had happened.
+
+**The state file also says what the page should do next.** It carries `live`
+while the run is going, `failed` once it is over, and `final` — written by
+`publish_results`, over the same key, once the report has landed on top of the
+page — which is what sends a reader's browser for the report.
 
 **It starts before nextflow does**, because the stages before nextflow are the
 ones a requester waits through with nothing to look at: recompressing and
@@ -419,7 +434,7 @@ longest-running of those jobs, which is the one driving the run. The second is
 `CPUTimeRAW` summed over the run's jobs in the accounting database, which is the
 only place the tasks that have already finished are still counted, so it only
 ever goes up. Both are read at the moment the page is rendered rather than
-counted up in the browser, so they step forward with each refresh.
+counted up in the browser, so they step forward with the state file.
 
 **A run that is over still says how long it took.** Its jobs are gone from
 `squeue` by then, so the counts read nought and nought — which is the true thing
@@ -448,10 +463,10 @@ troubleshooting docs* — that says nothing and would otherwise be the whole
 report. A run that failed some other way has neither, and the tail of the output
 stands in.
 
-**And it stops refreshing.** The meta refresh is written by the renderer rather
-than sat in the template, and a failed run's page is published without one, so
-the reader's browser stops asking for a page that is never going to change —
-the same way the finished dashboard does.
+**And it stops asking.** A failed run's state file says `failed` rather than
+`live`, and the page stops there, so the reader's browser stops asking after a
+run that is never going to say anything else — the same way it stops once the
+finished dashboard has replaced the page.
 
 That panel is why [`wrike_followup.sh`](../../scripts/wrike_followup.sh)
 republishes the page for a failed run. `wrike_job.sh` publishes one itself when
@@ -476,9 +491,9 @@ The status the bar carries is the run's own — `Validating`, `Queued`, `Running
 still, and `Completed` green, for the moment between the last stage and the
 report landing.
 
-The progress page refreshes itself every ten seconds; the finished dashboard and
-a failed run's page do not, which is what stops a reader's browser polling once
-a run is over either way.
+The progress page follows its state file every ten seconds; the finished
+dashboard has no such file to follow and a failed run's says to stop, which is
+what stops a reader's browser asking once a run is over either way.
 
 ## How the pages are styled
 

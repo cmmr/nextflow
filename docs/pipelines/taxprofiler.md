@@ -938,13 +938,41 @@ sizes its k-mer table against, so the 64 GB reserved for it is a budget rather
 than a headroom estimate. Reserving less is a coarser estimate rather than a
 failed task.
 
+**The steps that read the requester's own FASTQ files are retried** — `FASTQC`,
+`FASTQC_PROCESSED`, `FASTP_SINGLE` and `FASTP_PAIRED`, three times each, on any
+failure rather than on nf-core's list of exit codes. Nonpareil retries too,
+before falling back to the `ignore` it already had.
+
+The reason is run `i6hehgpw`, where four of ten `FASTQC` tasks died two minutes
+in with `java.io.IOException: Operation not permitted` while reading a raw
+FASTQ — across three different compute nodes, unrelated to file size or sample,
+on files that read back clean immediately afterwards and could not be made to
+fail again under the same concurrency. `read()` has no such error in POSIX; it
+came out of the GPFS driver. The root cause is in the storage layer rather than
+in this pipeline, and it is not one this repository can fix.
+
+What it *could* fix is the cost. nf-core's default strategy retries exit 104 and
+130–145, and a tool that has hit an I/O error is not among them — FastQC returns
+1, and 1 terminates. So one bad read on one of twenty files threw away an
+eight-hour run at minute two, in a step whose output feeds only MultiQC.
+
+**These four are the exposed ones** because
+[`taxprofiler_samplesheet.sh`](../../scripts/taxprofiler_samplesheet.sh)
+symlinks already-gzipped input into `raw-sequences/` rather than copying it. That
+is nearly free, and the price is that a run stays coupled to whatever filesystem
+the sequencing centre wrote to for its whole duration, rather than for one pass
+in pre-process. Copying would confine the exposure at the cost of a full
+duplicate of the inputs on `/data`.
+
 The HUMAnN workflow has its own
 [`workflows/humann/nextflow.config`](../../workflows/humann/nextflow.config),
 auto-loaded from the workflow's directory, with the same executor, the same
 image cache and the same node sizing. `HUMANN_PROFILE` is reserved 16 cpus and
 64 GB, doubling on a retry: the reservation is for DIAMOND against the 34 GB
 UniRef90 index, and HUMAnN is left on its default `--memory-use minimum` so
-DIAMOND blocks that index rather than holding it whole.
+DIAMOND blocks that index rather than holding it whole. `HUMANN_TABLES` is
+retried for the same reason the steps above are — it is the one task between
+every sample's profile and the published tables.
 
 Nothing copies a database. Nextflow stages inputs as absolute symlinks
 (`stageInMode` defaults to `symlink`) and `scratch` copies only declared

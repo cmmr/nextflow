@@ -51,9 +51,8 @@
 # beside it, and the feature table is there to be rarefied downstream.
 #
 # Usage: ampliseq_tables.R <results_dir> <plot_data.json> <statistics.tsv>
-#            [exclude_taxa] [method]
-#        exclude_taxa is a comma-separated list, or "none"; method is the
-#        sentence the composition chart is captioned with, or empty
+#            [exclude_taxa]
+#        exclude_taxa is a comma-separated list, or "none"
 #
 # Requires: rbiom (>= 3.1.0), and h5lite for the HDF5 output
 
@@ -68,7 +67,6 @@ results_dir  <- sub("/$", "", args[[1]])
 plot_data    <- args[[2]]
 stats_file   <- args[[3]]
 exclude_taxa <- if (length(args) >= 4) args[[4]] else "none"
-method       <- if (length(args) >= 5) args[[5]] else ""
 
 # The eleven the palette carries; everything rarer is summed into "Other"
 TOP_TAXA <- 11
@@ -504,11 +502,6 @@ data <- list(
     alpha   = alpha_values,
     metrics = metric_specs,
     levels  = levels)
-
-# How those numbers were made, for the caption under the composition chart. Read
-# off DADA2's own record of the database by the caller, which is the only thing
-# here that looks outside the feature table.
-if (nzchar(method)) data <- c(list(method = method), data)
 
 # I() marks the values that stay an array however few entries they have;
 # everything else here is a scalar, which is what the page reads it as.

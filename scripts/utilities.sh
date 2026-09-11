@@ -1,6 +1,6 @@
 #
 # utilities.sh - The log, warn, and fail helpers every script reports through,
-#                plus the uid helpers.
+#                plus the uid helpers and a run's cpu accounting.
 #
 # Author: Daniel Smith
 # Date:   August 12th, 2026
@@ -21,7 +21,8 @@
 # Wrike task.
 #
 # Defines: log, warn, fail, run_results_url, escape_html, escape_url, human_size,
-#          human_count, group_count, render_template, is_valid_uid, derive_uid
+#          human_count, group_count, render_template, is_valid_uid, derive_uid,
+#          run_cpu_seconds
 # Env:     RUN_ID_SALT from secrets/.env, for derive_uid only; AWS_S3_BUCKET and
 #          S3_RUN_PREFIX for run_results_url; NEXTFLOW_DIR for render_template
 
@@ -220,4 +221,26 @@ derive_uid() {
     fi
 
     printf '%s' "$uid"
+}
+
+# Cpu-seconds every Slurm job of the run in this directory has held between
+# them - allocated cores times elapsed time, sacct's CPUTimeRAW - read out of
+# the accounting database, which is the only place jobs that have already
+# finished are still counted. A job is the run's when its work directory is this
+# one or below it, which covers the job driving the run and every task nextflow
+# submits. The window opens at the one argument, in any form sacct --starttime
+# takes.
+#
+# Prints nothing when sacct cannot answer, or finds nothing to count.
+run_cpu_seconds() {
+    local since="$1"
+
+    command -v sacct > /dev/null 2>&1 || return 0
+
+    sacct --allocations --noheader --parsable2 --starttime="$since" \
+        --format=CPUTimeRAW,WorkDir 2>/dev/null \
+        | LC_ALL=C awk -F'|' -v here="$PWD" '
+            index($2, here) == 1 { total += $1 }
+            END { if (total == 0) exit 1; print total }
+        '
 }

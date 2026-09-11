@@ -52,3 +52,13 @@ accepted, and `run_state.json` and `nextflow.log` there say why — the state
 file's `.status` and `.message` carrying the account of it, and its
 `.wrike.task_id` naming the Wrike task it came from, since the uid does not lead
 back to one.
+
+**Every run that ends also leaves one line in `$NEXTFLOW_DIR/log/run_history.tsv`**,
+written by `wrike_followup.sh` whether the run succeeded or failed: when it
+ended, its uid, the pipeline version, its outcome, how many samples and decimal
+gigabytes of FASTQ it was given, and the allocated cpu hours all of its Slurm
+jobs held. The FASTQ is measured as the run staged it in `raw-sequences/`, and
+the cpu time is read from `sacct` once every job of the run has finished — so
+it includes the steps after nextflow, HUMAnN among them, which the progress
+page's last clock does not. It is the record an estimate of how far along a
+running job is gets fitted to; keep the rows whose `outcome` is `Completed`.

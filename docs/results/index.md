@@ -87,10 +87,15 @@ sidebar, the Overview is exactly as tall as the frame it is read in: the chart
 is drawn to the space the page has rather than the page growing a scrollbar to
 fit the chart.
 
-**Feature table**, at the top of the sidebar. One row per headline file the
-pipeline declared, and a row of format boxes for the one file it declared in
-several — nothing else; everything the run published comes down through the
-button at the top of the page.
+**Feature table**, at the top of the sidebar, with a tab-link per tool that
+wrote one — *DADA2* on a 16S run; *MetaPhlAn*, *Kraken/Bracken* and *HUMAnN* on
+a shotgun run, where the card is headed *Feature Tables*. A tab holds that
+tool's headline files — on a shotgun run, a link to its folder's listing too —
+and under them its classification: how many ASVs the classifier placed at
+phylum, genus and species; how many reads Kraken2 placed at each; what share of
+the reads MetaPhlAn and HUMAnN mapped. Nothing else — everything the run
+published comes down through the button at the top of the page. A tool the run
+did not use has no tab.
 
 **Download everything**, the emphasised button at the top right of the page,
 directly under the deletion date the navigation bar carries, since it is
@@ -114,12 +119,11 @@ merged, and the count every number under it is a count over. Then what the run
 measured, in the units a sidebar has room for. Both pipelines report the same two
 read totals — the reads that went in, and the reads that were left — then the
 thinnest, middle and deepest sample. An ampliseq run's retained reads are the
-ones that reached an ASV, and under them it reports how many ASVs it called and
-how much of that the classifier could place at family, at genus and at species. A
-taxprofiler run's are the ones that reached the classifier, after quality
-filtering and host depletion have each taken their cut, and under them it reports
-how much of that the classifier could place at phylum, at genus and at species.
-The same pass that works out the plots counts all of it, into `.statistics`.
+ones that reached an ASV; a taxprofiler run's are the ones that reached the
+classifier, after quality filtering and host depletion have each taken their
+cut. What each tool then classified is under that tool's tab of the Feature
+Table card rather than here. The same pass that works out the plots counts all
+of it, into `.statistics`.
 
 **Two bars, and the funnel behind a details link.** The sidebar shows what went
 in and what was left; the steps in between sit under `details` on the second of
@@ -334,10 +338,11 @@ ones a requester waits through with nothing to look at: recompressing and
 staging a few hundred FASTQ files, and measuring what was sequenced, take long
 enough to look like a stall. Each stage calls `set_run_stage` as it begins, which
 writes one sentence to `.stage` in the run's state file, and the page says it
-under the run's name — *Preparing your sequencing files.* The watcher is stopped
-before the results are uploaded, since that upload lands the finished dashboard
-on the same key; the last thing it publishes by hand is the page that says the
-results are being packaged.
+under the run's name — *Preparing your sequencing files.* The watcher runs until
+the last post-process step — the one that uploads the results, and lands the
+finished dashboard on the same key — and stops as that step begins, leaving a
+page that shows it under way. It finishes any upload already in flight before it
+exits, so nothing it sent can land on top of the dashboard.
 
 **Nothing is written into `nextflow.out` to make that work.** That file is
 nextflow's own console output, teed for the record, and a line of ours in it
@@ -374,10 +379,31 @@ under it — *17 of 20 tasks*. A process nextflow has not yet given any tasks
 counts for nothing rather than for nought out of nought, so the dial only ever
 reports on work that exists.
 
-Beside it, one bar per process: **navy once the process is done, green with its
-stripes running while its tasks are in flight**, and an empty track for one
-nextflow has not started. A process with tasks submitted but none finished still
-shows a sliver, so "started" and "not started" never look the same.
+**Beside it is the run's steps, in the order they run** — each pre-process
+command, the pipeline's nextflow run, then each post-process command — with the
+processes of each nextflow run indented under the step that drives it. For a
+taxprofiler run that is `samplesheet`, then `nf-core/taxprofiler` with its
+processes, then `humann` with HUMAnN's, then `upload`. `wrike_job.sh` records the
+list as `.steps` in the run's state file before the first step starts, and moves
+each through `waiting`, `active`, and `done` or `failed` as it runs.
+
+A process's bar is **navy once the process is done, and green with its stripes
+running while its tasks are in flight**; one with tasks submitted but none
+finished still shows a sliver.
+
+**A process nextflow has not given a task is left off**, along with the *Plus 7
+more processes waiting for tasks* line nextflow closes its table with. Nextflow
+lists every process a pipeline declares, and most of them never get a task on a
+given run — the long-read branch of a short-read run, `UNTAR` when the databases
+are already unpacked — so listing them padded the table with work that was
+never going to happen. One that does get a task appears the moment it starts.
+
+A step has no count
+of tasks to show a share of, so its bar is empty until it starts, striped across
+its whole width while it runs, navy once it is done and red if it failed. The
+dial counts every task of every nextflow run, plus one for each step that has no
+processes of its own, so it moves through the stages before and after nextflow
+too.
 
 **Under the dial are the run's Slurm jobs** — *3 Running*, *2 Queued*. `squeue`
 is asked for every running and pending job, and a job is this run's when its
@@ -435,7 +461,9 @@ word, and would otherwise leave the page frozen mid-run. The follow-up job runs
 whatever happened, so it is the one place that can say so.
 
 Those numbers come from parsing nextflow's console output, which `wrike_job.sh`
-tees to `nextflow.out`. Nextflow has no live status API outside Seqera Platform:
+tees to `nextflow.out` — and, for a step that drives a nextflow run of its own,
+whatever that step teed its run to. Nextflow has no live status API outside
+Seqera Platform:
 its trace file only records tasks that have already finished, and its HTML report
 is written once at the end. What it does emit continuously is the same process
 table an interactive terminal shows — one line per change, since ANSI output is

@@ -33,7 +33,7 @@
 #          state_update, state_get, state_get_json, state_get_tsv, state_has,
 #          state_set, state_set_json, state_set_number, state_set_tsv,
 #          state_append, state_unset, publish_run_state, set_run_status,
-#          set_run_stage, get_run_status
+#          set_run_stage, set_step_state, get_run_status
 # Requires: jq, and flock where two writers can overlap; aws for
 #           publish_run_state; the warn helper and is_valid_uid from
 #           utilities.sh, which .env sources first
@@ -259,4 +259,16 @@ get_run_status() {
 # Best effort, since a run must not fail over a status line.
 set_run_stage() {
     state_set stage "$1" 2>/dev/null || true
+}
+
+# Where one of the run's steps has got, for its row on the progress page:
+# "waiting", "active", "done" or "failed". The steps are recorded as ".steps" by
+# wrike_job.sh before the first of them starts - each pre-process command, the
+# nextflow run, each post-process command - and one is addressed by its place in
+# that list.
+#
+# Best effort, like the stage: a run must not fail over a progress row.
+set_step_state() {
+    state_update '.steps[$index].state = $state' \
+        --argjson index "$1" --arg state "$2" 2>/dev/null || true
 }

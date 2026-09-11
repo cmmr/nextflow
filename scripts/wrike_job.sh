@@ -61,7 +61,7 @@
 # Called by: wrike_task_handler.sh
 # Sources:   pipelines/<PIPELINE_NAME>.sh
 # Runs:      scripts/nextflow_progress.sh, backgrounded from the first stage to
-#            the end of the nextflow one, and once more before post-processing
+#            the start of the last, and once more as that one begins
 # Requires:  nextflow (as $NEXTFLOW_DIR/bin/nextflow), curl and jq (via the
 #            Wrike helpers)
 # Env:       NEXTFLOW_DIR, the Wrike helper functions, the params helpers, the
@@ -103,9 +103,95 @@ set_run_stage "Getting your run ready."
 "$NEXTFLOW_DIR/scripts/nextflow_progress.sh" --watch &
 PROGRESS_PID=$!
 
+# Stop the watcher, and wait for it. It finishes an upload already under way
+# before it exits, so once this returns nothing it sent can land on top of
+# whatever is published next.
+stop_progress() {
+    kill "$PROGRESS_PID" 2>/dev/null || return 0
+    wait "$PROGRESS_PID" 2>/dev/null || true
+}
+
 # Stop it however this script ends - including when Slurm cancels the job - so
 # no orphan keeps publishing over a finished run's report.
-trap 'kill "$PROGRESS_PID" 2>/dev/null || true' EXIT
+trap stop_progress EXIT
+
+# The name a pre- or post-process command is listed under on the progress page:
+# its script's name less the pipeline's prefix and extension, so
+# "$NEXTFLOW_DIR/scripts/taxprofiler_humann.sh" under "taxprofiler_" is "humann".
+step_name() {
+    local name="${1%% *}"
+
+    name=${name##*/}
+    name=${name%.sh}
+
+    printf '%s' "${name#"$2"}"
+}
+
+# Every step this run will take, recorded as ".steps" in the order they run for
+# the progress page to list: each pre-process command, the nextflow run, then
+# each post-process command, all waiting. Sets NEXTFLOW_STEP_INDEX and
+# POST_STEP_FIRST, the places the nextflow run and the first post-process
+# command take in that list.
+#
+# A command's console output is "<name>.out", which is where a step that drives
+# a nextflow run of its own tees that run, and where the page reads the
+# processes it lists under the step. The nextflow run is listed under the
+# pipeline it runs, with nextflow.out.
+record_steps() {
+    local prefix="${PIPELINE_VERSION,,}" pipeline="nextflow" command name steps i
+
+    prefix="${prefix%%_*}_"
+
+    for (( i = 0; i + 1 < ${#NEXTFLOW_ARGS[@]}; i++ )); do
+        if [[ "${NEXTFLOW_ARGS[i]}" == run ]]; then
+            pipeline="${NEXTFLOW_ARGS[i + 1]}"
+            break
+        fi
+    done
+
+    NEXTFLOW_STEP_INDEX=${#PRE_PROCESS_CMDS[@]}
+    POST_STEP_FIRST=$(( NEXTFLOW_STEP_INDEX + 1 ))
+
+    if steps=$(
+        {
+            for command in ${PRE_PROCESS_CMDS[@]+"${PRE_PROCESS_CMDS[@]}"}; do
+                name=$(step_name "$command" "$prefix")
+                printf '%s\t%s.out\n' "$name" "$name"
+            done
+
+            printf '%s\tnextflow.out\n' "$pipeline"
+
+            for command in ${POST_PROCESS_CMDS[@]+"${POST_PROCESS_CMDS[@]}"}; do
+                name=$(step_name "$command" "$prefix")
+                printf '%s\t%s.out\n' "$name" "$name"
+            done
+        } | jq -R -s -c 'split("\n") | map(select(length > 0) | split("\t")
+                         | {name: .[0], log: .[1], state: "waiting"})'
+    ) && state_set_json steps "$steps"; then
+        return 0
+    fi
+
+    warn "Could not record this run's steps; the progress page will list nextflow's processes alone."
+}
+
+# One step, with its row on the progress page kept up with it: active while it
+# runs, then done - or failed, in which case this job ends with the step's own
+# status, as it did before there were rows. The command and its arguments
+# arrive already split, the way the pipeline file wrote them.
+run_step() {
+    local index="$1" status=0
+    shift
+
+    set_step_state "$index" active
+    "$@" || status=$?
+
+    if (( status != 0 )); then
+        set_step_state "$index" failed
+        exit "$status"
+    fi
+
+    set_step_state "$index" done
+}
 
 # 1. Fetch the samplesheet attached to the requesting task.
 #    -L follows Wrike's redirect to the actual storage backend.
@@ -171,6 +257,9 @@ if [[ -n "$PIPELINE_RERUN_UID" ]]; then
     log "Reproducing run $PIPELINE_RERUN_UID with $PIPELINE_VERSION."
 fi
 
+# The rows the progress page lists from here on, one per step, all waiting
+record_steps
+
 # 4. Pre-process, e.g. converting the samplesheet to the format nextflow expects
 #    and measuring what was sequenced. Unquoted: a pipeline may set a command
 #    plus its arguments. They name it by absolute path, so nothing here depends
@@ -179,8 +268,8 @@ if [[ ${#PRE_PROCESS_CMDS[@]} -gt 0 ]]; then
     set_run_status "Pre-Processing"
     set_run_stage "Preparing your sequencing files."
 
-    for stage_command in "${PRE_PROCESS_CMDS[@]}"; do
-        $stage_command
+    for (( i = 0; i < ${#PRE_PROCESS_CMDS[@]}; i++ )); do
+        run_step "$i" ${PRE_PROCESS_CMDS[i]}
     done
 fi
 
@@ -267,20 +356,21 @@ chmod +x nextflow_command.sh
 
 set_run_status "Running"
 set_run_stage "Running the analysis."
+set_step_state "$NEXTFLOW_STEP_INDEX" active
 
 # Teed because nextflow's console output is the only live account it gives of its
 # own progress, and nextflow_progress.sh reads it from nextflow.out. It still
 # reaches the Slurm log. Under pipefail the pipeline's status is nextflow's own.
 if ! ./nextflow_command.sh 2>&1 | tee nextflow.out; then
     # Leave a page saying so, rather than one frozen mid-run
-    kill "$PROGRESS_PID" 2>/dev/null || true
+    set_step_state "$NEXTFLOW_STEP_INDEX" failed
+    stop_progress
     "$NEXTFLOW_DIR/scripts/nextflow_progress.sh" "Failed" || true
 
     fail "The Nextflow pipeline failed during execution."
 fi
 
-kill "$PROGRESS_PID" 2>/dev/null || true
-trap - EXIT
+set_step_state "$NEXTFLOW_STEP_INDEX" done
 
 # Ship the records alongside the results, since the run directory is deleted once
 # the run succeeds. The state file is not among them: it is published to the same
@@ -293,19 +383,27 @@ if [[ -d results ]]; then
 fi
 
 # 7. Post-process, e.g. uploading results to S3. Unquoted for the same reason as above.
+#
+#    The last step is the one that publishes the finished dashboard, to the key
+#    the progress page is published to, so the watcher stops as that step
+#    begins - leaving one page that shows it under way - and nothing it sends
+#    can land on top of the dashboard.
 if [[ ${#POST_PROCESS_CMDS[@]} -gt 0 ]]; then
     set_run_status "Post-Processing"
     set_run_stage "Packaging and publishing your results."
 
-    # One last page, by hand: the watcher was stopped above because the upload
-    # below lands the finished dashboard on the same key, and a loop still
-    # running would publish over it.
-    "$NEXTFLOW_DIR/scripts/nextflow_progress.sh" "Post-Processing" || true
+    for (( i = 0; i < ${#POST_PROCESS_CMDS[@]}; i++ )); do
+        if (( i == ${#POST_PROCESS_CMDS[@]} - 1 )); then
+            stop_progress
+            set_step_state $(( POST_STEP_FIRST + i )) active
+            "$NEXTFLOW_DIR/scripts/nextflow_progress.sh" "Post-Processing" || true
+        fi
 
-    for stage_command in "${POST_PROCESS_CMDS[@]}"; do
-        $stage_command
+        run_step $(( POST_STEP_FIRST + i )) ${POST_PROCESS_CMDS[i]}
     done
 fi
+
+stop_progress
 
 # The success signal wrike_followup.sh checks, reached only when every stage
 # above succeeded. Any earlier exit leaves the state file's ".status" on the

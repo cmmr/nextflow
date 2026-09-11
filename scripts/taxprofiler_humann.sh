@@ -46,8 +46,9 @@
 # Reads:     ./taxprofiler_samplesheet.csv, <results_dir>/analysis_ready_fastqs/,
 #            <results_dir>/metaphlan/, and db/humann/<release>/
 # Writes:    ./humann_samplesheet.csv, ./humann_profiles/, ./humann_command.sh,
-#            and <results_dir>/humann/ - the tables, the per-sample logs, and a
-#            copy of that command record
+#            ./humann.out and ./humann.log - the console output the progress
+#            page reads and the workflow's own log - and <results_dir>/humann/:
+#            the tables, the per-sample logs, and a copy of that command record
 # Env:       NEXTFLOW_DIR, the log/warn helpers and the run state helpers,
 #            sourced from .env
 
@@ -280,10 +281,9 @@ if (( PROFILED == 0 )); then
     skip "no sample had both analysis-ready reads and a $HUMANN_MPA_VERSION MetaPhlAn profile."
 fi
 
-# The page a requester is watching says what is happening, since this is hours
-# per sample rather than the packaging the post-process stage otherwise is
+# What the page a requester is watching says under the run's name, since this is
+# hours per sample rather than the packaging the post-process stage otherwise is
 set_run_stage "Profiling what the community can do (HUMAnN)." || true
-"$NEXTFLOW_DIR/scripts/nextflow_progress.sh" "Post-Processing" || true
 
 log "Running HUMAnN over $PROFILED sample(s)..."
 
@@ -291,7 +291,7 @@ log "Running HUMAnN over $PROFILED sample(s)..."
 # with the tables cannot drift from what produced them - the same way
 # wrike_job.sh records the taxprofiler command
 HUMANN_ARGS=(
-    -log humann_nextflow.log
+    -log humann.log
     run "$WORKFLOW"
     --input "$PWD/$HUMANN_SHEET"
     --outdir "$RESULTS_PATH"
@@ -309,8 +309,10 @@ HUMANN_ARGS=(
 } > humann_command.sh
 chmod +x humann_command.sh
 
-if ! ./humann_command.sh 2>&1 | tee humann_nextflow.out; then
-    skip "the HUMAnN workflow failed; see humann_nextflow.out."
+# Teed to humann.out, where the progress page reads the processes it lists under
+# this step
+if ! ./humann_command.sh 2>&1 | tee humann.out; then
+    skip "the HUMAnN workflow failed; see humann.out."
 fi
 
 set_run_stage "Packaging and publishing your results." || true

@@ -13,10 +13,12 @@
   reader's browser makes is the one that stops it polling.
 
   The dial on the left is every task of the run taken together, and the bars
-  beside it are one process each: navy once a process has finished, and green
-  with the stripes running while its tasks are in flight. Nextflow has no live
-  status API without Seqera Platform, so both are parsed out of its console
-  output; see nextflow_progress.sh.
+  beside it are the run's steps in the order they run, each nextflow run's
+  processes indented under the step that drives it: navy once a step or a
+  process has finished, green with the stripes running while it is in flight,
+  red for a step that failed. Nextflow has no live status API without Seqera
+  Platform, so the processes are parsed out of its console output; see
+  nextflow_progress.sh.
 
   Under that dial are the run's Slurm jobs, running and queued, and under those
   its clocks: how long the run has been going and how much cpu time it has held.

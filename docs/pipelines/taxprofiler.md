@@ -332,31 +332,39 @@ own numbers, the preference and the deletion are one condition in that loop —
 and worth re-checking against the reports the way the above was, rather than
 trusting the filename.
 
-The sidebar's quick download is labelled rather than named after the file, since
-those filenames carry the tool, the database and the format from the database
-sheet:
+The sidebar's **Feature Tables** card has a tab per tool. Each holds the files a
+requester is likeliest to want from it — labelled rather than named after the
+file, since those filenames carry the tool, the database and the format from the
+database sheet — a link to the listing of the tool's folder, and how much of the
+run the tool classified. A tool the run did not use has no tab.
 
-| Row | File |
-|---|---|
-| Species abundance table | `taxpasta/bracken_*.tsv`, or `taxpasta/kraken2_*.tsv` for a run without Bracken |
-| Feature table — Plain text / JSON / HDF5 | `feature_table/feature-table.tsv`, `.json.biom`, `.hdf5.biom` |
+| Tab | Downloads | Folder | Classification |
+|---|---|---|---|
+| MetaPhlAn | Relative abundance table (`metaphlan/metaphlan_*_combined_reports.txt`), Read count table (`count_tables/metaphlan-reads.tsv`), Feature table with phylogeny (`feature_table/metaphlan-table.hdf5.biom`) | `metaphlan/` | reads mapped to a known clade |
+| Kraken/Bracken | Species abundance table (`taxpasta/bracken_*.tsv`, or `taxpasta/kraken2_*.tsv` for a run without Bracken); Feature table — Plain text / JSON / HDF5 (`feature_table/feature-table.tsv`, `.json.biom`, `.hdf5.biom`) | `kraken2/`, `bracken/` | reads Kraken2 placed at phylum, genus and species |
+| HUMAnN | Pathway abundances, Gene family abundances, Enzyme (EC) abundances (`humann/pathway-abundance-relab.tsv`, `gene-families-relab.tsv`, `ec-relab.tsv`) | `humann/` | reads aligned to a gene family |
 
-**One row, one row of boxes, and the button under them.** The button is the
-whole run as a single zip — `$GLOBUS_URL/nxf/<uid>/<task title>_<uid>.zip?download`,
-the reads beside the results — and its label says how big that is.
+**Every mapped share is counted in the reads that reached the classifiers**, the
+unit the read totals are in.
+[`taxprofiler_composition.sh`](../../scripts/taxprofiler_composition.sh) reads
+MetaPhlAn's share per sample off the `#<n> reads processed` and
+`#estimated_reads_mapped_to_known_clades:<n>` lines of each profile's header, and
+HUMAnN's off `humann/alignment-summary.tsv` — what was still unaligned after the
+translated search, or after the nucleotide search where no translated search
+ran — then weighs each sample's share by the reads it brought to Kraken2.
+MetaPhlAn counts each mate of a pair as a read of its own, which is why its own
+counts are not reported as they stand.
 
 The row of boxes is [the feature table](#the-feature-tables) in the three
 formats it was written in, shaped the way the 16S pipeline shapes the same
 offer: one file three ways rather than three files. It is there because a
-requester computing UniFrac or Faith's PD needs the object with the tree in it,
-and nothing else on the page is that.
+requester computing UniFrac or Faith's PD needs the object with the tree in it.
 
-The merged MetaPhlAn and mOTUs profiles, the count tables, and
-`alpha_diversity.tsv`, are all published — they are just not what this list is for. It is the shortest
-route to the file a requester came for, and every row added to it makes that
-route longer. The file index carries each of them under the heading that says
-what it is for, and the second-opinion profiles and the numbers behind a plot
-the reader is already looking at are both a click into it.
+The mOTUs profiles, the rest of the count tables, and `alpha_diversity.tsv` are
+all published — they are just not what the card is for. The file index carries
+each of them under the heading that says what it is for, and everything the run
+published comes down through the **Download everything** button at the top of
+the page.
 
 All three open in a tab rather than downloading, which is what
 [their content types](../results/index.md#what-a-link-does-when-you-click-it)
@@ -805,7 +813,8 @@ driven by [`taxprofiler_humann.sh`](../../scripts/taxprofiler_humann.sh) as the
 first post-process step. It is a workflow rather than a loop in that script
 because HUMAnN is hours per sample: a loop would serialise it inside the
 2-core job the post-process stage runs in, where a workflow gets the same
-Slurm-level parallelism taxprofiler itself does.
+Slurm-level parallelism taxprofiler itself does. Its jobs appear on the progress
+page under the `humann` step, the way taxprofiler's appear under its own.
 
 Everything it writes lands in `results/humann/`, which the dashboard's File
 Explorer carries as its own **Functional profiles** section.
@@ -831,9 +840,16 @@ wrong way off the output:
   community *can* run it. Whether it does needs RNA.
 
 **`--taxonomic-profile` hands HUMAnN the profile taxprofiler already computed**,
-so it skips its own MetaPhlAn pass. That roughly halves the marginal cost, and it
-makes the taxonomy stratifying the by-taxon tables the same taxonomy the run
-publishes as its taxonomic deliverable.
+so it skips its own MetaPhlAn pass — one bowtie2 alignment of every read against
+the marker database — and the taxonomy stratifying the by-taxon tables is the
+same taxonomy the run publishes as its taxonomic deliverable. Translated search
+still dominates what HUMAnN costs.
+
+**It is the profile that is reused, not MetaPhlAn's alignments.** MetaPhlAn
+aligns reads to a small set of marker genes per species, which is enough to say
+who is present and nowhere near enough to say what they carry. HUMAnN aligns the
+reads again, to the whole pangenomes of the species in that profile, and then
+sends what is left to UniRef90.
 
 **The profile is rewritten before HUMAnN sees it,** and this is the part not to
 delete. taxprofiler runs MetaPhlAn with `-t rel_ab_w_read_stats`, which the

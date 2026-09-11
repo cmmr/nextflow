@@ -33,6 +33,13 @@
 # A successful run has already published to S3, so its run directory is removed.
 # A failed one is kept for inspection.
 #
+# Either way, the run first leaves one line in log/run_history.tsv: its pipeline,
+# how it ended, how many samples and gigabytes of FASTQ it was given, and the cpu
+# time its jobs held. Read here rather than off the progress page's last clock,
+# since this is the one moment every job of the run has finished and been
+# accounted for. It is what an estimate of how far along a running job is gets
+# fitted to.
+#
 # --output and --error name the same file, so both streams land in one
 # log/followup_<uid>_<jobid>.out.
 #
@@ -40,7 +47,8 @@
 #                --dependency=afterany:<job_id> wrike_followup.sh
 # Called by: wrike_task_handler.sh
 # Runs:      scripts/nextflow_progress.sh, once, for a run that failed
-# Requires:  curl and jq (via the Wrike helpers)
+# Requires:  curl and jq (via the Wrike helpers); sacct and flock, each optional
+# Writes:    one line of $NEXTFLOW_DIR/log/run_history.tsv
 # Env:       NEXTFLOW_DIR, the Wrike helper functions and the run state helpers,
 #            sourced from .env
 #
@@ -81,6 +89,54 @@ run_report() {
     printf '%s' "$reply"
 }
 
+# Where every run that ends leaves one line: when it ended, which run and which
+# pipeline version it was, how it ended, how many samples and gigabytes of FASTQ
+# it was given, and the cpu hours its jobs held.
+RUN_HISTORY="$NEXTFLOW_DIR/log/run_history.tsv"
+
+# This run's line, appended under a lock since two runs can end at once, with
+# the header written first by whichever run finds the file empty.
+#
+# The FASTQ is measured as the run staged it in raw-sequences/ - through the
+# links to the requester's own copies, and after any recompression to gzip - in
+# decimal gigabytes. The cpu time is every job whose work directory is this
+# run's, from when the run directory was made, in allocated core-hours. Either
+# is left empty when it cannot be read.
+record_run_history() {
+    local outcome="$1" pipeline samples started since cpu gb="" cpu_hours=""
+
+    pipeline=$(state_get manifest.pipeline)
+    samples=$(state_get samples.count)
+
+    if [[ -d raw-sequences ]]; then
+        gb=$(find -L raw-sequences -type f -printf '%s\n' 2>/dev/null \
+            | awk '{ total += $1 } END { printf "%.3f", total / 1e9 }')
+    fi
+
+    # sacct reads its window in local time; the run recorded when it began in UTC
+    started=$(state_get created_utc)
+    if [[ -z "$started" ]] || ! since=$(date -d "$started" '+%Y-%m-%dT%H:%M:%S' 2>/dev/null); then
+        since="now-7days"
+    fi
+
+    if cpu=$(run_cpu_seconds "$since") && [[ "$cpu" =~ ^[0-9]+$ ]]; then
+        cpu_hours=$(awk -v s="$cpu" 'BEGIN { printf "%.2f", s / 3600 }')
+    fi
+
+    {
+        if command -v flock > /dev/null 2>&1; then
+            flock 9 || true
+        fi
+
+        if [[ ! -s "$RUN_HISTORY" ]]; then
+            printf 'finished_utc\trun_id\tpipeline\toutcome\tsamples\tfastq_gb\tcpu_hours\n' >&9
+        fi
+
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+            "$RUN_ID" "$pipeline" "$outcome" "$samples" "$gb" "$cpu_hours" >&9
+    } 9>>"$RUN_HISTORY"
+}
+
 # No recorded status means wrike_job.sh died before its first progress update
 STATUS=$(get_run_status)
 : "${STATUS:=Starting}"
@@ -99,6 +155,10 @@ if [[ "$STATUS" == "Completed" ]]; then
     publish_run_state "$RUN_ID" \
         || warn "Could not publish the final $RUN_STATE_FILE for run $RUN_ID."
 
+    # Before the directory goes, since the FASTQ it measures is staged in it
+    record_run_history Completed \
+        || warn "Could not add run $RUN_ID to $RUN_HISTORY."
+
     # Results are already in S3; the working files are no longer needed
     cd /
     rm -rf "$RUN_DIR"
@@ -108,6 +168,9 @@ fi
 
 set_run_status "Failed" || true
 set_wrike_status "Failed"
+
+record_run_history Failed \
+    || warn "Could not add run $RUN_ID to $RUN_HISTORY."
 
 # Leave the results page saying so, with the logs on it. wrike_job.sh publishes
 # one itself when nextflow is what failed, but every other way a run ends -

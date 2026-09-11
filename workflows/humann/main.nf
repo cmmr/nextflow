@@ -7,9 +7,14 @@
 // and its MetaPhlAn profile and runs this; see docs/pipelines/taxprofiler.md.
 //
 // --taxonomic-profile hands HUMAnN the profile taxprofiler already computed, so
-// it skips its own MetaPhlAn pass. That halves the marginal cost and makes the
-// taxonomy stratifying every by-taxon table below the same taxonomy the run
-// publishes as its taxonomic deliverable.
+// it skips its own MetaPhlAn pass - one bowtie2 alignment of every read against
+// the marker database - and the taxonomy stratifying every by-taxon table below
+// is the same taxonomy the run publishes as its taxonomic deliverable.
+//
+// It is the profile that is reused, not MetaPhlAn's alignments. Those are reads
+// against a small set of marker genes per species; HUMAnN aligns the reads
+// again, to the whole pangenomes of the species in the profile, then sends what
+// is left to UniRef90.
 //
 // Everything is published to <outdir>/humann/.
 

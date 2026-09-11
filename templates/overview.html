@@ -40,17 +40,20 @@
   without hunting for it. What the classifier named nothing is not drawn at all,
   so a column reaches only as far as the reads that were named and the axis is
   cut to the tallest of them rather than fixed at 100%; the last line of the
-  tooltip is what that came to for the sample under the pointer. Under the
-  chart, the caption says so, and names the tools and the database the numbers
-  came from for the data that carries it.
+  tooltip is what that came to for the sample under the pointer.
+
+  The Feature Table card in the sidebar holds one tab per tool that wrote a
+  table worth taking - its downloads, a link to its folder, and how much of the
+  run it classified - and shows one tab at a time.
 
   "Download everything" is the one archive this run published to the guest
   collection - the reads it was given and this whole dashboard in a single zip.
   It sits at the top right of the page, under the deletion date the bar above
   carries.
 
-  Placeholders are COMMON_HEAD, TASK_NAME, SUBTITLE, PLOT_DATA, DOWNLOADS,
-  ZIP_BUTTON, STATS, YEAR and FOOTER_NOTE, each wrapped in doubled
+  Placeholders are COMMON_HEAD, TASK_NAME, SUBTITLE, PLOT_DATA,
+  DOWNLOADS_TITLE, DOWNLOADS, ZIP_BUTTON, STATS, YEAR and FOOTER_NOTE, each
+  wrapped in doubled
   underscores. They are deliberately not spelled that way in this comment - the
   renderer substitutes the whole file, comment included, and would paste the
   entire dataset in here too. The task name is user-authored text and is
@@ -235,15 +238,6 @@ __ZIP_BUTTON__
 <section class="flex-1 min-h-0 flex flex-col" id="composition" style="display: none">
 <div class="grid grid-cols-3 gap-x-8 gap-y-2.5 shrink-0 max-h-[34%] overflow-y-auto pb-5" id="legend"></div>
 <div class="flex-1 min-h-0 overflow-hidden" id="bars-box"><canvas id="bars"></canvas></div>
-<div class="shrink-0 max-w-3xl mt-4 space-y-1">
-<p class="font-body-sm text-body-sm text-on-surface">One column per sample, most abundant
-taxon at the top. Each band is that taxon&rsquo;s share of the sample&rsquo;s reads; the
-eleven most abundant at this rank are drawn in their own colour and everything
-rarer is grouped as &ldquo;Other&rdquo;. A column reaches as far as the reads the
-classifier placed at this rank, and the axis is scaled to the tallest of them.</p>
-<p class="font-body-sm text-body-sm text-on-surface-variant" id="composition-method" style="display: none"></p>
-<p class="font-body-sm text-body-sm text-outline" id="axis-note"></p>
-</div>
 </section>
 <section class="flex-1 min-h-0 flex flex-col" id="diversity" style="display: none">
 <div class="flex-1 min-h-0 overflow-hidden" id="metric-box-plot"><canvas id="metric-chart"></canvas></div>
@@ -268,11 +262,9 @@ classifier placed at this rank, and the axis is scaled to the tallest of them.</
 <aside class="w-full lg:w-80 flex flex-col gap-gutter-grid shrink-0 lg:min-h-0">
 <div class="bg-surface-container-lowest rounded-xl border border-outline-variant p-padding-card shadow-sm shrink-0">
 <h3 class="text-base font-semibold text-primary mb-3 flex items-center gap-2">
-<span class="material-symbols-outlined text-[20px]">table_view</span>Feature Table
+<span class="material-symbols-outlined text-[20px]">table_view</span>__DOWNLOADS_TITLE__
       </h3>
-<div class="flex flex-col gap-0.5">
 __DOWNLOADS__
-</div>
 </div>
 __STATS__
 </aside>
@@ -292,6 +284,37 @@ __STATS__
 <div class="tip" hidden id="tip"></div>
 
 <script>
+// The two states of a tab-link, as the design writes them. publish_dashboard.sh
+// writes the Feature Table card's links in the same two.
+var TAB_ON = "font-label-caps text-label-caps font-bold text-primary border-b-2"
+           + " border-primary pb-0.5";
+var TAB_OFF = "font-label-caps text-label-caps font-bold text-on-surface-variant"
+            + " opacity-60 hover:opacity-100 transition-opacity pb-0.5";
+
+// The Feature Table card's tabs, showing one panel at a time
+(function () {
+  var tabs = [].slice.call(document.querySelectorAll("[data-feature-tab]"));
+  var panels = [].slice.call(document.querySelectorAll("[data-feature-panel]"));
+
+  tabs.forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      var which = tab.getAttribute("data-feature-tab");
+
+      tabs.forEach(function (other) {
+        var on = other === tab;
+
+        other.className = on ? TAB_ON : TAB_OFF;
+        other.setAttribute("aria-selected", on ? "true" : "false");
+      });
+
+      panels.forEach(function (panel) {
+        panel.style.display =
+          panel.getAttribute("data-feature-panel") === which ? "" : "none";
+      });
+    });
+  });
+})();
+
 // The "details" link a statistics bar can carry, which shows and hides the
 // stages behind that bar's reading. Both are written hidden - the link because
 // a reader without scripting cannot work it, the stages because they are an
@@ -323,13 +346,6 @@ __STATS__
 
 (function () {
   var DATA = __PLOT_DATA__;
-
-  // The two states of a tab-link in the panel's header, as the design writes
-  // them
-  var ON = "font-label-caps text-label-caps font-bold text-primary border-b-2"
-         + " border-primary pb-0.5";
-  var OFF = "font-label-caps text-label-caps font-bold text-on-surface-variant"
-          + " opacity-60 hover:opacity-100 transition-opacity pb-0.5";
 
   var buttons = [].slice.call(document.querySelectorAll("[data-plot]"));
   var sections = {
@@ -365,17 +381,6 @@ __STATS__
   display(document.getElementById("plot-empty"), false);
   display(document.getElementById("plot-scroll"), true);
   display(document.getElementById("plot-controls"), true);
-
-  // Which tools and which database produced the composition below, in the words
-  // of the script that read their reports - only it knows what this run was
-  // classified against. A run whose data predates the sentence leaves the line
-  // off rather than describing the wrong pipeline.
-  var method = document.getElementById("composition-method");
-
-  if (DATA && DATA.method) {
-    method.textContent = DATA.method;
-    display(method, true);
-  }
 
   // Room above every plot for the label on its topmost gridline
   var TOP = 9;
@@ -572,7 +577,6 @@ __STATS__
   var legend = document.getElementById("legend");
   var barsBox = document.getElementById("bars-box");
   var barsCanvas = document.getElementById("bars");
-  var note = document.getElementById("axis-note");
   var level = null;
 
   // The taxa of the rank that are drawn, and their shares sample by sample.
@@ -721,10 +725,6 @@ __STATS__
     if (names) drawNames(ctx, geometry, floor, foot);
     else       axisFoot(ctx, "Samples", geometry.left, view.width - 8, floor + 8);
 
-    note.textContent = ordering()
-      + " Hover a column for the sample it belongs to, or a taxon above for what"
-      + " it is and how much of the run it accounts for.";
-
     return { geometry: geometry, height: plotHeight, top: axis.top };
   }
 
@@ -858,6 +858,13 @@ __STATS__
     return spec.unit ? written + spec.unit : written;
   }
 
+  // What an index is called wherever its name labels a reading. One drawn on a
+  // square root says so: every other index in the select is drawn straight, and
+  // a reader is owed that before reading the columns rather than after.
+  function labelled(spec) {
+    return spec.scale === "sqrt" ? spec.title + " (sqrt scale)" : spec.title;
+  }
+
   // Where a reading sits up the axis, as a share of its height, and the reading
   // a gridline drawn at that share stands for. One index in the set is a count
   // rather than a measurement - a run holds a sample that failed beside one
@@ -960,7 +967,7 @@ __STATS__
       }
     }
 
-    axisTitle(ctx, metric.title, TOP, height);
+    axisTitle(ctx, labelled(metric), TOP, height);
 
     if (names) drawNames(ctx, geometry, floor, foot);
     else       axisFoot(ctx, "Samples", geometry.left, view.width - 8, floor + 8);
@@ -1001,7 +1008,7 @@ __STATS__
         ? series[(series.length - 1) / 2]
         : (series[series.length / 2 - 1] + series[series.length / 2]) / 2;
 
-      html = "<tr><td>" + escape(metric.title) + "</td><td class=\"num\">"
+      html = "<tr><td>" + escape(labelled(metric)) + "</td><td class=\"num\">"
         + format(metric, series[0])
         + "</td><td class=\"num\">" + format(metric, middle)
         + "</td><td class=\"num\">" + format(metric, series[series.length - 1])
@@ -1178,7 +1185,7 @@ __STATS__
 
       var option = document.createElement("option");
       option.value = String(index);
-      option.textContent = spec.title;
+      option.textContent = labelled(spec);
       metricSelect.appendChild(option);
 
       if (!metric) { metric = spec; metricSelect.value = String(index); }
@@ -1186,7 +1193,7 @@ __STATS__
 
     metricChart = attach(metricCanvas, function (sample) {
       return '<div class="name">' + escape(samples[sample]) + "</div>"
-        + '<div class="row">' + metric.title + " <b>"
+        + '<div class="row">' + labelled(metric) + " <b>"
         + format(metric, (values(metric.key) || [])[sample]) + "</b></div>";
     });
 
@@ -1210,7 +1217,7 @@ __STATS__
     buttons.forEach(function (button) {
       var on = button.getAttribute("data-plot") === which;
 
-      button.className = on ? ON : OFF;
+      button.className = on ? TAB_ON : TAB_OFF;
       display(sections[button.getAttribute("data-plot")], on);
     });
 

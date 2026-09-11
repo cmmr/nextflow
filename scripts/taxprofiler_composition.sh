@@ -42,6 +42,10 @@
 # names the chemistry it read off the files, which is what the funnel is headed
 # with.
 #
+# So is the share of those reads MetaPhlAn and HUMAnN each mapped, off every
+# MetaPhlAn profile's header and HUMAnN's alignment-summary.tsv, for the tabs of
+# the Feature Tables card named after those tools.
+#
 # Only the eleven most abundant taxa of each rank are kept, the rest summed into
 # "Other": past that fill no reader can tell one colour from the next, and the
 # merged taxpasta tables are published for anyone who needs every row.
@@ -157,6 +161,10 @@ readonly RANK_NAMES=(Phylum Class Order Family Genus Species)
 # The suffix each kind of report is named with, after the sample and database
 readonly BRACKEN_SUFFIX=".bracken.kraken2.report_bracken.txt"
 readonly KRAKEN2_SUFFIX=".kraken2.kraken2.report.txt"
+readonly METAPHLAN_SUFFIX=".metaphlan_profile.txt"
+
+# How far HUMAnN got with each sample, on a run that ran it
+readonly HUMANN_SUMMARY="$RESULTS_DIR/humann/alignment-summary.tsv"
 
 if [[ ! -d "$RESULTS_DIR" ]]; then
     fail "There is no '$RESULTS_DIR' directory to summarise."
@@ -181,9 +189,10 @@ HOST_TABLE="$WORK/host.tsv"
 NONPAREIL_TABLE="$WORK/nonpareil.tsv"
 MOTUS_TABLE="$WORK/motus.tsv"
 
-# mOTUs profiles as "sample <TAB> path", the same shape the classifier reports
-# are collected in
+# mOTUs and MetaPhlAn profiles as "sample <TAB> path", the same shape the
+# classifier reports are collected in
 MOTUS_SET="$WORK/motus_reports.tsv"
+METAPHLAN_SET="$WORK/metaphlan_reports.tsv"
 
 # Faith's PD off each of the two trees, as scripts/R/taxprofiler_tables.R
 # returns it: sample, the index, and the abundance it was computed over
@@ -1232,25 +1241,64 @@ read_depth_stats() {
     ' "$READ_TOTALS"
 }
 
-# How the composition numbers were made, as the caption under the chart drawn
-# from them. Which classifier and which database produced a bar is a run's own,
-# and a reader is owed it beside the bar rather than three pages away. That the
-# unclassified reads are left out of the chart is not said here: it is true of
-# both pipelines, so the page says it once, above this line.
-composition_method() {
-    local database
+# The reads that reached the classifier on the samples MetaPhlAn profiled, and
+# how many of them it mapped to a known clade. Each profile's header gives the
+# reads it processed and the reads it mapped; that share is weighed by the
+# sample's depth here, since MetaPhlAn counts each mate of a pair on its own.
+metaphlan_mapping() {
+    local -a profiles=()
 
-    database=$(reports_database "$KRAKEN2_SET")
+    mapfile -t profiles < <(cut -f2 "$METAPHLAN_SET")
 
-    printf 'Reads were classified with Kraken2 against the %s database' "$database"
+    LC_ALL=C awk -F'\t' '
+        function settle() {
+            if (name in depth && reads > 0 && known != "") {
+                total += depth[name]
+                mapped += depth[name] * known / reads
+            }
+            reads = known = ""
+        }
 
-    if [[ "$PROFILE_TOOL" == "Bracken" ]]; then
-        printf ', then re-estimated at every rank by Bracken'
-    else
-        printf ", and each bar is that report's own clade counts"
-    fi
+        ARGIND == 1 { depth[$1] = $2 + $3; next }
+        ARGIND == 2 { sample[$2] = $1; next }
 
-    printf '.'
+        FNR == 1 { settle(); name = sample[FILENAME] }
+
+        /^#[0-9]+ reads processed/                  { reads = substr($1, 2) + 0 }
+        /^#estimated_reads_mapped_to_known_clades:/ { known = substr($0, index($0, ":") + 1) + 0 }
+
+        END {
+            settle()
+
+            if (total > 0)
+                printf "metaphlan_total\t%d\nmetaphlan_mapped\t%d\n", total, mapped + 0.5
+        }
+    ' "$READ_TOTALS" "$METAPHLAN_SET" "${profiles[@]}"
+}
+
+# The same for HUMAnN, off its alignment summary: a sample is mapped as far as
+# its translated search got, or its nucleotide search where no translated
+# search ran
+humann_mapping() {
+    LC_ALL=C awk -F'\t' '
+        NR == FNR { depth[$1] = $2 + $3; next }
+
+        FNR == 1 { next }
+
+        {
+            unaligned = $4 != "" ? $4 : $3
+
+            if (unaligned == "" || !($1 in depth)) next
+
+            total += depth[$1]
+            mapped += depth[$1] * (100 - unaligned) / 100
+        }
+
+        END {
+            if (total > 0)
+                printf "humann_total\t%d\nhumann_mapped\t%d\n", total, mapped + 0.5
+        }
+    ' "$READ_TOTALS" "$HUMANN_SUMMARY"
 }
 
 # The run's headline numbers, keyed for the dashboard's sidebar. Each is left out
@@ -1281,6 +1329,15 @@ write_run_statistics() {
                 { total += $2; removed += $3 }
                 END { printf "host_total\t%d\nhost_removed\t%d\n", total, removed }
             ' "$HOST_TABLE"
+        fi
+
+        if [[ -s "$METAPHLAN_SET" ]]; then
+            printf 'metaphlan_database\t%s\n' "$(reports_database "$METAPHLAN_SET")"
+            metaphlan_mapping
+        fi
+
+        if [[ -s "$HUMANN_SUMMARY" ]]; then
+            humann_mapping
         fi
     } | state_set_tsv "$STATS_KEY"
 }
@@ -1320,6 +1377,10 @@ host_removal > "$HOST_TABLE"
 # What quality filtering wrote about itself, on a run that filtered short reads
 declare -a FASTP_REPORTS=()
 mapfile -t FASTP_REPORTS < <(fastp_reports)
+
+# MetaPhlAn's per-sample profiles, for the share of the reads it mapped
+collect_reports "$METAPHLAN_DIR" "$METAPHLAN_SUFFIX" "$METAPHLAN_SET" \
+    || log "No MetaPhlAn profiles under $METAPHLAN_DIR; its mapping rate will be missing."
 
 # 2. Diversity, as nonpareil and mOTUs measured it, in the sample order the
 #    plotted reports set. Neither is required: a run that produced neither still
@@ -1381,10 +1442,6 @@ fi
 # What the reader is being shown a count of, so the page says species where the
 # 16S page says ASV
 DATA="\"feature\":{\"one\":\"species\",\"many\":\"species\",\"depth\":\"reads that reached the classifier\"},$DATA"
-
-# How those numbers were made, for the caption under the composition chart. jq
-# encodes it, since it is a sentence being written into JSON.
-DATA="\"method\":$(composition_method | jq -R -s .),$DATA"
 
 # 4. Composition, every rank in the order a reader reads them
 LEVELS=""

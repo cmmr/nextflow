@@ -16,12 +16,10 @@ panel with a tab-link for each of those two questions.
 Both write the same file in the same shape, so there is one Overview rather than
 one per pipeline. What the two differ on, the plot data says rather than the
 template assuming: what a column of the diversity chart counts — an ASV on a 16S
-run, a species on a shotgun one — *which indices there are at all*, since the two
-pipelines share none, and the caption naming the tools and the database the
-composition was worked out from. Only the script that read the reports knows any
-of it, so it writes them and the page renders what it is handed. Plot data naming
-no indices falls back to the amplicon set; plot data with no caption leaves that
-line off rather than describing the wrong pipeline.
+run, a species on a shotgun one — and *which indices there are at all*, since
+the two pipelines share none. Only the script that read the reports knows
+either, so it writes them and the page renders what it is handed. Plot data
+naming no indices falls back to the amplicon set.
 
 The rest of this page takes the 16S half first, then the shotgun half; the
 sections on the sidebar and on colour apply to both.
@@ -56,9 +54,8 @@ The panel is the same for both pipelines.
 **Taxonomic composition** — one column per sample, under a legend naming every
 taxon in it, on an axis scaled to the tallest of them, with the panel's own
 control for the taxonomic rank and one for the order the samples are in (by name, by the share of the most
-abundant taxon, by read depth, or by whichever index the run leads with). The axis is labelled, and
-what the chart is, how the numbers in it were made, and how it is ordered are
-written under it. Hovering a column names the sample and gives its full
+abundant taxon, by read depth, or by whichever index the run leads with). The
+axis is labelled, and nothing is written under the chart. Hovering a column names the sample and gives its full
 breakdown; hovering a legend entry gives that taxon's mean share, how many
 samples it was found in, and its lineage.
 
@@ -87,9 +84,10 @@ could not place at the rank being drawn is left out of the chart entirely: it is
 not a taxon anybody can act on, and it was routinely the tallest band on the
 column, burying everything that was found under one slab saying only how much of
 the run went unnamed. Every share is still a share of the whole sample, so a
-column adds up to less than 100% by exactly that much, and the caption under the
-chart says so. The share itself is not lost: it is in `composition_data.json`,
-and the sidebar reports how far down the taxonomy the classifier did get.
+column adds up to less than 100% by exactly that much. The share itself is not
+lost: it is in `composition_data.json`, the tooltip gives it per sample, and the
+sidebar's Feature Table card reports how far down the taxonomy the classifier
+did get.
 
 **So the axis is cut to the run rather than fixed at 100%.** It runs from zero
 to the tallest column, rounded up to a step whole percentages can be read off —
@@ -124,8 +122,11 @@ the data rather than in the page:
   count, and a run holding a sample that failed beside one sequenced a hundred
   times as deep draws every column but the deepest as a hairline. The square
   root pulls the top in while keeping zero at the floor — which a logarithm
-  cannot, so the columns still start where the axis does — and the caption says
-  a column twice as tall is four times the reading.
+  cannot, so the columns still start where the axis does. Such an index
+  carries the scale in its own name — *Read depth (sqrt scale)* —
+  wherever that name labels a reading, since every other index in the select
+  is drawn straight; and the caption says a column twice as tall is four
+  times the reading.
 
 Both are drawn to a `<canvas>`. A column per sample stays a column per sample
 whether there are six or six thousand; nothing is added to the document, so
@@ -445,8 +446,10 @@ as one.
 **taxprofiler** reports the reads the run started with and how many were left
 once quality filtering and the host had each taken their cut, with fastp's four
 tests broken out behind the details link;
-the thinnest, middle and deepest sample; and the share of what reached the
-classifier that it resolved to phylum, to genus and to species. It also names
+the thinnest, middle and deepest sample; the share of what reached the
+classifier that Kraken2 resolved to phylum, to genus and to species; and the
+share MetaPhlAn and HUMAnN each mapped, weighed sample by sample by the same
+depth — see [the Feature Tables card](../pipelines/taxprofiler.md). It also names
 what the reads were — the platform the samplesheet measured them into, and the
 chemistry fastp read off them, as *"Illumina, 2 × 151 bp"* — which is the note
 the read totals are headed with.

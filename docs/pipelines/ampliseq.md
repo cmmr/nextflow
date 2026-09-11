@@ -132,12 +132,20 @@ text file:
 dashboard_view report  "Analysis Report" "summary_report/summary_report.html"
 dashboard_view quality "Technical Report" "multiqc/multiqc_report.html"
 dashboard_index_view   "File Explorer"
-dashboard_formats "Feature table" "<note>"                  "Plain text|feature_table/feature-table.tsv"                  "JSON|feature_table/feature-table.json.biom"                  "HDF5|feature_table/feature-table.hdf5.biom"
+dashboard_stat_group "READ TOTALS"    "$SEQUENCED"
+dashboard_tab        asvs "DADA2"
+dashboard_formats    "" "Plain text|feature_table/feature-table.tsv" \
+                        "JSON|feature_table/feature-table.json.biom" \
+                        "HDF5|feature_table/feature-table.hdf5.biom"
+dashboard_stat_group "CLASSIFICATION" "$REFERENCE"
+dashboard_tab_end
 dashboard_bundle "$(globus_run_url "$RUN_ID" "$BUNDLE_NAME")" \
                  "$(globus_archive_size "$RUN_ID" "$BUNDLE_NAME")"
-dashboard_stat_group "READ TOTALS"    "$SEQUENCED"
-dashboard_stat_group "CLASSIFICATION" "$REFERENCE"
 ```
+
+The feature table and the classification sit together in the sidebar's Feature
+Table card, under a tab named for the tool that called the ASVs — *Savont* on a
+run that published `savont/` and no `dada2/`.
 
 plus [`templates/ampliseq/outputs.conf`](../../templates/ampliseq/outputs.conf),
 the annotated index of everything else — abundance tables, taxonomy, sequences,

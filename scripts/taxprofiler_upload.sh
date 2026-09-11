@@ -217,33 +217,6 @@ dashboard_view krona   "Taxonomy Explorer" "$KRONA_CHART"
 dashboard_view quality "Technical Report"  "$MULTIQC_REPORT_HREF"
 dashboard_index_view   "File Explorer"
 
-#    The one table a requester opens first, named for what it holds rather than
-#    for the tool, the database and the format that named the file: taxpasta's
-#    merged bracken profile, the file to load into R or Python.
-#
-#    Nothing else is here. The second-opinion profiles MetaPhlAn and mOTUs
-#    wrote, and the diversity table behind the plot the reader is already
-#    looking at, are files a run produces rather than files a run is read
-#    through - the file index lists every one of them, under the heading that
-#    says what it is for. Everything this run published, the reads included,
-#    comes down through the one button at the top of the page.
-if ! dashboard_button "taxpasta/bracken_*.tsv" "Species abundance table"; then
-    #    "|| true" because a glob that names nothing is a false return, and a
-    #    run whose bracken step did not produce a table has nothing left to fall
-    #    back to
-    dashboard_button "taxpasta/kraken2_*.tsv" "Taxonomic profile table" || true
-fi
-
-#    The same table as an object with a tree in it, in the three formats it was
-#    written in, so a requester can compute UniFrac and Faith's PD without
-#    building a phylogeny of their own. Offered as one row of boxes because it
-#    is one file three ways rather than three files.
-dashboard_formats "Feature table" \
-    "Counts and taxonomy for every species. The BIOM files carry the tree the diversity metrics are computed over." \
-    "Plain text|feature_table/feature-table.tsv" \
-    "JSON|feature_table/feature-table.json.biom" \
-    "HDF5|feature_table/feature-table.hdf5.biom" || true
-
 #    How the run was set up. The pipeline version comes off the manifest
 #    wrike_job.sh recorded, so the page and the record cannot disagree; what was
 #    depleted comes off the request.
@@ -382,18 +355,63 @@ if [[ "$TOTAL_READS" =~ ^[0-9]+$ ]] && (( TOTAL_READS > 0 )); then
     dashboard_stat_chips "$(human_count "${STATS[reads_min]:-0}")|Min" \
                          "$(human_count "${STATS[reads_median]:-0}")|Median" \
                          "$(human_count "${STATS[reads_max]:-0}")|Max"
+fi
 
-    #    How far down the taxonomy the classifier could place a read. Each rank
-    #    counts the reads that landed inside some clade of it, which is the same
-    #    reading kraken2's own report gives, and each is a share of the reads it
-    #    was given - so the three bars are one funnel rather than three readings.
-    dashboard_stat_group "CLASSIFICATION" \
-        "${STATS[profiler]:+${STATS[profiler]} · }${STATS[database]:-}"
+#    The feature tables, one tab per tool: the tables a requester is likeliest
+#    to want from it, a link to the folder holding everything else it wrote, and
+#    how much of the run it classified. A tool the run did not use leaves its
+#    tab off. Every share is of the reads that reached the classifiers, so the
+#    tabs and the read totals count in the same units.
+dashboard_tab metaphlan "MetaPhlAn"
+dashboard_button "metaphlan/metaphlan_*_combined_reports.txt" "Relative abundance table" || true
+dashboard_button "count_tables/metaphlan-reads.tsv" "Read count table" || true
+dashboard_button "feature_table/metaphlan-table.hdf5.biom" "Feature table with phylogeny" || true
+dashboard_folder "metaphlan/" "All MetaPhlAn outputs" || true
+
+if [[ -n "${STATS[metaphlan_total]:-}" ]]; then
+    dashboard_stat_group "CLASSIFICATION" "${STATS[metaphlan_database]:-}"
+    stat_share "Mapped reads" "${STATS[metaphlan_mapped]:-}" "${STATS[metaphlan_total]}"
+fi
+
+dashboard_tab kraken "Kraken/Bracken"
+
+#    taxpasta's merged bracken profile, or kraken2's for a run without bracken
+if ! dashboard_button "taxpasta/bracken_*.tsv" "Species abundance table"; then
+    dashboard_button "taxpasta/kraken2_*.tsv" "Taxonomic profile table" || true
+fi
+
+dashboard_formats "Feature table" \
+    "Plain text|feature_table/feature-table.tsv" \
+    "JSON|feature_table/feature-table.json.biom" \
+    "HDF5|feature_table/feature-table.hdf5.biom" || true
+
+dashboard_folder "kraken2/" "All Kraken2 outputs" || true
+dashboard_folder "bracken/" "All Bracken outputs" || true
+
+#    How far down the taxonomy kraken2 could place a read. Each rank counts the
+#    reads that landed inside some clade of it, as kraken2's own report does, so
+#    the three bars are one funnel rather than three readings.
+if [[ "$RETAINED_READS" =~ ^[0-9]+$ ]] && (( RETAINED_READS > 0 )) &&
+   [[ -n "${STATS[phylum_reads]:-}${STATS[genus_reads]:-}${STATS[species_reads]:-}" ]]; then
+    dashboard_stat_group "CLASSIFICATION" "${STATS[database]:-}"
 
     stat_share "Phylum level"  "${STATS[phylum_reads]:-}"  "$RETAINED_READS"
     stat_share "Genus level"   "${STATS[genus_reads]:-}"   "$RETAINED_READS"
     stat_share "Species level" "${STATS[species_reads]:-}" "$RETAINED_READS"
 fi
+
+dashboard_tab humann "HUMAnN"
+dashboard_button "humann/pathway-abundance-relab.tsv" "Pathway abundances" || true
+dashboard_button "humann/gene-families-relab.tsv" "Gene family abundances" || true
+dashboard_button "humann/ec-relab.tsv" "Enzyme (EC) abundances" || true
+dashboard_folder "humann/" "All HUMAnN outputs" || true
+
+if [[ -n "${STATS[humann_total]:-}" ]]; then
+    dashboard_stat_group "CLASSIFICATION"
+    stat_share "Mapped reads" "${STATS[humann_mapped]:-}" "${STATS[humann_total]}"
+fi
+
+dashboard_tab_end
 
 #    The title is read from Wrike rather than taken from the copy recorded at
 #    submission, since the requester may have renamed the task since. That copy

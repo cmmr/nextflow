@@ -187,18 +187,6 @@ dashboard_view report  "Analysis Report" "summary_report/summary_report.html"
 dashboard_view quality "Technical Report" "multiqc/multiqc_report.html"
 dashboard_index_view   "File Explorer"
 
-#    The feature table is the one file most people came for, offered in the
-#    three formats it was written in - the same object each time, which is what
-#    the row of boxes is shaped to say. The card it sits in is named for that
-#    table, so the row carries no heading of its own. Nothing else is offered
-#    here: the tables behind it are in the file index, and everything this run
-#    published, the reads included, comes down through the one button at the top
-#    of the page.
-dashboard_formats "" \
-    "Counts, taxonomy and sequences for every ASV. The HDF5 file carries the phylogeny too." \
-    "Plain text|feature_table/feature-table.tsv" \
-    "JSON|feature_table/feature-table.json.biom" \
-    "HDF5|feature_table/feature-table.hdf5.biom" || true
 #    How the run was set up. Every value comes off the manifest wrike_job.sh
 #    recorded, so the page and the record cannot disagree; anything it does not
 #    carry leaves its note off the sidebar. Each is stated over the numbers it
@@ -373,9 +361,24 @@ if [[ -n "${STATS[reads_retained]:-}" ]]; then
                          "$(human_count "${STATS[reads_max]:-0}")|Max"
 fi
 
-#    How many ASVs the run called, and how far down the classifier could name
-#    them. Each rank is a count of the ASVs that reached it, against the ASV
-#    total the block opens with - the same reading ampliseq's own report gives.
+#    The feature table, in the three formats it was written in, under a tab
+#    named for the tool that called the ASVs. The classification sits under it:
+#    how many ASVs the run called, and how far down the classifier could name
+#    them, each rank a count of the ASVs that reached it against the ASV total
+#    the block opens with - the same reading ampliseq's own report gives.
+ASV_TOOL="DADA2"
+
+if [[ -d "$RESULTS_DIR/savont" && ! -d "$RESULTS_DIR/dada2" ]]; then
+    ASV_TOOL="Savont"
+fi
+
+dashboard_tab asvs "$ASV_TOOL"
+
+dashboard_formats "" \
+    "Plain text|feature_table/feature-table.tsv" \
+    "JSON|feature_table/feature-table.json.biom" \
+    "HDF5|feature_table/feature-table.hdf5.biom" || true
+
 if [[ -n "${STATS[asvs]:-}${STATS[phylum_asvs]:-}${STATS[genus_asvs]:-}${STATS[species_asvs]:-}" ]]; then
     dashboard_stat_group "CLASSIFICATION" "$REFERENCE"
 
@@ -402,6 +405,8 @@ if [[ -n "${STATS[asvs]:-}${STATS[phylum_asvs]:-}${STATS[genus_asvs]:-}${STATS[s
         dashboard_stat_bar "$RANK_LABEL" "$RANK_READING" "$RANK_PCT" growth
     done
 fi
+
+dashboard_tab_end
 
 #    The title is read from Wrike rather than taken from the copy recorded at
 #    submission, since the requester may have renamed the task since. That copy

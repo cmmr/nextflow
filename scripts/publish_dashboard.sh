@@ -20,12 +20,20 @@
 #   dashboard_reset      <results_dir> <catalog>
 #   dashboard_view       <id> <label> <path>      once per report the bar offers
 #   dashboard_index_view [label]                  where the file index sits in it
+#   dashboard_tab        <id> <label>             opens a tab of the Feature
+#                                                 Table card; the buttons,
+#                                                 formats, folders and stat
+#                                                 groups declared after it are
+#                                                 drawn in that tab, and a tab
+#                                                 left empty is not drawn
+#   dashboard_tab_end                             closes it, sending stat groups
+#                                                 back to the statistics card
 #   dashboard_button     <glob> [label]           once per file the sidebar
 #                                                 offers, under its own name
 #                                                 unless the label says
 #                                                 otherwise; false when the glob
 #                                                 named nothing
-#   dashboard_formats    <heading> <note> <label|path> ...
+#   dashboard_formats    <heading> <label|path> ...
 #                                                 one file offered in several
 #                                                 formats, as a row of boxes
 #                                                 under one heading, or under
@@ -34,6 +42,9 @@
 #                                                 left out, and a heading whose
 #                                                 formats are all missing is
 #                                                 not drawn
+#   dashboard_folder     <folder/> [label]        a link to a folder's listing;
+#                                                 false when the run has no such
+#                                                 folder
 #   dashboard_bundle     <url> [bytes]            the one archive the run
 #                                                 publishes to Globus, which is
 #                                                 what "Download everything"
@@ -93,7 +104,8 @@
 # biotech, database, filter_alt, science, folder_zip, data_object and so on.
 #
 # Defines: dashboard_reset, dashboard_view, dashboard_index_view,
-#          dashboard_button, dashboard_formats, dashboard_bundle,
+#          dashboard_tab, dashboard_tab_end, dashboard_button,
+#          dashboard_formats, dashboard_folder, dashboard_bundle,
 #          dashboard_stat_group, dashboard_stat_row, dashboard_stat_tiles,
 #          dashboard_stat_chips, dashboard_stat_bar, dashboard_stat_detail,
 #          dashboard_report_section, render_dashboard,
@@ -118,6 +130,11 @@ DOWNLOAD_EXTENSIONS=(zip gz bz2 xz tar tgz qza qzv biom rds rda parquet)
 readonly DASHBOARD_NAV_ON="text-on-primary border-b-2 border-secondary-fixed font-bold pb-1 px-2 py-1 rounded text-[13px] tracking-[0.02em] hover:bg-primary-container transition-colors"
 readonly DASHBOARD_NAV_OFF="text-primary-fixed/80 hover:text-on-primary hover:bg-primary-container transition-colors px-2 py-1 rounded text-[13px] tracking-[0.02em] font-medium"
 
+# The two states of a tab link in the Feature Table card, spelled the same as
+# the page's own script spells them
+readonly DASHBOARD_TAB_ON="font-label-caps text-label-caps font-bold text-primary border-b-2 border-primary pb-0.5"
+readonly DASHBOARD_TAB_OFF="font-label-caps text-label-caps font-bold text-on-surface-variant opacity-60 hover:opacity-100 transition-opacity pb-0.5"
+
 # The three pages this script writes into the results folder. Named here because
 # the upload sends them last, after everything they frame.
 readonly DASHBOARD_PAGES=(overview.html files.html index.html)
@@ -128,6 +145,16 @@ DASHBOARD_VIEWS=()
 DASHBOARD_DOWNLOADS=""
 DASHBOARD_STATS=""
 DASHBOARD_STAT_GROUP_OPEN=""
+
+# The Feature Table card's tabs, in the order they were declared, and the one
+# being declared now. While a tab is open, DASHBOARD_DOWNLOADS and
+# DASHBOARD_STATS are that tab's, and the card's own are kept aside.
+DASHBOARD_TAB=""
+DASHBOARD_TAB_IDS=()
+DASHBOARD_TAB_LABELS=()
+DASHBOARD_TAB_BODIES=()
+DASHBOARD_CARD_DOWNLOADS=""
+DASHBOARD_CARD_STATS=""
 
 # The one archive this run published to Globus: where it is served from, and
 # how big it came out. The address is what "Download everything" takes and what
@@ -144,6 +171,12 @@ dashboard_reset() {
     DASHBOARD_DOWNLOADS=""
     DASHBOARD_STATS=""
     DASHBOARD_STAT_GROUP_OPEN=""
+    DASHBOARD_TAB=""
+    DASHBOARD_TAB_IDS=()
+    DASHBOARD_TAB_LABELS=()
+    DASHBOARD_TAB_BODIES=()
+    DASHBOARD_CARD_DOWNLOADS=""
+    DASHBOARD_CARD_STATS=""
     DASHBOARD_BUNDLE_URL=""
     DASHBOARD_BUNDLE_SIZE=""
 }
@@ -224,30 +257,51 @@ dashboard_sample_pill() {
 # that names one.
 dashboard_button() {
     local pattern="$1" label="${2:-}"
-    local path name text
+    local path name
     local offered=1
 
     for path in "$DASHBOARD_RESULTS_DIR"/$pattern; do
         [[ -r "$path" ]] || continue
 
         name=${path#"$DASHBOARD_RESULTS_DIR/"}
-        text=${label:-${name##*/}}
 
-        DASHBOARD_DOWNLOADS+="<a class=\"flex items-center justify-between gap-2 px-2 py-1.5 rounded hover:bg-surface-container transition-colors group\""
-        DASHBOARD_DOWNLOADS+=" href=\"$(escape_url "$name")\"$(dashboard_link_attributes "$name")>"
-        DASHBOARD_DOWNLOADS+="<span class=\"flex items-center gap-2 min-w-0\">"
-        DASHBOARD_DOWNLOADS+="<span class=\"material-symbols-outlined text-[20px] text-on-surface-variant group-hover:text-primary transition-colors\">"
-        DASHBOARD_DOWNLOADS+="$(dashboard_file_icon "$name")</span>"
-        DASHBOARD_DOWNLOADS+="<span class=\"text-[13px] leading-5 text-on-surface truncate\""
-        DASHBOARD_DOWNLOADS+=" title=\"$(escape_html "$name")\">$(escape_html "$text")</span></span>"
-        DASHBOARD_DOWNLOADS+="<span class=\"material-symbols-outlined text-[18px] shrink-0 text-on-surface-variant opacity-0 group-hover:opacity-100 transition-opacity\">"
-        DASHBOARD_DOWNLOADS+="file_download</span></a>"
+        dashboard_link_row "$(escape_url "$name")" "${label:-${name##*/}}" "$name" \
+            "$(dashboard_file_icon "$name")" file_download \
+            "$(dashboard_link_attributes "$name")"
         offered=0
     done
 
     # Whether the glob named anything, so a caller can offer a second choice for
     # the run that produced neither
     return $offered
+}
+
+# A link to the listing index_directories.sh wrote for a folder, under the
+# folder's own name unless the label says otherwise
+dashboard_folder() {
+    local folder="${1%/}" label="${2:-}"
+
+    [[ -d "$DASHBOARD_RESULTS_DIR/$folder" ]] || return 1
+
+    dashboard_link_row "$(escape_url "$folder")/directory_listing.html" \
+        "${label:-$folder/}" "$folder/" folder_open open_in_new \
+        "$(dashboard_link_attributes directory_listing.html)"
+}
+
+# One row of the Feature Table card: an icon for what it leads to, its text,
+# and an icon for what following it does
+dashboard_link_row() {
+    local href="$1" text="$2" title="$3" icon="$4" action="$5" attributes="$6"
+
+    DASHBOARD_DOWNLOADS+="<a class=\"flex items-center justify-between gap-2 px-2 py-1.5 rounded hover:bg-surface-container transition-colors group\""
+    DASHBOARD_DOWNLOADS+=" href=\"$href\"$attributes>"
+    DASHBOARD_DOWNLOADS+="<span class=\"flex items-center gap-2 min-w-0\">"
+    DASHBOARD_DOWNLOADS+="<span class=\"material-symbols-outlined text-[20px] text-on-surface-variant group-hover:text-primary transition-colors\">"
+    DASHBOARD_DOWNLOADS+="$icon</span>"
+    DASHBOARD_DOWNLOADS+="<span class=\"text-[13px] leading-5 text-on-surface truncate\""
+    DASHBOARD_DOWNLOADS+=" title=\"$(escape_html "$title")\">$(escape_html "$text")</span></span>"
+    DASHBOARD_DOWNLOADS+="<span class=\"material-symbols-outlined text-[18px] shrink-0 text-on-surface-variant opacity-0 group-hover:opacity-100 transition-opacity\">"
+    DASHBOARD_DOWNLOADS+="$action</span></a>"
 }
 
 # One file the run wrote in several formats, as a row of boxes under a heading
@@ -262,9 +316,9 @@ dashboard_button() {
 # a heading whose formats are all missing is not drawn at all. An empty heading
 # draws the row on its own, for the file the card is already named after.
 dashboard_formats() {
-    local heading="$1" note="$2"
+    local heading="$1"
     local entry label name boxes=""
-    shift 2
+    shift
 
     for entry in "$@"; do
         label=${entry%%|*}
@@ -293,15 +347,51 @@ dashboard_formats() {
     fi
 
     DASHBOARD_DOWNLOADS+="<div class=\"grid grid-cols-3 gap-1.5\">$boxes</div>"
-
-    if [[ -n "$note" ]]; then
-        DASHBOARD_DOWNLOADS+="<p class=\"mt-1.5 font-body-sm text-[11px] leading-4 text-outline\">"
-        DASHBOARD_DOWNLOADS+="$(escape_html "$note")</p>"
-    fi
-
     DASHBOARD_DOWNLOADS+="</div>"
 
     return 0
+}
+
+# Open a tab of the Feature Table card. Until the next dashboard_tab or
+# dashboard_tab_end, downloads and stat groups are written into it.
+dashboard_tab() {
+    dashboard_tab_end
+    dashboard_end_stat_group
+
+    DASHBOARD_CARD_DOWNLOADS="$DASHBOARD_DOWNLOADS"
+    DASHBOARD_CARD_STATS="$DASHBOARD_STATS"
+    DASHBOARD_DOWNLOADS=""
+    DASHBOARD_STATS=""
+    DASHBOARD_TAB="$1|$2"
+}
+
+# Close the open tab, dropping it when nothing was written into it, and send
+# stat groups back to the statistics card. The downloads come first in a tab and
+# its stat groups under them, whichever order they were declared in.
+dashboard_tab_end() {
+    local body=""
+
+    [[ -n "$DASHBOARD_TAB" ]] || return 0
+
+    dashboard_end_stat_group
+
+    if [[ -n "$DASHBOARD_DOWNLOADS" ]]; then
+        body+="<div class=\"flex flex-col gap-0.5\">$DASHBOARD_DOWNLOADS</div>"
+    fi
+
+    if [[ -n "$DASHBOARD_STATS" ]]; then
+        body+="<div class=\"flex flex-col gap-5 px-2${DASHBOARD_DOWNLOADS:+ mt-4}\">$DASHBOARD_STATS</div>"
+    fi
+
+    if [[ -n "$body" ]]; then
+        DASHBOARD_TAB_IDS+=("${DASHBOARD_TAB%%|*}")
+        DASHBOARD_TAB_LABELS+=("${DASHBOARD_TAB#*|}")
+        DASHBOARD_TAB_BODIES+=("$body")
+    fi
+
+    DASHBOARD_DOWNLOADS="$DASHBOARD_CARD_DOWNLOADS"
+    DASHBOARD_STATS="$DASHBOARD_CARD_STATS"
+    DASHBOARD_TAB=""
 }
 
 # The one archive the run published to the guest collection: the reads it was
@@ -570,15 +660,60 @@ dashboard_stats_card() {
     printf '<div class="flex flex-col gap-5">%s</div></div>' "$DASHBOARD_STATS"
 }
 
-# What the Feature Table card offers, or a line saying the run named none
+# The Feature Table card's heading, plural once it holds more than one tab
+dashboard_downloads_title() {
+    if (( ${#DASHBOARD_TAB_IDS[@]} > 1 )); then
+        printf 'Feature Tables'
+    else
+        printf 'Feature Table'
+    fi
+}
+
+# What the Feature Table card offers - a row of tab links over one panel per
+# tab, the first of them showing - or a line saying the run named nothing
 dashboard_downloads() {
-    if [[ -z "$DASHBOARD_DOWNLOADS" ]]; then
+    local count=${#DASHBOARD_TAB_IDS[@]}
+    local i id class selected style
+
+    if [[ -z "$DASHBOARD_DOWNLOADS" ]] && (( count == 0 )); then
         printf '<p class="font-body-sm text-body-sm text-on-surface-variant p-2">'
         printf 'This run names no single files; take all of it with the button above.</p>'
         return 0
     fi
 
-    printf '%s' "$DASHBOARD_DOWNLOADS"
+    if [[ -n "$DASHBOARD_DOWNLOADS" ]]; then
+        printf '<div class="flex flex-col gap-0.5">%s</div>' "$DASHBOARD_DOWNLOADS"
+    fi
+
+    (( count > 0 )) || return 0
+
+    printf '<div class="flex flex-wrap items-center gap-x-4 gap-y-1 ml-1 mb-3" role="tablist">'
+
+    for (( i = 0; i < count; i++ )); do
+        class="$DASHBOARD_TAB_OFF"
+        selected="false"
+
+        if (( i == 0 )); then
+            class="$DASHBOARD_TAB_ON"
+            selected="true"
+        fi
+
+        printf '<button type="button" role="tab" aria-selected="%s" class="%s" data-feature-tab="%s">%s</button>' \
+            "$selected" "$class" "$(escape_html "${DASHBOARD_TAB_IDS[i]}")" \
+            "$(escape_html "${DASHBOARD_TAB_LABELS[i]}")"
+    done
+
+    printf '</div>'
+
+    for (( i = 0; i < count; i++ )); do
+        id=$(escape_html "${DASHBOARD_TAB_IDS[i]}")
+        style=""
+
+        (( i > 0 )) && style=' style="display: none"'
+
+        printf '<div role="tabpanel" data-feature-panel="%s"%s>%s</div>' \
+            "$id" "$style" "${DASHBOARD_TAB_BODIES[i]}"
+    done
 }
 
 # A group heading as its own fragment, e.g. "Start here" -> "start-here"
@@ -877,10 +1012,15 @@ render_overview() {
     local run_id="$1" task_name="$2" subtitle="$3" pipeline="$4" run_date="$5"
     local sample_count="$6" plot_data="$7"
 
+    # A tab the upload script left open, so its stat groups are not counted as
+    # the statistics card's
+    dashboard_tab_end
+
     render_template "$NEXTFLOW_DIR/templates/overview.html" \
         TASK_NAME   "$(escape_html "$task_name")" \
         SUBTITLE    "$(escape_html "$subtitle")" \
         PLOT_DATA   "$(dashboard_plot_data "$plot_data")" \
+        DOWNLOADS_TITLE "$(dashboard_downloads_title)" \
         DOWNLOADS   "$(dashboard_downloads)" \
         ZIP_BUTTON  "$(dashboard_zip_button)" \
         STATS       "$(dashboard_stats_card "$sample_count")" \

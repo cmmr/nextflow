@@ -17,10 +17,14 @@
 # block, the debug log beside it, and the command that was run, so a requester
 # has something to quote without anyone reading the cluster for them.
 #
-# The dial and the table are built from nextflow's console output, which
-# wrike_job.sh tees to
-# ./nextflow.out. With ANSI output off, as it is in a batch job, nextflow
-# reprints its whole table every time something changes:
+# The table is the run's steps, which wrike_job.sh records as ".steps" in the
+# run's state file - each pre-process command, the nextflow run, each
+# post-process command - with the processes of each nextflow run listed under
+# the step that drives it. Those, and the dial, come from that run's console
+# output: wrike_job.sh tees the pipeline's to ./nextflow.out, and a step that
+# drives a nextflow run of its own tees it to <step>.out. With ANSI output off,
+# as it is in a batch job, nextflow reprints its whole table every time
+# something changes:
 #
 #   executor >  local (41)
 #   [f5/de7a5f] NFC…SEQ:FASTQC (McAllister_P3) | 6 of 6 ✔
@@ -38,11 +42,13 @@
 #            nextflow_progress.sh --watch [secs]  # publish repeatedly until killed
 # Called by: wrike_task_handler.sh, once per change of status while a request is
 #            being handled - the first of those calls creates the run's S3 prefix
-#            - and wrike_job.sh, backgrounded for the length of the nextflow stage
+#            - and wrike_job.sh, backgrounded from its first stage until its
+#            last, which publishes the results over this page
 # Requires:  aws, awk; squeue and sacct for the cluster counts and the clocks,
 #            each optional
 # Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, and the log/warn helpers,
-#            is_valid_uid and the run_state helpers, all sourced from .env
+#            is_valid_uid, run_cpu_seconds and the run_state helpers, all
+#            sourced from .env
 #
 # Run from inside the run directory, whose name is the run ID.
 
@@ -79,8 +85,8 @@ readonly REFRESH_SECONDS=10
 # into an object a browser reloads.
 readonly LOG_TAIL_LINES=200
 
-# Shown before nextflow has printed its first process line, which can take a
-# couple of minutes while it resolves the pipeline and its containers.
+# Shown before any process has been given a task, which can take a couple of
+# minutes while nextflow resolves the pipeline and its containers.
 readonly STARTING_MESSAGE="Starting up. The pipeline is being prepared; progress will appear here shortly."
 
 RUN_ID="${PWD##*/}"
@@ -90,11 +96,13 @@ fi
 
 readonly S3_INDEX="s3://$AWS_S3_BUCKET/$S3_RUN_PREFIX/$RUN_ID/index.html"
 
-# Turn the newest block of nextflow's progress lines into table rows. Each block
-# lists every process that has started, so the last one is the current state and
-# everything before it is history.
+# Turn the newest block of one nextflow run's progress lines, out of the console
+# output named first, into table rows. Each block lists every process that has
+# started, so the last one is the current state and everything before it is
+# history. Given a second argument, the rows are indented to sit under the step
+# whose run they are.
 render_rows() {
-    awk '
+    awk -v indent="${2:-}" '
         # HTML-escape, a character at a time
         function esc(s,   out, i, c) {
             out = ""
@@ -131,7 +139,10 @@ render_rows() {
         # "[f5/de7a5f] NFC…SEQ:FASTQC (McAllister_P3) | 6 of 6 ✔" once a process
         # has tasks, "[-        ] NFC…AMPLISEQ:AMPLISEQ:DECONTAM -" before that
         /^\[[0-9a-f-][^]]*\] / {
-            if (!inblock) { inblock = 1; n = 0; more = "" }
+            # A new block is the whole table printed again, so the counts start
+            # over with it: the dial is the tasks of the newest block, not the
+            # sum of every block nextflow has printed
+            if (!inblock) { inblock = 1; n = 0; tasks_done = 0; tasks_total = 0 }
 
             rest = $0
             sub(/^\[[^]]*\] /, "", rest)
@@ -149,14 +160,18 @@ render_rows() {
             gsub(/^[ \t]+|[ \t]+$/, "", name)
             gsub(/^[ \t]+|[ \t]+$/, "", count)
 
+            # A process nextflow has not given a task is left off the table.
+            # Most never get one - the long-read branch of a short-read run,
+            # UNTAR when the databases are already unpacked - and one that does
+            # is listed from the moment it starts.
+            if (count == "") next
+
             pcent = 0
             if (match(count, /[0-9]+ of [0-9]+/)) {
                 split(substr(count, RSTART, RLENGTH), done, / of /)
                 if (done[2] + 0 > 0) pcent = int(100 * done[1] / done[2])
 
-                # Every task of the run together, which the dial reports. A
-                # process nextflow has not given tasks yet counts for nothing
-                # rather than for nought out of nought.
+                # Every task of the run together, which the dial reports
                 tasks_done += done[1] + 0
                 tasks_total += done[2] + 0
             }
@@ -165,15 +180,14 @@ render_rows() {
             label[n] = pretty(name)
             pct[n]   = pcent
             cnt[n]   = count
-            state[n] = count == "" ? "waiting" : (pcent >= 100 ? "done" : "active")
+            state[n] = pcent >= 100 ? "done" : "active"
             next
         }
 
-        # The line nextflow closes each block with, when it has one
-        {
-            inblock = 0
-            if ($0 ~ /^Plus .* processes waiting/) more = $0
-        }
+        # Anything else ends the block - including the "Plus 7 more processes
+        # waiting for tasks" line nextflow closes one with, which counts the
+        # same processes that are left off above
+        { inblock = 0 }
 
         END {
             if (n == 0) exit 0
@@ -189,7 +203,8 @@ render_rows() {
                 if (state[i] == "active") fill = "bg-bio-growth stripe"
 
                 printf "<div class=\"flex items-center gap-3 py-1\">"
-                printf "<span class=\"font-code-md text-code-md text-on-surface truncate"
+                printf "<span class=\"font-code-md text-code-md text-on-surface truncate%s", \
+                    (indent != "" ? " pl-4" : "")
                 printf " basis-[42%%] shrink-0\" title=\"%s\">%s</span>", esc(label[i]), esc(label[i])
                 printf "<span class=\"flex-1 h-1.5 bg-surface-variant rounded-full overflow-hidden\">"
 
@@ -205,12 +220,80 @@ render_rows() {
                 printf " text-right shrink-0 hidden sm:block\">%s</span>", esc(cnt[i])
                 printf "</div>\n"
             }
-
-            if (more != "") {
-                printf "<p class=\"font-body-sm text-body-sm text-outline mt-3\">%s</p>\n", esc(more)
-            }
         }
-    ' "$NEXTFLOW_OUT"
+    ' "$1"
+}
+
+# One step's row, in the same columns as a process's, its name set heavier so
+# the processes listed under it read as belonging to it. A step has no count of
+# tasks to show a share of, so its bar is empty until it starts, striped the
+# whole width while it runs, and full once it is over - navy when it finished,
+# red when it did not.
+step_row() {
+    local name="$1" state="$2" fill="" percent="" note
+
+    case "$state" in
+        active) fill="bg-bio-growth stripe"; note="running" ;;
+        done)   fill="bg-primary-container"; note="done"; percent="100%" ;;
+        failed) fill="bg-error-red";         note="failed" ;;
+        *)      note="waiting" ;;
+    esac
+
+    printf '<div class="flex items-center gap-3 py-1">'
+    printf '<span class="font-code-md text-code-md text-on-surface font-semibold truncate'
+    printf ' basis-[42%%] shrink-0" title="%s">%s</span>' \
+        "$(escape_html "$name")" "$(escape_html "$name")"
+    printf '<span class="flex-1 h-1.5 bg-surface-variant rounded-full overflow-hidden">'
+
+    if [[ -n "$fill" ]]; then
+        printf '<span class="block h-full w-full %s rounded-full"></span>' "$fill"
+    fi
+
+    printf '</span>'
+    printf '<span class="font-code-sm text-code-sm text-on-surface-variant w-9'
+    printf ' text-right shrink-0">%s</span>' "$percent"
+    printf '<span class="font-body-sm text-body-sm text-on-surface-variant w-24'
+    printf ' text-right shrink-0 hidden sm:block">%s</span>' "$note"
+    printf '</div>\n'
+}
+
+# The steps wrike_job.sh recorded, in the order they run, each followed by the
+# processes of the nextflow run it drives when it drives one. Written the way
+# render_rows writes, totals first: every task of every nextflow run, plus one
+# for each step with no processes of its own, so the dial moves through the
+# stages before and after nextflow too.
+#
+# Prints nothing when no steps were recorded.
+render_steps() {
+    local name log state rows done_count total_count
+    local tasks_done=0 tasks_total=0 body=""
+
+    while IFS=$'\t' read -r name log state; do
+        rows=""
+        if [[ -r "$log" ]]; then
+            rows=$(render_rows "$log" indent) || rows=""
+        fi
+
+        if [[ "$rows" == TOTALS\ * ]]; then
+            read -r _ done_count total_count <<< "${rows%%$'\n'*}"
+            rows=${rows#*$'\n'}$'\n'
+
+            tasks_done=$(( tasks_done + done_count ))
+            tasks_total=$(( tasks_total + total_count ))
+        else
+            rows=""
+            tasks_total=$(( tasks_total + 1 ))
+            if [[ "$state" == done ]]; then
+                tasks_done=$(( tasks_done + 1 ))
+            fi
+        fi
+
+        body+="$(step_row "$name" "$state")"$'\n'"$rows"
+    done < <(state_get_json steps | jq -r '.[]? | [.name, .log, .state] | @tsv')
+
+    [[ -n "$body" ]] || return 0
+
+    printf 'TOTALS %d %d\n%s' "$tasks_done" "$tasks_total" "$body"
 }
 
 # The Slurm jobs this run has on the cluster, as "running pending elapsed".
@@ -273,26 +356,6 @@ cluster_counts() {
             $1 == "PENDING" { pending++ }
 
             END { printf "%d %d %d\n", running, pending, elapsed }
-        '
-}
-
-# Cpu-seconds every Slurm job of this run has held between them, read out of the
-# accounting database, which is the only place the tasks that have already
-# finished are still counted. The window is the run's own age, with a few
-# minutes' slack for the driver job that was submitted before it.
-#
-# Prints nothing when sacct cannot answer, which leaves the cpu clock off the
-# widget without taking the wall clock with it.
-run_cpu_seconds() {
-    local elapsed="$1"
-
-    command -v sacct > /dev/null 2>&1 || return 0
-
-    sacct --allocations --noheader --parsable2 --starttime="now-$(( elapsed + 300 ))seconds" \
-        --format=CPUTimeRAW,WorkDir 2>/dev/null \
-        | LC_ALL=C awk -F'|' -v here="$PWD" '
-            index($2, here) == 1 { total += $1 }
-            END { if (total == 0) exit 1; print total }
         '
 }
 
@@ -562,13 +625,19 @@ publish_once() {
         esac
     fi
 
+    # One row per step, with each nextflow run's processes under the step that
+    # runs it. A run that recorded no steps - one begun before they were, or a
+    # page published while the request is still being checked - lists
+    # nextflow's processes alone, as far as there are any.
     rows=""
-    if [[ -r "$NEXTFLOW_OUT" ]]; then
-        rows=$(render_rows) || rows=""
+    if state_has steps; then
+        rows=$(render_steps) || rows=""
+    elif [[ -r "$NEXTFLOW_OUT" ]]; then
+        rows=$(render_rows "$NEXTFLOW_OUT") || rows=""
     fi
 
-    # The first line render_rows writes is the run's task totals, which the dial
-    # is drawn from rather than listed with
+    # The first line either writes is the run's task totals, which the dial is
+    # drawn from rather than listed with
     tasks_done=0
     tasks_total=0
 
@@ -608,7 +677,10 @@ publish_once() {
         # than losing them with the jobs they were read from
         cpu=""
         if (( elapsed > 0 )); then
-            cpu=$(run_cpu_seconds "$elapsed") || cpu=""
+            # Over the run's own age, with a few minutes' slack for the driver
+            # job that was submitted before it. Nothing when sacct cannot
+            # answer, which leaves the cpu clock off without the wall clock.
+            cpu=$(run_cpu_seconds "now-$(( elapsed + 300 ))seconds") || cpu=""
 
             state_set_number clocks.elapsed_seconds "$elapsed" > /dev/null 2>&1 || true
             if [[ -n "$cpu" ]]; then
@@ -666,10 +738,18 @@ publish_once() {
 if [[ "${1:-}" == "--watch" ]]; then
     INTERVAL="${2:-$DEFAULT_INTERVAL}"
 
-    # Ends when wrike_job.sh kills it, which is the only way out
+    # Ends when wrike_job.sh sends TERM, which is the only way out. Trapped
+    # rather than left to kill the loop outright, because bash runs a trap only
+    # once the command in front of it returns: a page being uploaded when the
+    # signal arrives lands first, and wrike_job.sh, waiting on this, knows
+    # nothing is still in flight. The sleep is waited on in the background
+    # because a trapped signal cuts a wait short, where it would sit out a sleep.
+    trap 'exit 0' TERM
+
     while true; do
         publish_once || warn "Could not publish the progress page; will try again."
-        sleep "$INTERVAL"
+        sleep "$INTERVAL" &
+        wait $!
     done
 fi
 

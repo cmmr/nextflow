@@ -24,10 +24,9 @@
 #
 # What is left here is everything that does not come out of the feature table.
 # The read totals are counted off overall_summary.tsv, which is the only place
-# the reads that went in are written down, and the classification database is
-# read off DADA2's own record of it. Both are added to the "statistics" of
-# ./run_state.json beside the counts the R script returned, for
-# ampliseq_upload.sh to read.
+# the reads that went in are written down, and the chemistry off what FastQC
+# measured. Both are added to the "statistics" of ./run_state.json beside the
+# counts the R script returned, for ampliseq_upload.sh to read.
 #
 # Nothing is rarefied, and no group is compared against another: these runs
 # carry no experimental metadata to compare by. The read depth every index was
@@ -63,10 +62,6 @@ readonly TABLES_SCRIPT="$NEXTFLOW_DIR/scripts/R/ampliseq_tables.R"
 # Reads surviving each stage of the pipeline, one row per sample, which is the
 # only place the reads that went in are counted
 readonly OVERALL_SUMMARY="$RESULTS_DIR/overall_summary.tsv"
-
-# DADA2's record of which reference it classified against, named for the
-# database the run used
-readonly TAXONOMY_DIR="$RESULTS_DIR/dada2"
 
 # What FastQC measured off each raw FASTQ, as MultiQC tabulated it. The zips
 # FastQC wrote are pruned from the results; this table is not.
@@ -160,24 +155,6 @@ total_input_reads() {
     summary_reads "chopper_input cutadapt_total_processed DADA2_input input_reads input"
 }
 
-# The reference DADA2 classified against, as it titles itself
-taxonomy_database() {
-    local path title
-
-    for path in "$TAXONOMY_DIR"/ref_taxonomy.*.txt; do
-        [[ -r "$path" ]] || continue
-
-        title=$(LC_ALL=C awk '/^Title: / { sub(/^Title:[ \t]*/, ""); print; exit }' "$path")
-
-        [[ -n "$title" ]] || continue
-
-        printf '%s' "$title"
-        return 0
-    done
-
-    return 1
-}
-
 # The chemistry FastQC read off the raw files, as a reader says it: "2 × 250 bp"
 # for a paired run, "250 bp" for a single-ended one, and "250 + 150 bp" where the
 # two mates were read to different lengths.
@@ -253,15 +230,6 @@ read_chemistry() {
     printf '%s' "$chemistry"
 }
 
-# How those numbers were made, for the caption under the composition chart
-composition_method() {
-    local database
-
-    database=$(taxonomy_database) || return 1
-
-    printf 'ASVs were inferred with DADA2 and classified against %s.' "$database"
-}
-
 # Everything the sidebar reports: what the R script counted off the feature
 # table, the chemistry FastQC read off the raw files, and the read totals counted
 # off the summary beside them.
@@ -332,18 +300,10 @@ fi
 EXCLUDE_TAXA=$(state_get "manifest.params.exclude_taxa") || true
 : "${EXCLUDE_TAXA:=none}"
 
-#    How the numbers were made, for the caption under the composition chart.
-#    Passed in rather than edited into the rendered file afterwards: a database
-#    title is free to contain the characters sed reads as syntax.
-if ! METHOD=$(composition_method); then
-    warn "The classification database could not be named; the Overview will not state it."
-    METHOD=""
-fi
-
 if ! R_OUTPUT=$(apptainer exec -B /data "$RBIOM_CONTAINER" \
         Rscript --vanilla "$TABLES_SCRIPT" \
             "$RESULTS_DIR" "$PLOT_DATA" "$TABLE_STATS" \
-            "$EXCLUDE_TAXA" "$METHOD" 2>&1); then
+            "$EXCLUDE_TAXA" 2>&1); then
     warn "The feature table could not be assembled; the Overview will show no plots:"$'\n'"$R_OUTPUT"
     rm -f "$PLOT_DATA"
     exit 0

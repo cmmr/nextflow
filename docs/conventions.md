@@ -60,6 +60,12 @@ These carry most of the system's state, and nothing works if you break them:
   `nextflow_progress.sh` for the line under the run's name. It is kept beside
   `nextflow.out` rather than in it: that file is nextflow's own output, and the
   parser that reads it should never have to tell our lines from nextflow's.
+- **`.steps` is the list the progress page shows.** `wrike_job.sh` records
+  every step before the first starts — each pre-process command, the nextflow
+  run, each post-process command — as its name, the console output its
+  processes are read from, and a state it moves through as it runs: `waiting`,
+  `active`, then `done` or `failed`. `set_step_state` addresses a step by its
+  place in that list.
 - **`.notes` is where a stage reports success.** An array stages *append* to —
   the region `ampliseq_detect_region.sh` measured arrives that way.
   `wrike_followup.sh` posts it whether the run succeeded or failed, where

@@ -10,12 +10,29 @@ A pipeline file is **not** a script — it is a set of variable assignments and
 | `PARAMS_FILE` | no | Where `wrike_job.sh` writes the params file, e.g. `ampliseq_args.yaml` |
 | `PARAMS_LOCKED` | no | Bash array; parameter names a requester may not override |
 | `PRE_PROCESS_CMDS` | no | Bash array; commands run in order before nextflow, in the run directory |
-| `POST_PROCESS_CMDS` | no | Bash array; commands run in order after nextflow succeeds |
+| `POST_PROCESS_CMDS` | no | Bash array; commands run in order after nextflow succeeds. The last one publishes the results |
 
 `PIPELINE_NAME` upper-cased must name the file itself — `ampliseq_01` →
 `pipelines/AMPLISEQ_01.sh`. That is how the run manifest records the *version*
 that ran rather than the shortcut that was asked for, which is what lets a rerun
 a year later reproduce it.
+
+## Steps on the progress page
+
+Every pre-process command, the nextflow run, and every post-process command is a
+row on the live progress page, in the order they run. A command is listed under
+its script's name less the pipeline's prefix — `taxprofiler_humann.sh` is
+`humann` — and the nextflow run under the pipeline it runs, with nextflow's
+processes indented beneath it.
+
+**A step that drives a nextflow run of its own tees that run's console output to
+`<name>.out`** in the run directory, and the page lists that run's processes
+under the step the same way. `taxprofiler_humann.sh` writes `humann.out`.
+
+**The last post-process command must be the one that publishes the results.**
+The finished dashboard lands on the same S3 key the progress page is published
+to, so `wrike_job.sh` stops the page's watcher as that step begins, leaving a
+page that shows it under way. Both pipelines end with their upload script.
 
 ## Parameters
 

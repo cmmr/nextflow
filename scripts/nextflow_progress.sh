@@ -23,6 +23,13 @@
 # publish_results, not here - when the report has landed on top of the page,
 # which is what sends a reader's browser for it.
 #
+# Neither is published by a cycle whose reads did not come back whole. The rows
+# and the dial are parsed out of logs the run is still writing, and a read that
+# lands mid-reprint sees part of a table, or none of it, and would put a page
+# saying the run is starting up in front of a requester watching it work. A run
+# only ever adds tasks, so a total that has gone down is the read and not the
+# run; see tasks_read_whole.
+#
 # A run that has failed carries its logs on the page as well: nextflow's error
 # block, the debug log beside it, and the command that was run, so a requester
 # has something to quote without anyone reading the cluster for them.
@@ -100,6 +107,10 @@ readonly DIAL_CIRCUMFERENCE=339.292
 # of a run always sends both, whatever is at the prefix already.
 readonly PAGE_DIGEST=".progress_page.md5"
 readonly STATE_DIGEST=".progress_state.md5"
+
+# What the last state file published said the run's tasks came to, kept beside
+# those digests and read back by tasks_read_whole
+readonly TASKS_RECORD=".progress_tasks"
 
 # How much of a log a failed run's page carries. Enough for nextflow's error
 # block, which runs to a few dozen lines, without pasting a whole run's output
@@ -596,6 +607,45 @@ page_state() {
     printf 'live'
 }
 
+# Whether the tasks this page would report are tasks the run could actually have
+# reached, which is a check on the files they were read from rather than on the
+# run.
+#
+# The rows and the dial are parsed out of console output the run is still
+# writing, and nextflow reprints its whole table into it every time anything
+# changes. A read that lands in the middle of one of those reprints sees part of
+# a table - and a log that has just been opened, and so truncated, none of it -
+# so the page built from it drops every process the read did not reach: a run
+# sixty tasks in reports four, or reports that it is starting up. That has been
+# seen mid-run, and it is the page a requester is looking at.
+#
+# A run only ever adds tasks - nextflow reprints every process that has started,
+# and a step that has no processes of its own still counts for one - so a total
+# that has gone down is the read and not the run, and the page already up is a
+# truer account than the one this would make. The last total published is kept
+# in the run directory; the first publish of a run has none to compare against
+# and stands.
+#
+# The most this can cost is a page a little behind, since the next read that
+# comes back whole publishes over it. A failed run publishes whatever it read:
+# its page carries the explanation and the logs it died with, which is the whole
+# reason that page is worth opening.
+tasks_read_whole() {
+    local total="$1" status="$2" last
+
+    [[ "${status,,}" != "failed" ]] || return 0
+    [[ -r "$TASKS_RECORD" ]]        || return 0
+
+    last=$(<"$TASKS_RECORD")
+    [[ "$last" =~ ^[0-9]+$ ]] || return 0
+
+    if (( total < last )); then
+        warn "This run's logs read as $total tasks, down from $last;" \
+             "leaving the page that is up rather than publishing an emptier one."
+        return 1
+    fi
+}
+
 # What this page is going to become, said after the stage under the run's name.
 # A failed run is not going to become anything, and the panel below it says so
 # at length, so there the sentence is left off rather than contradicted.
@@ -762,43 +812,54 @@ publish_once() {
         failure=$(failure_report) || failure=""
     fi
 
-    # The page itself, which carries only what is fixed for the whole run: the
-    # run's name, the dial at nothing, and the script that reads the state file
-    # written below. Sent once - every publish after the first renders the same
-    # bytes and sends nothing.
-    render_template "$PROGRESS_TEMPLATE" \
-        TASK_NAME  "$(escape_html "$task_name")" \
-        RUN_ID     "$RUN_ID" \
-        STATE_FILE "$PROGRESS_STATE_KEY" \
-        INTERVAL   "$(( POLL_SECONDS * 1000 ))" \
-        ARC        "$(dial_arc 0 "$DIAL_CIRCUMFERENCE")" \
-        STARTING   "$STARTING_MESSAGE" \
-        | upload_if_changed "$S3_INDEX" "text/html" "$PAGE_DIGEST" \
-        || return 1
+    # Both objects, or neither: a cycle whose reads did not come back whole
+    # leaves the pair as the last good cycle left them. The page is guarded with
+    # the state file because it carries the run's name, read from the same
+    # record - and, being sent once, it would otherwise keep a fallback name for
+    # the rest of the run.
+    if tasks_read_whole "$tasks_total" "$status"; then
+        # The page itself, which carries only what is fixed for the whole run:
+        # the run's name, the dial at nothing, and the script that reads the
+        # state file written below. Sent once - every publish after the first
+        # renders the same bytes and sends nothing.
+        render_template "$PROGRESS_TEMPLATE" \
+            TASK_NAME  "$(escape_html "$task_name")" \
+            RUN_ID     "$RUN_ID" \
+            STATE_FILE "$PROGRESS_STATE_KEY" \
+            INTERVAL   "$(( POLL_SECONDS * 1000 ))" \
+            ARC        "$(dial_arc 0 "$DIAL_CIRCUMFERENCE")" \
+            STARTING   "$STARTING_MESSAGE" \
+            | upload_if_changed "$S3_INDEX" "text/html" "$PAGE_DIGEST" \
+            || return 1
 
-    # And everything that moves, as the object that page asks for. The five
-    # fragments go in as the renderers built them - each escaped whatever came
-    # out of a log or a task name on its way in, and the page writes them as
-    # markup - while the rest go in as they were read and the page writes them
-    # as text.
-    jq -n \
-        --arg     state       "$(page_state "$status")" \
-        --arg     status_pill "$(status_pill "$status")" \
-        --arg     stage       "$stage" \
-        --arg     page_note   "$(page_note "$status")" \
-        --argjson percent     "$percent" \
-        --arg     arc         "$arc" \
-        --arg     tasks       "$tasks" \
-        --arg     cluster     "$clusters" \
-        --arg     timers      "$timers" \
-        --arg     rows        "$rows" \
-        --arg     failure     "$failure" \
-        --arg     footnote    "$(page_footnote "$status")" \
-        --arg     updated     "$(date '+%B %-d, %Y at %-I:%M %p %Z')" \
-        '{$state, $status_pill, $stage, $page_note, $percent, $arc, $tasks,
-          $cluster, $timers, $rows, $failure, $footnote, $updated}' \
-        | upload_if_changed "$S3_STATE" "application/json" "$STATE_DIGEST" \
-        || return 1
+        # And everything that moves, as the object that page asks for. The five
+        # fragments go in as the renderers built them - each escaped whatever
+        # came out of a log or a task name on its way in, and the page writes
+        # them as markup - while the rest go in as they were read and the page
+        # writes them as text.
+        jq -n \
+            --arg     state       "$(page_state "$status")" \
+            --arg     status_pill "$(status_pill "$status")" \
+            --arg     stage       "$stage" \
+            --arg     page_note   "$(page_note "$status")" \
+            --argjson percent     "$percent" \
+            --arg     arc         "$arc" \
+            --arg     tasks       "$tasks" \
+            --arg     cluster     "$clusters" \
+            --arg     timers      "$timers" \
+            --arg     rows        "$rows" \
+            --arg     failure     "$failure" \
+            --arg     footnote    "$(page_footnote "$status")" \
+            --arg     updated     "$(date '+%B %-d, %Y at %-I:%M %p %Z')" \
+            '{$state, $status_pill, $stage, $page_note, $percent, $arc, $tasks,
+              $cluster, $timers, $rows, $failure, $footnote, $updated}' \
+            | upload_if_changed "$S3_STATE" "application/json" "$STATE_DIGEST" \
+            || return 1
+
+        # What the next cycle's read is measured against, written only once the
+        # state file it describes is up
+        printf '%s' "$tasks_total" > "$TASKS_RECORD"
+    fi
 
     # The run's own record, refreshed with the page it explains, so a reader
     # holding the results link also holds the account of how the run was set up

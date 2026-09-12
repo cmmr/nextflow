@@ -348,6 +348,19 @@ while the run is going, `failed` once it is over, and `final` — written by
 `publish_results`, over the same key, once the report has landed on top of the
 page — which is what sends a reader's browser for the report.
 
+**Neither is published by a cycle that did not read the run whole.** The rows
+and the dial are parsed out of console output the run is still writing, and
+nextflow reprints its whole table into it every time anything changes. A read
+that lands in the middle of one of those reprints sees part of a table — and a
+log that has just been opened, and so truncated, none of it — so the page built
+from it drops every process the read did not reach: a run sixty tasks in reports
+four, or reports that it is starting up. A run only ever adds tasks, so a total
+that has gone down is the read and not the run, and `tasks_read_whole` leaves
+both objects as the last good cycle left them. The most that costs is a page ten
+seconds behind, since the next whole read publishes over it. A failed run is
+exempt: its page carries the explanation and the logs it died with, which is the
+whole reason that page is worth opening.
+
 **It starts before nextflow does**, because the stages before nextflow are the
 ones a requester waits through with nothing to look at: recompressing and
 staging a few hundred FASTQ files, and measuring what was sequenced, take long

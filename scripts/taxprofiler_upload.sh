@@ -237,58 +237,6 @@ while IFS=$'\t' read -r STAT_KEY STAT_VALUE; do
     STATS["$STAT_KEY"]="$STAT_VALUE"
 done < <(state_get_tsv "$STATS_KEY")
 
-# A count against the total it was taken against, as the fill a bar takes and
-# the reading written beside it.
-#
-# The share is written whole, except where rounding it whole would read 100% for
-# a step that did drop reads: quality filtering keeps 99.5% of a good run, and a
-# sidebar calling that 100% tells the reader nothing happened.
-#
-# Nothing at all when either is not a count, which is how a step the run did not
-# take leaves out its bar rather than reporting a share of nothing.
-share_reading() {
-    local count="$1" total="$2"
-
-    [[ "$count" =~ ^[0-9]+$ && "$total" =~ ^[0-9]+$ ]] || return 1
-    (( total > 0 )) || return 1
-
-    LC_ALL=C awk -v c="$count" -v t="$total" 'BEGIN {
-        share = c * 100 / t
-        text = sprintf("%.0f", share)
-
-        if (text == "100" && c < t) {
-            text = sprintf("%.1f", share)
-            if (text == "100.0") text = "99.9"
-        }
-
-        printf "%.4f %s\n", share, text
-    }'
-}
-
-# One reading as a bar: what it is, how many reads it was, and what share of the
-# total. Green is for the reads that came through; what was taken out is left in
-# the navy every total wears.
-stat_share() {
-    local label="$1" count="$2" total="$3" tone="${4:-growth}" details="${5:-}"
-    local percent reading
-
-    read -r percent reading < <(share_reading "$count" "$total") || return 0
-
-    dashboard_stat_bar "$label" "$reading% · $(human_count "$count")" "$percent" \
-        "$tone" "$details"
-}
-
-# The same reading as one of the steps behind a bar's "details" link
-stat_share_detail() {
-    local group="$1" label="$2" count="$3" total="$4" href="${5:-}"
-    local percent reading
-
-    read -r percent reading < <(share_reading "$count" "$total") || return 0
-
-    dashboard_stat_detail "$group" "$label" "$reading% · $(human_count "$count")" \
-        "$percent" "$href"
-}
-
 #    Reads as they reached the pipeline, and what was still in hand at each step
 #    after it. Quality filtering counted them first, so its total is the one the
 #    read totals are taken against; without it host removal's count is, and
@@ -337,7 +285,7 @@ if [[ "$TOTAL_READS" =~ ^[0-9]+$ ]] && (( TOTAL_READS > 0 )); then
 
         QC_LEFT=$(( QC_LEFT - removed ))
 
-        stat_share_detail reads "$label" "$QC_LEFT" "$TOTAL_READS" "$FASTP_SECTION"
+        dashboard_stat_share_detail reads "$label" "$QC_LEFT" "$TOTAL_READS" "$FASTP_SECTION"
     }
 
     qc_step "After quality filter"    qc_cut_quality
@@ -345,11 +293,11 @@ if [[ "$TOTAL_READS" =~ ^[0-9]+$ ]] && (( TOTAL_READS > 0 )); then
     qc_step "After length filter"     qc_cut_length
     qc_step "After complexity filter" qc_cut_complexity
 
-    stat_share_detail reads "After host depletion" "$HOST_KEPT" "$TOTAL_READS" \
+    dashboard_stat_share_detail reads "After host depletion" "$HOST_KEPT" "$TOTAL_READS" \
         "$(dashboard_report_section "$MULTIQC_REPORT" "$MULTIQC_REPORT_HREF" \
             "bowtie2 general_stats")"
 
-    stat_share "Retained reads" "$RETAINED_READS" "$TOTAL_READS" growth reads
+    dashboard_stat_share "Retained reads" "$RETAINED_READS" "$TOTAL_READS" growth reads
 
     dashboard_stat_group "READS PER SAMPLE"
     dashboard_stat_chips "$(human_count "${STATS[reads_min]:-0}")|Min" \
@@ -370,7 +318,7 @@ dashboard_folder "metaphlan/" "All MetaPhlAn outputs" || true
 
 if [[ -n "${STATS[metaphlan_total]:-}" ]]; then
     dashboard_stat_group "CLASSIFICATION" "${STATS[metaphlan_database]:-}"
-    stat_share "Mapped reads" "${STATS[metaphlan_mapped]:-}" "${STATS[metaphlan_total]}"
+    dashboard_stat_share "Mapped reads" "${STATS[metaphlan_mapped]:-}" "${STATS[metaphlan_total]}"
 fi
 
 dashboard_tab kraken "Kraken/Bracken"
@@ -395,9 +343,9 @@ if [[ "$RETAINED_READS" =~ ^[0-9]+$ ]] && (( RETAINED_READS > 0 )) &&
    [[ -n "${STATS[phylum_reads]:-}${STATS[genus_reads]:-}${STATS[species_reads]:-}" ]]; then
     dashboard_stat_group "CLASSIFICATION" "${STATS[database]:-}"
 
-    stat_share "Phylum level"  "${STATS[phylum_reads]:-}"  "$RETAINED_READS"
-    stat_share "Genus level"   "${STATS[genus_reads]:-}"   "$RETAINED_READS"
-    stat_share "Species level" "${STATS[species_reads]:-}" "$RETAINED_READS"
+    dashboard_stat_share "Phylum level"  "${STATS[phylum_reads]:-}"  "$RETAINED_READS"
+    dashboard_stat_share "Genus level"   "${STATS[genus_reads]:-}"   "$RETAINED_READS"
+    dashboard_stat_share "Species level" "${STATS[species_reads]:-}" "$RETAINED_READS"
 fi
 
 dashboard_tab humann "HUMAnN"
@@ -408,7 +356,7 @@ dashboard_folder "humann/" "All HUMAnN outputs" || true
 
 if [[ -n "${STATS[humann_total]:-}" ]]; then
     dashboard_stat_group "CLASSIFICATION"
-    stat_share "Mapped reads" "${STATS[humann_mapped]:-}" "${STATS[humann_total]}"
+    dashboard_stat_share "Mapped reads" "${STATS[humann_mapped]:-}" "${STATS[humann_total]}"
 fi
 
 dashboard_tab_end

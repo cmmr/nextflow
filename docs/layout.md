@@ -46,6 +46,11 @@ scripts/
                            pairs samples with their reads and profiles and runs
                            workflows/humann. First POST_PROCESS_CMDS entry.
   taxprofiler_upload.sh       POST_PROCESS_CMDS for the taxprofiler pipelines.
+  biobakery_samplesheet.sh    PRE_PROCESS_CMDS for the biobakery pipelines; runs
+                           taxprofiler_samplesheet.sh and keeps its CSV.
+  biobakery_composition.sh    Works out what the Overview plots from MetaPhlAn's
+                           profiles. Run by biobakery_upload.sh.
+  biobakery_upload.sh         POST_PROCESS_CMDS for the biobakery pipelines.
   build_host_reference.sh     Builds a host-depletion reference. Setup, not part of a run.
   build_16s_reference.sh      Builds the 16S landmarks the region detector aligns to. Likewise.
   fetch_taxprofiler_db.sh     Downloads a taxprofiler or HUMAnN database. Likewise.

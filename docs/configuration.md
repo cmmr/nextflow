@@ -3,9 +3,12 @@
 Every script that talks to Wrike or AWS begins with
 `source /data/prod/nextflow/.env`. Every statement in that file is a plain
 assignment or a `source`, so it is safe and cheap to source any number of times,
-in any process, and it carries no guard. It sets `NEXTFLOW_DIR`, sets the
-nextflow cache directories, unsets any `WRIKE_API_TOKEN` inherited from the
-caller, and then sources five things.
+in any process, and it carries no guard. It sets `NEXTFLOW_DIR`, and
+`NEXTFLOW_DB_DIR` — where the reference databases are, `$NEXTFLOW_DIR/db` unless
+the environment already names somewhere else — sets the nextflow cache
+directories, unsets any `WRIKE_API_TOKEN` inherited from the caller, and then
+sources five things. `NEXTFLOW_DB_DIR` is read by the biobakery pipeline; see
+[Toward a container](pipelines/biobakery.md#toward-a-container).
 
 It also sets the prefix everything this system publishes lives under.
 `S3_RUN_PREFIX` (`nxf`) is where a run's results and its landing page go, and

@@ -1,0 +1,358 @@
+# biobakery
+
+Shotgun metagenomic profiling with the [bioBakery](https://github.com/biobakery)
+tools, run as a Nextflow workflow that lives in this repository:
+[KneadData](https://github.com/biobakery/kneaddata) cleans the reads and removes
+the host, [MetaPhlAn](https://github.com/biobakery/MetaPhlAn) says what was in
+each sample, and [HUMAnN](https://github.com/biobakery/humann) says what those
+communities can do.
+
+KneadData and MetaPhlAn run on every sample; HUMAnN is a module a run can switch
+off. The workflow is built so that more optional modules can be added beside it
+— [Marker-MAGu](https://github.com/cmmr/Marker-MAGu) and
+[EsViritu](https://github.com/cmmr/EsViritu) are the two planned — and so that
+the whole of it can later be packaged into one Nix image with the databases
+mounted from outside; see [Toward a container](#toward-a-container).
+
+For how a request becomes a run at all, see the [Overview](../index.md).
+
+
+## Versions in use
+
+| Component | Version | Where |
+| --- | --- | --- |
+| KneadData | **0.12.4** | `quay.io/biocontainers/kneaddata:0.12.4--pyhdfd78af_0`, in `modules/kneaddata.nf` |
+| MetaPhlAn | **4.1.1** | `quay.io/biocontainers/metaphlan:4.1.1--pyhdfd78af_0`, in `modules/metaphlan.nf` |
+| HUMAnN | **3.9** | `quay.io/biocontainers/humann:3.9--py312hdfd78af_0`, in `modules/humann.nf` |
+| MultiQC | **1.35** | `quay.io/biocontainers/multiqc:1.35--pyhdfd78af_1`, in `modules/multiqc.nf` |
+| MetaPhlAn database | **mpa_vJun23_CHOCOPhlAnSGB_202403** | `db/metaphlan/…`, shared with taxprofiler |
+| HUMAnN databases | **v201901_v31** / **v201901b** | `db/humann/v201901b/…`, shared with taxprofiler |
+| Host references | PhiX, T2T-CHM13v2.0 + PhiX, GRCm39 + PhiX | `db/hostremoval/…`, shared with taxprofiler |
+
+**Every image is the BioContainers build of the bioconda package.** The
+`biobakery/*` images on Docker Hub are the tools' own, but they have not kept
+up: the newest KneadData there is 0.10.0 (2021) and the newest MetaPhlAn 4.0.2
+(2022). The bioconda recipes track each release, and BioContainers publishes an
+image of every one, pinned here by tag like every other image this system runs.
+
+**MetaPhlAn is pinned to 4.1.1 and its vJun23 database, for HUMAnN.** HUMAnN 3.9
+is its newest stable release and accepts a taxonomic profile only if the profile
+names vJun23. MetaPhlAn 4.2 writes vJan25 and later databases, and HUMAnN 4 —
+still an alpha — does not read MetaPhlAn 4.2 profiles either. Moving MetaPhlAn
+forward waits on a stable HUMAnN that does. The same pin already holds for
+[taxprofiler](taxprofiler.md#versions-in-use), so both pipelines read the same
+database directory.
+
+**Nothing new has to be fetched.** The MetaPhlAn database, the HUMAnN databases
+and the host references are the ones [taxprofiler's cluster
+setup](taxprofiler.md#cluster-setup) installs.
+
+
+## The pipeline
+
+One pipeline, `BIOBAKERY`, currently `BIOBAKERY_01`. Like taxprofiler it reads the
+form's "Taxprofiler --hostremoval_reference" answer — `None`, `PhiX`,
+`Human + PhiX` or `Mouse + PhiX`, and `PhiX` when unanswered — and hands KneadData
+the matching bowtie2 index. `None` still trims; it removes nothing.
+
+[`BIOBAKERY_01.sh`](../../pipelines/BIOBAKERY_01.sh) runs
+`workflows/biobakery` with HUMAnN on:
+
+| Step | What | Progress page row |
+| --- | --- | --- |
+| pre-process | [`biobakery_samplesheet.sh`](../../scripts/biobakery_samplesheet.sh) | `samplesheet` |
+| nextflow | `workflows/biobakery` | `biobakery` |
+| post-process | [`biobakery_upload.sh`](../../scripts/biobakery_upload.sh) | `upload` |
+
+HUMAnN runs inside the workflow rather than as a second workflow afterwards, as
+it does for taxprofiler, so its tasks are listed under the `biobakery` row with
+everything else.
+
+**The workflow is not pinned by `-r`.** An nf-core pipeline is fetched at a
+commit; this one runs from `$NEXTFLOW_DIR/workflows/biobakery`, so a
+[rerun](index.md#reproducing-an-earlier-run) reuses the recorded parameters with
+whatever code is checked out. `BIOBAKERY_01.sh` should be treated as immutable
+the same way the others are, and a change to what the workflow computes deserves
+a `BIOBAKERY_02.sh`. The Nix image is what will pin the code itself.
+
+
+## How the workflow is put together
+
+```
+workflows/biobakery/
+  main.nf              samplesheet in, then each enabled module in order
+  nextflow.config      parameter defaults, profiles, execution reports
+  conf/base.config     per-process resources and retries
+modules/
+  kneaddata.nf         KNEADDATA, KNEADDATA_COUNTS
+  metaphlan.nf         METAPHLAN, METAPHLAN_MERGE
+  humann.nf            HUMANN_PREPARE_PROFILE, HUMANN_PROFILE, HUMANN_TABLES
+  multiqc.nf           MULTIQC
+config/biobakery/
+  slurm.config         the cluster: executor, node sizes, apptainer
+```
+
+The split is between **what the analysis is** and **where it runs**. Everything
+under `workflows/biobakery` and `modules/` is free of host paths: every database
+is a parameter, containers are named by registry address, and the executor comes
+from a `-c` config. [`config/biobakery/slurm.config`](../../config/biobakery/slurm.config)
+is the one file that knows about this cluster.
+
+`modules/humann.nf` is shared: `workflows/humann`, which taxprofiler runs after
+itself, includes the same two HUMAnN processes, so there is one copy of how
+HUMAnN is called and how its tables are built.
+
+### Choosing modules per run
+
+KneadData and MetaPhlAn run on every sample. HUMAnN, and every add-on, is
+switched by a parameter of its own:
+
+| Parameter | Default | Needs |
+| --- | --- | --- |
+| `run_humann` | `true` | `humann_chocophlan`, `humann_uniref`, `humann_utility_mapping` |
+
+A pipeline file sets it with `params_set`, like any other parameter, so it lands
+in the params file and in the manifest a rerun is rebuilt from. A form question
+could switch it just as `hostremoval_reference` chooses a reference.
+
+`metaphlan_db` is always required, and an empty `kneaddata_db` trims without
+depleting a host. A database is checked only when the module that reads it is
+enabled, and an unset or missing one stops the run before any task starts.
+
+### What the modules share
+
+The modules talk to each other through two channels in `main.nf`:
+
+| Channel | Shape | Holds |
+| --- | --- | --- |
+| `ch_reads` | `[meta, reads]` | KneadData's cleaned reads |
+| `ch_profiles` | `[meta, profile]` | MetaPhlAn's profile per sample |
+
+`meta` is `[id: <sample>, single_end: <true|false>]`. For a paired sample `reads`
+is the two mates' files followed by KneadData's orphans.
+
+### Adding a module
+
+Marker-MAGu and EsViritu both take cleaned reads and a database, and both have
+BioContainers images (`marker-magu:0.4.0--pyhdfd78af_1`,
+`esviritu:1.3.3--pyhdfd78af_0` at the time of writing). Adding either is:
+
+1. **`modules/<tool>.nf`** — one process per sample reading `ch_reads`, and a
+   second that merges the per-sample tables, publishing under
+   `${params.outdir}/<tool>/`. Pin the container by tag, and give the per-sample
+   process a `stub:` block. Both tools can filter reads themselves (`-q`, `-f`);
+   leave that off when KneadData has run.
+2. **`workflows/biobakery/nextflow.config`** — `run_<tool> = false` and the
+   database parameter.
+3. **`workflows/biobakery/main.nf`** — an `if (params.run_<tool>)` block after
+   KneadData's, calling `database('<tool>_db')`. EsViritu's `-p` is `unpaired`
+   or `paired` from `meta.single_end`.
+4. **`workflows/biobakery/conf/base.config`** and
+   **`config/biobakery/slurm.config`** — its resources.
+5. **A database fetch** with a manifest, as `fetch_taxprofiler_db.sh` does.
+6. **`pipelines/BIOBAKERY_02.sh`** — `params_set run_<tool> true` and the
+   database path under `$NEXTFLOW_DB_DIR`; repoint `BIOBAKERY.sh` at it.
+7. **The dashboard** — rows in `templates/biobakery/outputs.conf` and a
+   `dashboard_tab` in `biobakery_upload.sh`.
+
+
+## Preparing a run
+
+[`biobakery_samplesheet.sh`](../../scripts/biobakery_samplesheet.sh) runs
+[`taxprofiler_samplesheet.sh`](taxprofiler.md#preparing-a-run) and keeps what it
+writes, so both pipelines accept the same lab samplesheet the same way: paired or
+single-end, repeated sample names as runs of one sample, reads staged into
+`raw-sequences/`, the platform measured. The CSV is renamed
+`biobakery_samplesheet.csv`, and the Bracken database sheet taxprofiler also
+needs is deleted.
+
+**A run whose reads are not Illumina short reads is refused** here, with the
+requester told why: KneadData, MetaPhlAn and HUMAnN are all short-read tools. The
+workflow checks again for anyone running it by hand, and skips such rows with a
+warning.
+
+
+## KneadData
+
+One task per sample. A sample's runs are joined in samplesheet order into one
+file per mate, then trimmed with Trimmomatic, cleared of tandem repeats with TRF,
+and aligned against the host with bowtie2. FastQC runs before and after. The
+defaults are KneadData's own: `--sequencer-source NexteraPE`, Trimmomatic's
+`SLIDINGWINDOW:4:20` and a minimum length of half the read length, bowtie2 in
+`--very-sensitive-local`, and `--decontaminate-pairs strict`.
+`kneaddata_args` adds to them.
+
+**The cleaned reads are the files KneadData's log lists as final.** Which files
+those are depends on the run — `<sample>_paired_1.fastq` and its orphans when a
+host was depleted, `<sample>.repeats.removed.1.fastq` when nothing was, and
+`<sample>.fastq` for single-end reads — and KneadData leaves its contaminant and
+trimmed files beside them whatever `--remove-intermediate-output` says. They are
+gzipped for the modules after it and not published; `save_clean_reads` publishes
+them under `kneaddata/clean/`.
+
+**Where reads are lost is `kneaddata/read-counts.tsv`**: one row per sample, one
+column per step and file — `raw pair1`, `trimmed pair1`,
+`decontaminated host pair1`, `final orphan1`, and so on — with `NA` where a
+sample has no such count. It is built from the `READ COUNT` lines of every log
+rather than by `kneaddata_read_count_table`, which names each sample by its log's
+name up to the first dot and so would merge `P3.stool.T1` and `P3.stool.T2`.
+
+
+## MetaPhlAn
+
+One task per sample, over every cleaned file at once, with
+`-t rel_ab_w_read_stats --unclassified_estimation`. Each profile therefore
+carries marker coverage and an estimated read count beside each clade's relative
+abundance, and that abundance is a share of every read processed — the
+`UNCLASSIFIED` row is the rest. Published per sample under
+`metaphlan/profiles/`.
+
+`METAPHLAN_MERGE` joins them with `merge_metaphlan_tables.py` into
+`metaphlan/metaphlan-relab.tsv`, every clade at every rank with one column per
+sample, and `metaphlan-species-relab.tsv`, the species rows alone. The merge
+keeps only relative abundance, which is why the per-sample profiles stay
+published.
+
+
+## HUMAnN
+
+The same processes, tables and failure handling as taxprofiler's — see
+[Functional profiling](taxprofiler.md#functional-profiling) for what HUMAnN is
+doing and what each of the eighteen tables means. Two differences:
+
+- **The profile is rewritten inside the workflow**, by `HUMANN_PREPARE_PROFILE`,
+  rather than by a shell script beforehand. The reason is the same: HUMAnN 3.9
+  reads the abundance from the second-to-last column, which under
+  `rel_ab_w_read_stats` is coverage.
+- **It reads KneadData's reads directly**, so nothing has to be published for it
+  and deleted afterwards.
+
+
+## The dashboard
+
+[`biobakery_upload.sh`](../../scripts/biobakery_upload.sh) takes the same steps
+as taxprofiler's upload script, and a run is read through the same three pages.
+
+- **The Overview's composition chart is MetaPhlAn's.**
+  [`biobakery_composition.sh`](../../scripts/biobakery_composition.sh) reads each
+  sample's profile at phylum through species, keeps the eleven most abundant taxa
+  of each rank and sums the rest into "Other". Shares are of every read MetaPhlAn
+  processed, so a column falls short of the top by that sample's unclassified
+  share, as on a taxprofiler run. There is no diversity chart.
+- **Read totals** in the sidebar are KneadData's: total reads, and behind
+  "details" what was left after trimming and after host depletion, each linking
+  to the KneadData table in the Technical Report; then the reads retained, and
+  the smallest, median and largest sample.
+- **The Feature Table card** has a MetaPhlAn tab (species and all-rank tables,
+  and the share of reads mapped to a known clade), a HUMAnN tab (pathway, gene
+  family and EC tables, and the share of reads aligned) and a KneadData tab
+  (the read count table). A module a run did not enable leaves its tab off.
+- **The Technical Report is MultiQC**, over KneadData's FastQC reports and its
+  read count table as a section of its own. It is the only report the run adds;
+  there is no Krona chart. `MULTIQC` ignores its own failure, so a run is never
+  lost to it.
+
+[`templates/biobakery/outputs.conf`](../../templates/biobakery/outputs.conf) is
+the file index, and [`prune.conf`](../../templates/biobakery/prune.conf) deletes
+the FastQC zips and MultiQC's re-encodings of its own report before anything is
+published.
+
+
+## Toward a container
+
+The plan is one Nix image holding everything but the databases: Nextflow, this
+repository's scripts and workflows, and the tools they call, run with the data
+mounted in and described by environment variables. Nothing is built yet — code
+outside an image is quicker to change — but this pipeline is laid out for it.
+
+**Code and data are named separately.** `NEXTFLOW_DIR` is where the code is, and
+`NEXTFLOW_DB_DIR` — set in `.env` to `$NEXTFLOW_DIR/db` unless the environment
+already names somewhere else — is where the databases are. `BIOBAKERY_01.sh`
+builds every database path from `NEXTFLOW_DB_DIR`, and the workflow itself names
+no path at all. Image caches already have their own variables
+(`NXF_APPTAINER_CACHEDIR`).
+
+**Every resolved path lands in the manifest**, since each is a parameter rather
+than something a config file reads from the environment. An image run with
+different mounts records what it actually read.
+
+**The site config is separate from the workflow.** An image carries
+`workflows/biobakery` unchanged, and the site it runs at supplies its own `-c`.
+
+What still assumes the current layout, and is the work of building the image:
+
+- Every script begins `source /data/prod/nextflow/.env`. That line becomes the
+  image's own path, or reads it from a variable.
+- `.env` sets `NEXTFLOW_DIR` outright, and the other pipelines still read their
+  databases from `$NEXTFLOW_DIR/db`.
+- Each process names its BioContainers image, which suits a Nextflow run inside
+  an image that launches tool containers beside it. An image holding the tools
+  as well wants a profile with containers switched off, since every tool would
+  already be on `PATH`.
+
+The environment an image would need, beyond its own paths:
+
+| Variable | For |
+| --- | --- |
+| `NEXTFLOW_DB_DIR` | the databases |
+| `NXF_APPTAINER_CACHEDIR` | tool images, while tools still run in containers |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `AWS_DEFAULT_REGION`, `AWS_S3_BUCKET`, `AWS_SQS_QUEUE_URL` | publishing, and the queue |
+| `WRIKE_API_TOKEN`, `WRIKE_WEBHOOK_SECRET`, `RUN_ID_SALT` | Wrike, and the uid |
+| `GLOBUS_DIR`, `GLOBUS_URL`, `GLOBUS_UUID`, `GLOBUS_RUN_PREFIX`, `GLOBUS_CLI_CLIENT_ID`, `GLOBUS_CLI_CLIENT_SECRET` | the download |
+| `S3_RUN_PREFIX` | where results are published |
+| `RBIOM_CONTAINER` | the other pipelines' feature tables |
+
+plus a run directory mounted where `wrike_job.sh` is started.
+
+
+## Trying it locally
+
+The workflow runs anywhere Docker does. The `local` profile caps each task at
+the machine's cores and 16 GB; pass a config lowering `process.resourceLimits`
+further on a smaller machine. `-stub` replaces KneadData, MetaPhlAn, HUMAnN's two heavy steps and
+MultiQC with placeholders and runs everything between them for real, which checks
+how the modules are wired together without a database:
+
+```bash
+nextflow run workflows/biobakery -stub -profile docker,local --input samplesheet.csv --outdir results --kneaddata_db db/host --metaphlan_db db/metaphlan --humann_chocophlan db/chocophlan --humann_uniref db/uniref90 --humann_utility_mapping db/utility_mapping
+```
+
+The databases only have to exist for a stub run; add `--run_humann false` to leave
+HUMAnN out.
+
+The samplesheet is the CSV `biobakery_samplesheet.sh` writes:
+`sample,run_accession,instrument_platform,fastq_1,fastq_2`.
+
+
+## Resource limits
+
+[`conf/base.config`](../../workflows/biobakery/conf/base.config) sets a
+reservation and a retry policy per process;
+[`config/biobakery/slurm.config`](../../config/biobakery/slurm.config) resizes the
+two that depend on the node — KneadData at 16 cpus and 32 GB, MetaPhlAn at 16
+cpus and 48 GB, the same as taxprofiler's `METAPHLAN_METAPHLAN` — and caps
+everything at the node's size.
+
+- **KneadData and MetaPhlAn retry twice**, with more memory and time each time,
+  then let running tasks finish and stop. Both read the requester's reads or a
+  database over the shared filesystem.
+- **HUMAnN** keeps taxprofiler's policy: a sample is retried once with twice the
+  memory and time, then left out of the tables.
+- **MultiQC** is ignored when it fails.
+
+KneadData decompresses a sample's reads onto the node's scratch before it starts
+and compresses what it keeps afterwards, so a deep sample needs several times its
+compressed size free under `/tmp`.
+
+`wrike_job.sh`'s 48-hour limit covers the whole workflow, HUMAnN included.
+
+
+## Registering the pipeline in Wrike
+
+`biobakery` is in `WRIKE_FORM_ANSWERS`, but nothing runs until the Wrike side
+matches:
+
+1. Add `biobakery :: WGS taxonomic and functional profiling (KneadData, MetaPhlAn, HUMAnN)`
+   to the "Nextflow Pipeline" field.
+2. Show the "Taxprofiler --hostremoval_reference" follow-up question for it as
+   well. Unanswered, the pipeline depletes PhiX alone.

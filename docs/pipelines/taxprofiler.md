@@ -27,7 +27,7 @@ see the [README](../index.md).
 | MetaPhlAn database | **mpa_vJun23_CHOCOPhlAnSGB_202403** | `db/metaphlan/…` (33 GB) |
 | MetaPhlAn SGB phylogeny | same release, 36,273 tips | `db/metaphlan/…/mpa_vJun23_CHOCOPhlAnSGB_202403.nwk` (1.2 MB) |
 | mOTUs database | **db_mOTU_v3.1.0** | `db/motus/db_mOTU_v3.1.0/db_mOTU` (3.5 GB) |
-| HUMAnN | **3.9** | pinned by container digest in `workflows/humann/main.nf` |
+| HUMAnN | **3.9** | pinned by container tag in `modules/humann.nf`, shared with biobakery |
 | ChocoPhlAn pangenomes | **v201901_v31** | `db/humann/v201901b/chocophlan` (16 GB) |
 | UniRef90 DIAMOND index | **v201901b**, annotated | `db/humann/v201901b/uniref90` (34 GB) |
 | HUMAnN utility mapping | **v201901b** | `db/humann/v201901b/utility_mapping` (6 GB) |

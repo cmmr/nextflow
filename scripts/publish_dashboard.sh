@@ -62,6 +62,10 @@
 #                        one step behind a bar's "details" link, hidden until
 #                        the reader asks for it; href makes the label a link to
 #                        where the pipeline's own report accounts for that step
+#   dashboard_stat_share <label> <count> <total> [tone] [details]
+#   dashboard_stat_share_detail <group> <label> <count> <total> [href]
+#                        the two above, reading a count as a share of its total;
+#                        nothing when either is not a count
 #   dashboard_report_section <report> <href> <anchors>
 #                        the address of a section of a published report, for
 #                        that href, or nothing when it carries no such section
@@ -620,6 +624,58 @@ dashboard_stat_detail() {
     DASHBOARD_STATS+="</div></div>"
 
     return 0
+}
+
+# A count against the total it was taken against, as the fill a bar takes and
+# the reading written beside it.
+#
+# The share is written whole, except where rounding it whole would read 100% for
+# a step that did drop reads: quality filtering keeps 99.5% of a good run, and a
+# sidebar calling that 100% tells the reader nothing happened.
+#
+# Nothing at all when either is not a count, which is how a step the run did not
+# take leaves out its bar rather than reporting a share of nothing.
+dashboard_share_reading() {
+    local count="$1" total="$2"
+
+    [[ "$count" =~ ^[0-9]+$ && "$total" =~ ^[0-9]+$ ]] || return 1
+    (( total > 0 )) || return 1
+
+    LC_ALL=C awk -v c="$count" -v t="$total" 'BEGIN {
+        share = c * 100 / t
+        text = sprintf("%.0f", share)
+
+        if (text == "100" && c < t) {
+            text = sprintf("%.1f", share)
+            if (text == "100.0") text = "99.9"
+        }
+
+        printf "%.4f %s\n", share, text
+    }'
+}
+
+# One reading as a bar: what it is, how many reads it was, and what share of the
+# total. Green is for the reads that came through; what was taken out is left in
+# the navy every total wears.
+dashboard_stat_share() {
+    local label="$1" count="$2" total="$3" tone="${4:-growth}" details="${5:-}"
+    local percent reading
+
+    read -r percent reading < <(dashboard_share_reading "$count" "$total") || return 0
+
+    dashboard_stat_bar "$label" "$reading% · $(human_count "$count")" "$percent" \
+        "$tone" "$details"
+}
+
+# The same reading as one of the steps behind a bar's "details" link
+dashboard_stat_share_detail() {
+    local group="$1" label="$2" count="$3" total="$4" href="${5:-}"
+    local percent reading
+
+    read -r percent reading < <(dashboard_share_reading "$count" "$total") || return 0
+
+    dashboard_stat_detail "$group" "$label" "$reading% · $(human_count "$count")" \
+        "$percent" "$href"
 }
 
 # The address of a section of a report the run published, named as the anchors

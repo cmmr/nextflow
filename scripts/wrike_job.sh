@@ -149,6 +149,9 @@ record_steps() {
         fi
     done
 
+    # A workflow in this repository is run by its path; list it by its name
+    [[ "$pipeline" == /* ]] && pipeline=${pipeline##*/}
+
     NEXTFLOW_STEP_INDEX=${#PRE_PROCESS_CMDS[@]}
     POST_STEP_FIRST=$(( NEXTFLOW_STEP_INDEX + 1 ))
 

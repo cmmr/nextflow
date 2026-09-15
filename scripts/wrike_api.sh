@@ -72,7 +72,7 @@ export WRIKE_EXPIRATION_NOTICE_DAYS=14
 # lets anything be written into (allowOtherValues), which is most of why these
 # lists are checked at all.
 WRIKE_FORM_ANSWERS=(
-    "pipeline|Nextflow Pipeline|IEAAIKU5JUANAH3C|ampliseq,taxprofiler,prev_run_id"
+    "pipeline|Nextflow Pipeline|IEAAIKU5JUANAH3C|ampliseq,taxprofiler,biobakery,prev_run_id"
     "retention|Dashboard Retention|IEAAIKU5JUANE5TN|1 Month,3 Months,6 Months,12 Months,24 Months,Unlimited"
     "previous_run|Nextflow Previous Run ID|IEAAIKU5JUANE5WG|"
     "dada_ref_taxonomy|Ampliseq --dada_ref_taxonomy|IEAAIKU5JUANE5UH|silva=138.2,greengenes2=2024.09,coidb=221216,gtdb=R11-RS232,midori2-co1=gb250,pr2=5.1.0,rdp=18,sbdi-gtdb=R11-RS232-1,unite-alleuk=10.0,unite-fungi=10.0,zehr-nifh=2.5.0"

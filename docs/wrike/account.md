@@ -35,7 +35,7 @@ Every question is listed in `WRIKE_FORM_ANSWERS` in
 
 | Key | Custom field | Answers |
 | --- | --- | --- |
-| `pipeline` | Nextflow Pipeline | `ampliseq`, `taxprofiler`, `prev_run_id` |
+| `pipeline` | Nextflow Pipeline | `ampliseq`, `taxprofiler`, `biobakery`, `prev_run_id` |
 | `retention` | Dashboard Retention | 1, 3, 6, 12, 24 Months, or Unlimited |
 | `previous_run` | Nextflow Previous Run ID | a run's uid — checked by shape, not by list |
 | `dada_ref_taxonomy` | Ampliseq --dada_ref_taxonomy | 11 values, SILVA as `silva=138.2` |
@@ -115,15 +115,16 @@ Its options carry a description after the name:
 ```
 ampliseq    :: 16S full length or variable region amplicons
 taxprofiler :: WGS metagenomic profiling
+biobakery   :: WGS taxonomic and functional profiling (KneadData, MetaPhlAn, HUMAnN)
 prev_run_id :: process new data using the same settings as before
 ```
 
 **Only the first word is read**, so the descriptions can be reworded freely. The
-first two resolve to `pipelines/AMPLISEQ.sh` and `pipelines/TAXPROFILER.sh`; the
-third names no pipeline, and means the settings come from the run named in
-"Nextflow Previous Run ID".
+first three resolve to `pipelines/AMPLISEQ.sh`, `pipelines/TAXPROFILER.sh` and
+`pipelines/BIOBAKERY.sh`; the last names no pipeline, and means the settings come
+from the run named in "Nextflow Previous Run ID".
 
-Adding a fourth option means adding `pipelines/<NAME>.sh` and the option to both
+Adding another option means adding `pipelines/<NAME>.sh` and the option to both
 the form and `WRIKE_FORM_ANSWERS` — see
 [Adding a pipeline](../pipelines/index.md#adding-a-pipeline).
 

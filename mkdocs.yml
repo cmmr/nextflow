@@ -47,6 +47,7 @@ nav:
       - pipelines/index.md
       - ampliseq: pipelines/ampliseq.md
       - taxprofiler: pipelines/taxprofiler.md
+      - biobakery: pipelines/biobakery.md
   - Results:
       - results/index.md
       - Composition and diversity: results/composition.md

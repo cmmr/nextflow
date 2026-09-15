@@ -16,3 +16,5 @@ run: `scripts/build_16s_reference.sh` for
 [the ampliseq region detector](../pipelines/ampliseq.md#building-the-landmark-reference),
 and `scripts/build_host_reference.sh` plus `scripts/fetch_taxprofiler_db.sh` for
 [the taxprofiler pipelines](../pipelines/taxprofiler.md).
+[The biobakery pipeline](../pipelines/biobakery.md) reads the same host
+references and the same MetaPhlAn and HUMAnN databases, and needs nothing more.

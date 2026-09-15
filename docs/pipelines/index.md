@@ -32,7 +32,7 @@ under the step the same way. `taxprofiler_humann.sh` writes `humann.out`.
 **The last post-process command must be the one that publishes the results.**
 The finished dashboard lands on the same S3 key the progress page is published
 to, so `wrike_job.sh` stops the page's watcher as that step begins, leaving a
-page that shows it under way. Both pipelines end with their upload script.
+page that shows it under way. Every pipeline ends with its upload script.
 
 ## Parameters
 
@@ -104,8 +104,9 @@ defaults.** Nothing about the command line is defaulted by `wrike_job.sh`.
 
 **`-r` names a commit, not a tag or a branch.** A branch moves by design and a
 tag can be moved by accident, and either would mean a rerun of a year-old run
-executing different code. Both pipelines pin a SHA with a comment saying which
-release or branch it came from.
+executing different code. The nf-core pipelines pin a SHA with a comment saying
+which release or branch it came from. BIOBAKERY runs a workflow from this
+repository and has no `-r`; see [the biobakery pipeline](biobakery.md#the-pipeline).
 
 ## Naming
 
@@ -138,6 +139,10 @@ Currently defined:
   community was sequenced. Which host genome is depleted first is the form's
   "Taxprofiler --hostremoval_reference" answer rather than a separate pipeline. See
   [the taxprofiler pipeline](taxprofiler.md).
+- **BIOBAKERY** — KneadData, MetaPhlAn 4.1.1 and HUMAnN 3.9 over shotgun reads,
+  as a workflow in this repository, with HUMAnN and any add-on module switched on
+  per pipeline version. Reads the same host answer as TAXPROFILER. See
+  [the biobakery pipeline](biobakery.md).
 
 **Pipeline files are named in upper case.** `wrike_task_handler.sh` uppercases
 whatever the user typed and looks for exactly that filename, so `taxprofiler` on

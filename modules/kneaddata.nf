@@ -31,11 +31,17 @@ process KNEADDATA {
     gzip -cdf ${fastq_1} > ${id}_R1.fastq
     ${meta.single_end ? '' : "gzip -cdf ${fastq_2} > ${id}_R2.fastq"}
 
+    # KneadData applies --max-memory only when it runs Trimmomatic's jar itself.
+    # Found on PATH, it runs the bioconda wrapper, which caps the heap at 1 GB.
+    mkdir trimmomatic
+    ln -s "\$(find -L /usr/local/share -name 'trimmomatic*.jar' | head -n 1)" trimmomatic/
+
     kneaddata ${input} \\
         --output out \\
         --output-prefix ${id} \\
         ${database} \\
         --threads ${task.cpus} \\
+        --trimmomatic trimmomatic \\
         ${heap} \\
         --sequencer-source ${params.kneaddata_sequencer_source} \\
         --run-fastqc-start \\

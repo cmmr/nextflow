@@ -23,10 +23,19 @@ process METAPHLAN {
     script:
     def input = [reads].flatten().join(',')
     """
-    # The index is named after the database release; the directory holds one
-    INDEX=\$(find -L ${db} -name '*.rev.1.bt2*' | head -n 1)
-    INDEX=\${INDEX##*/}
-    INDEX=\${INDEX%%.rev.1.bt2*}
+    # The release named by the directory when it holds that index, otherwise the
+    # one index the directory holds
+    INDEX=${db.name}
+
+    if ! ls ${db}/\$INDEX.rev.1.bt2* > /dev/null 2>&1; then
+        INDEX=\$(find -L ${db} -maxdepth 1 -name '*.rev.1.bt2*' \\
+            | sed 's#.*/##; s#\\.rev\\.1\\.bt2.*##' | sort -u)
+
+        if [ "\$(printf '%s\\n' "\$INDEX" | grep -c .)" -ne 1 ]; then
+            echo "Expected one MetaPhlAn index in ${db}, found: \$INDEX" >&2
+            exit 1
+        fi
+    fi
 
     metaphlan ${input} \\
         --input_type fastq \\

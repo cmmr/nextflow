@@ -182,6 +182,13 @@ defaults are KneadData's own: `--sequencer-source NexteraPE`, Trimmomatic's
 `--very-sensitive-local`, and `--decontaminate-pairs strict`.
 `kneaddata_args` adds to them.
 
+**KneadData is pointed at Trimmomatic's jar, not its command.** It passes
+`--max-memory` to Java only when it runs the jar itself. Left to find
+Trimmomatic on `PATH`, it runs the bioconda wrapper instead, which ignores that
+setting and caps the heap at 1 GB — enough for a small sample, and an
+`OutOfMemoryError` on a sample of a million pairs at 16 threads, however much
+memory the task was given. The heap is three quarters of the task's memory.
+
 **The cleaned reads are the files KneadData's log lists as final.** Which files
 those are depends on the run — `<sample>_paired_1.fastq` and its orphans when a
 host was depleted, `<sample>.repeats.removed.1.fastq` when nothing was, and
@@ -206,6 +213,11 @@ carries marker coverage and an estimated read count beside each clade's relative
 abundance, and that abundance is a share of every read processed — the
 `UNCLASSIFIED` row is the rest. Published per sample under
 `metaphlan/profiles/`.
+
+**The database release is the one `metaphlan_db` is named after.** MetaPhlAn
+reads an index by name, so one directory can hold several releases. The module
+uses the index named like the directory when there is one, the only index
+otherwise, and refuses a directory holding several with none named like it.
 
 `METAPHLAN_MERGE` joins them with `merge_metaphlan_tables.py` into
 `metaphlan/metaphlan-relab.tsv`, every clade at every rank with one column per

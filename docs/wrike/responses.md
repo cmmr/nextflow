@@ -37,7 +37,7 @@ IEAAIKU5JUANE5UV        Ampliseq --qiime_ref_taxonomy
 IEAAIKU5JUANE5VD        Ampliseq --kraken2_ref_taxonomy
 IEAAIKU5JUANE5VL        Ampliseq --picrust
 IEAAIKU5JUANE5VR        Ampliseq --exclude_taxa
-IEAAIKU5JUANE5WC        Taxprofiler --hostremoval_reference
+IEAAIKU5JUANE5WC        Host Removal
 IEAAIKU5JUANE5WG        Nextflow Previous Run ID
 ```
 
@@ -385,7 +385,7 @@ call_wrike_api GET spaces/$WRIKE_SPACE_ID/customfields
     {
       "id": "IEAAIKU5JUANE5WC",
       "accountId": "IEAAIKU5",
-      "title": "Taxprofiler --hostremoval_reference",
+      "title": "Host Removal",
       "type": "DropDown",
       "spaceId": "MQAAAAEN9xux",
       "sharedIds": [],

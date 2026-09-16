@@ -137,9 +137,10 @@ Currently defined:
 - **TAXPROFILER** — nf-core/taxprofiler 2.0.1 running kraken2, bracken, metaphlan
   and mOTUs over shotgun reads, with nonpareil measuring how much of each
   community was sequenced. Which host genome is depleted first is the form's
-  "Taxprofiler --hostremoval_reference" answer rather than a separate pipeline. See
+  "Host Removal" answer rather than a separate pipeline. See
   [the taxprofiler pipeline](taxprofiler.md).
 - **BIOBAKERY** — KneadData, MetaPhlAn 4.1.1 and HUMAnN 3.9 over shotgun reads,
+  with mOTUs and nonpareil for diversity,
   as a workflow in this repository, with HUMAnN and any add-on module switched on
   per pipeline version. Reads the same host answer as TAXPROFILER. See
   [the biobakery pipeline](biobakery.md).

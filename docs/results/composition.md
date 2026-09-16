@@ -12,8 +12,9 @@ panel with a tab-link for each of those two questions.
 |---|---|---|
 | ampliseq | [`ampliseq_composition.sh`](../../scripts/ampliseq_composition.sh), which runs [`ampliseq_tables.R`](../../scripts/R/ampliseq_tables.R) | DADA2's own tables, assembled into one feature table by rbiom |
 | taxprofiler | [`taxprofiler_composition.sh`](../../scripts/taxprofiler_composition.sh), which runs [`taxprofiler_tables.R`](../../scripts/R/taxprofiler_tables.R) | the per-sample Bracken and Kraken2 reports for composition, nonpareil and mOTUs for diversity, and the merged profiles for the feature tables |
+| biobakery | [`biobakery_composition.sh`](../../scripts/biobakery_composition.sh) | MetaPhlAn's per-sample profiles for composition, and nonpareil and mOTUs for diversity, as on taxprofiler — see [the biobakery pipeline](../pipelines/biobakery.md#diversity) |
 
-Both write the same file in the same shape, so there is one Overview rather than
+Each writes the same file in the same shape, so there is one Overview rather than
 one per pipeline. What the two differ on, the plot data says rather than the
 template assuming: what a column of the diversity chart counts — an ASV on a 16S
 run, a species on a shotgun one — and *which indices there are at all*, since

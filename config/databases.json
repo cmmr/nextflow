@@ -46,7 +46,8 @@
       "release": "3.1.0",
       "description": "The database motus downloadDB installs for mOTUs 3.1.0, with the db_mOTU_versions file that command writes.",
       "used_by": [
-        "taxprofiler: config/taxprofiler/database.csv (motus)"
+        "taxprofiler: config/taxprofiler/database.csv (motus)",
+        "biobakery: motus_db"
       ],
       "setup": "scripts/fetch_taxprofiler_db.sh motus",
       "manifest": "motus/db_mOTU_v3.1.0.manifest.json",

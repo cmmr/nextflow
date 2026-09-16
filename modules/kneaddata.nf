@@ -57,12 +57,33 @@ process KNEADDATA {
 
     awk '/Final output files? created/ { final = 1; next }
          final && /^\\// { print; next }
-         { final = 0 }' out/${id}.log \\
-        | while read -r path; do
-            gzip -1 -c "out/\${path##*/}" > "clean/\${path##*/}.gz"
-        done
+         { final = 0 }' out/${id}.log > final.txt
+
+    while read -r path; do
+        gzip -1 -c "out/\${path##*/}" > "clean/\${path##*/}.gz"
+    done < final.txt
 
     ls clean/*.fastq.gz > /dev/null
+
+    # With no host KneadData logs no count after Tandem Repeats Finder, so the
+    # final files are counted into the log in its own READ COUNT format
+    if ! grep -q 'READ COUNT: final ' out/${id}.log; then
+        while read -r path; do
+            name=\${path##*/}
+
+            case "\$name" in
+                *unmatched[._][12].fastq|*single[._][12].fastq) type="orphan\${name: -7:1}" ;;
+                *[._]1.fastq) type=pair1 ;;
+                *[._]2.fastq) type=pair2 ;;
+                *)            type=single ;;
+            esac
+
+            printf 'INFO: READ COUNT: final %s : Total reads counted by the workflow in the final output ( %s ): %d.0\\n' \\
+                "\$type" "\$path" \$(( \$(wc -l < "out/\$name") / 4 )) >> out/${id}.log
+        done < final.txt
+    fi
+
+    rm final.txt
 
     mv out/${id}.log ${id}.log
     mv out/fastqc fastqc

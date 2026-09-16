@@ -13,7 +13,8 @@
 # a listing page into every folder, add those to the zip, and copy the results to
 # s3://$AWS_S3_BUCKET/$S3_RUN_PREFIX/<uid>/ with the pages last.
 #
-# The Overview's composition chart is MetaPhlAn's, and it has no diversity half.
+# The Overview's composition chart is MetaPhlAn's, and its diversity chart is
+# Nonpareil's and mOTUs', on a run that enabled either.
 # The sidebar carries KneadData's read totals and a Feature Table tab each for
 # MetaPhlAn and HUMAnN; a tool the run did not enable leaves its tab off.
 #
@@ -148,18 +149,22 @@ if [[ "$TOTAL_READS" =~ ^[0-9]+$ ]] && (( TOTAL_READS > 0 )); then
                          "$(human_count "${STATS[reads_max]:-0}")|Max"
 fi
 
-#    The Feature Table card, one tab per tool: the species read counts in three
+#    The Feature Table card, one tab per tool: the SGB read counts in three
 #    BIOM formats, and HUMAnN's RPK tables in classic tabular form
 dashboard_tab metaphlan "MetaPhlAn"
 
 dashboard_formats "" \
-    "Species|BIOM (tsv)|metaphlan/metaphlan-species-reads.tsv" \
-    "Species|BIOM (json)|metaphlan/metaphlan-species-reads.json.biom" \
-    "Species|BIOM (hdf5)|metaphlan/metaphlan-species-reads.hdf5.biom" || true
+    "Taxa|BIOM (tsv)|metaphlan/metaphlan-sgb-reads.tsv" \
+    "Taxa|BIOM (json)|metaphlan/metaphlan-sgb-reads.json.biom" \
+    "Taxa|BIOM (hdf5)|metaphlan/metaphlan-sgb-reads.hdf5.biom" || true
 
-if [[ -n "${STATS[metaphlan_total]:-}" ]]; then
-    dashboard_stat_group "CLASSIFICATION" "${STATS[metaphlan_database]:-}"
-    dashboard_stat_share "Mapped reads" "${STATS[metaphlan_mapped]:-}" "${STATS[metaphlan_total]}"
+#    Each tool's mapped reads out of the reads KneadData retained, with the
+#    database it mapped against named under the bar
+if [[ -n "${STATS[metaphlan_mapped]:-}" ]]; then
+    dashboard_stat_group
+    dashboard_stat_share_of "Mapped reads" "${STATS[metaphlan_mapped]}" \
+        "${STATS[retained_total]:-${STATS[metaphlan_total]:-}}" "${STATS[metaphlan_database]:-}" \
+        "MetaPhlAn's estimate of the reads that came from the organisms it identified. Only reads matching its clade-specific marker genes are aligned; each identified clade's marker coverage is then scaled up by its genome size to estimate all the reads it contributed. The rest, including organisms with no markers in the database, is unclassified."
 fi
 
 dashboard_tab humann "HUMAnN"
@@ -169,9 +174,11 @@ dashboard_formats "" \
     "Genes|BIOM (tsv)|humann/gene-families-rpk.tsv" \
     "Enzymes|BIOM (tsv)|humann/ec-rpk.tsv" || true
 
-if [[ -n "${STATS[humann_total]:-}" ]]; then
-    dashboard_stat_group "CLASSIFICATION" "${STATS[humann_database]:-}"
-    dashboard_stat_share "Mapped reads" "${STATS[humann_mapped]:-}" "${STATS[humann_total]}"
+if [[ -n "${STATS[humann_mapped]:-}" ]]; then
+    dashboard_stat_group
+    dashboard_stat_share_of "Mapped reads" "${STATS[humann_mapped]}" \
+        "${STATS[retained_total]:-${STATS[humann_total]:-}}" "${STATS[humann_database]:-}" \
+        "Reads HUMAnN aligned to a gene family: first as DNA to the ChocoPhlAn pangenomes of the species MetaPhlAn found, then, for reads left over, as translated protein against UniRef90. Reads that matched neither are unmapped. A sample HUMAnN could not finish is counted as unmapped."
 fi
 
 dashboard_tab_end
@@ -220,8 +227,8 @@ fi
 dashboard_bundle "$(globus_run_url "$RUN_ID" "$BUNDLE_NAME")" \
     "$(globus_archive_size "$RUN_ID" "$BUNDLE_NAME")" "${BUNDLE_PARTS[@]%%|*}"
 
-# 6. The run's record into the results folder, for the file index to list, and
-#    the three pages
+# 6. The run's record into the results folder, for the download and the File
+#    Explorer to carry, and the three pages
 dashboard_stage_records \
     || warn "The run's record could not be copied into the results; the download will not carry it."
 

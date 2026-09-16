@@ -11,7 +11,8 @@
 # Nothing before the reads arrived is described.
 #
 # Versions are the BioContainers images the modules pin, which the text names in
-# full: KneadData, MetaPhlAn, HUMAnN and MultiQC by the version in the tag, and
+# full: KneadData, MetaPhlAn, HUMAnN, mOTUs, Nonpareil and MultiQC by the version
+# in the tag, and
 # the tools inside those images - Trimmomatic, Bowtie2, DIAMOND and the rest - by
 # the image that carries them.
 #
@@ -356,6 +357,8 @@ KNEADDATA_ARGS=$(state_get manifest.params.kneaddata_args)
 METAPHLAN_DB=$(state_get manifest.params.metaphlan_db)
 METAPHLAN_ARGS=$(state_get manifest.params.metaphlan_args)
 RUN_HUMANN=$(state_get manifest.params.run_humann)
+RUN_MOTUS=$(state_get manifest.params.run_motus)
+RUN_NONPAREIL=$(state_get manifest.params.run_nonpareil)
 HUMANN_CHOCOPHLAN=$(state_get manifest.params.humann_chocophlan)
 HUMANN_UNIREF=$(state_get manifest.params.humann_uniref)
 LAYOUT=$(state_get statistics.layout)
@@ -382,8 +385,11 @@ fi
 [[ -n "$METAPHLAN_DB" ]] \
     || fail "This run recorded no MetaPhlAn database, so its methods cannot be described."
 
-TOOLS=(kneaddata metaphlan multiqc)
-[[ "$RUN_HUMANN" == true ]] && TOOLS=(kneaddata metaphlan humann multiqc)
+TOOLS=(kneaddata metaphlan)
+[[ "$RUN_HUMANN" == true ]]    && TOOLS+=(humann)
+[[ "$RUN_MOTUS" == true ]]     && TOOLS+=(motus)
+[[ "$RUN_NONPAREIL" == true ]] && TOOLS+=(nonpareil)
+TOOLS+=(multiqc)
 
 IMAGES=()
 
@@ -496,7 +502,9 @@ TEXT+=", mapping reads with Bowtie2$CITATION"
 TEXT+=" and estimating the unclassified fraction (--unclassified_estimation)$(extra_options "$METAPHLAN_ARGS")."
 
 cite mcdonald2012
-TEXT+=" Estimated species read counts were written as BIOM tables with biom-format$CITATION."
+TEXT+=" Estimated read counts per species-level genome bin (SGB) were written as BIOM tables with"
+TEXT+=" biom-format$CITATION, together with the MetaPhlAn SGB phylogeny pruned to the SGBs detected;"
+TEXT+=" eukaryotic bins, which that phylogeny does not include, were left out of these tables."
 
 # 5. HUMAnN
 if [[ "$RUN_HUMANN" == true ]]; then
@@ -526,7 +534,26 @@ if [[ "$RUN_HUMANN" == true ]]; then
     TEXT+=" the HUMAnN utility scripts."
 fi
 
-# 6. The paragraph and the references it cites
+# 6. Diversity
+DIVERSITY=()
+
+if [[ "$RUN_MOTUS" == true ]]; then
+    cite ruscheweyh2022
+    DIVERSITY+=("$(named mOTUs "$(tool_version motus)")$CITATION")
+fi
+
+if [[ "$RUN_NONPAREIL" == true ]]; then
+    cite rodriguezr2018
+    DIVERSITY+=("$(named Nonpareil "$(tool_version nonpareil)")$CITATION")
+fi
+
+if (( ${#DIVERSITY[@]} > 0 )); then
+    TEXT+=" $(and_list "${DIVERSITY[@]}")"
+    (( ${#DIVERSITY[@]} > 1 )) && TEXT+=" were" || TEXT+=" was"
+    TEXT+=" run with default settings to quantify community diversity."
+fi
+
+# 7. The paragraph and the references it cites
 if ! jq -n --arg text "$TEXT" --slurpfile refs "$REFERENCES" '
         [$text | scan("\\[@[^\\]]*\\]") | scan("@([A-Za-z0-9_]+)") | .[0]] | unique as $ids
         | ($ids - ($refs[0].references | keys)) as $missing

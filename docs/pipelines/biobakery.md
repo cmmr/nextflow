@@ -5,10 +5,12 @@ tools, run as a Nextflow workflow that lives in this repository:
 [KneadData](https://github.com/biobakery/kneaddata) cleans the reads and removes
 the host, [MetaPhlAn](https://github.com/biobakery/MetaPhlAn) says what was in
 each sample, and [HUMAnN](https://github.com/biobakery/humann) says what those
-communities can do.
+communities can do. [mOTUs](https://github.com/motu-tool/mOTUs) and
+[Nonpareil](https://github.com/lmrodriguezr/nonpareil) beside them say how
+diverse each community is, for the Overview's diversity chart.
 
-KneadData and MetaPhlAn run on every sample; HUMAnN is a module a run can switch
-off. The workflow is built so that more optional modules can be added beside it
+KneadData and MetaPhlAn run on every sample; HUMAnN, mOTUs and Nonpareil are
+modules a run can switch off. The workflow is built so that more optional modules can be added beside it
 — [Marker-MAGu](https://github.com/cmmr/Marker-MAGu) and
 [EsViritu](https://github.com/cmmr/EsViritu) are the two planned — and so that
 the whole of it can later be packaged into one Nix image with the databases
@@ -24,9 +26,12 @@ For how a request becomes a run at all, see the [Overview](../index.md).
 | KneadData | **0.12.4** | `quay.io/biocontainers/kneaddata:0.12.4--pyhdfd78af_0`, in `modules/kneaddata.nf` |
 | MetaPhlAn | **4.1.1** | `quay.io/biocontainers/metaphlan:4.1.1--pyhdfd78af_0`, in `modules/metaphlan.nf` |
 | HUMAnN | **3.9** | `quay.io/biocontainers/humann:3.9--py312hdfd78af_0`, in `modules/humann.nf` |
+| mOTUs | **3.1.0** | `quay.io/biocontainers/motus:3.1.0--pyhdfd78af_0`, in `modules/motus.nf` |
+| Nonpareil | **3.5.5** | `quay.io/biocontainers/nonpareil:3.5.5--r43hdcf5f25_0`, in `modules/nonpareil.nf` |
 | MultiQC | **1.35** | `quay.io/biocontainers/multiqc:1.35--pyhdfd78af_1`, in `modules/multiqc.nf` |
 | MetaPhlAn database | **mpa_vJun23_CHOCOPhlAnSGB_202403** | `db/metaphlan/…`, shared with taxprofiler |
 | HUMAnN databases | **v201901_v31** / **v201901b** | `db/humann/v201901b/…`, shared with taxprofiler |
+| mOTUs database | **db_mOTU_v3.1.0** | `db/motus/db_mOTU_v3.1.0/db_mOTU`, shared with taxprofiler |
 | Host references | PhiX, T2T-CHM13v2.0 + PhiX, GRCm39 + PhiX | `db/hostremoval/…`, shared with taxprofiler |
 
 **Every image is the BioContainers build of the bioconda package.** The
@@ -43,20 +48,25 @@ forward waits on a stable HUMAnN that does. The same pin already holds for
 [taxprofiler](taxprofiler.md#versions-in-use), so both pipelines read the same
 database directory.
 
-**Nothing new has to be fetched.** The MetaPhlAn database, the HUMAnN databases
-and the host references are the ones [taxprofiler's cluster
+**mOTUs and Nonpareil are pinned to taxprofiler 2.0.1's versions.** mOTUs
+refuses a database built for any other version, so 3.1.0 is what lets both
+pipelines read `db_mOTU_v3.1.0`; see [the mOTUs
+pin](taxprofiler.md#versions-in-use). Nonpareil needs no database.
+
+**Nothing new has to be fetched.** The MetaPhlAn, HUMAnN and mOTUs databases and
+the host references are the ones [taxprofiler's cluster
 setup](taxprofiler.md#cluster-setup) installs.
 
 
 ## The pipeline
 
 One pipeline, `BIOBAKERY`, currently `BIOBAKERY_01`. Like taxprofiler it reads the
-form's "Taxprofiler --hostremoval_reference" answer — `None`, `PhiX`,
+form's "Host Removal" answer — `None`, `PhiX`,
 `Human + PhiX` or `Mouse + PhiX`, and `PhiX` when unanswered — and hands KneadData
 the matching bowtie2 index. `None` still trims; it removes nothing.
 
 [`BIOBAKERY_01.sh`](../../pipelines/BIOBAKERY_01.sh) runs
-`workflows/biobakery` with HUMAnN on:
+`workflows/biobakery` with HUMAnN, mOTUs and Nonpareil on:
 
 | Step | What | Progress page row |
 | --- | --- | --- |
@@ -71,9 +81,7 @@ everything else.
 **The workflow is not pinned by `-r`.** An nf-core pipeline is fetched at a
 commit; this one runs from `$NEXTFLOW_DIR/workflows/biobakery`, so a
 [rerun](index.md#reproducing-an-earlier-run) reuses the recorded parameters with
-whatever code is checked out. `BIOBAKERY_01.sh` should be treated as immutable
-the same way the others are, and a change to what the workflow computes deserves
-a `BIOBAKERY_02.sh`. The Nix image is what will pin the code itself.
+whatever code is checked out. The Nix image is what will pin the code itself.
 
 
 ## How the workflow is put together
@@ -83,10 +91,13 @@ workflows/biobakery/
   main.nf              samplesheet in, then each enabled module in order
   nextflow.config      parameter defaults, profiles, execution reports
   conf/base.config     per-process resources and retries
+  bin/                 helper scripts Nextflow puts on each task's PATH
 modules/
   kneaddata.nf         KNEADDATA, KNEADDATA_COUNTS
   metaphlan.nf         METAPHLAN, METAPHLAN_MERGE
   humann.nf            HUMANN_PREPARE_PROFILE, HUMANN_PROFILE, HUMANN_TABLES
+  motus.nf             MOTUS, MOTUS_MERGE
+  nonpareil.nf         NONPAREIL, NONPAREIL_CURVES
   multiqc.nf           MULTIQC
 config/biobakery/
   slurm.config         the cluster: executor, node sizes, apptainer
@@ -104,14 +115,19 @@ HUMAnN is called and how its tables are built.
 
 ### Choosing modules per run
 
-KneadData and MetaPhlAn run on every sample. HUMAnN, and every add-on, is
-switched by a parameter of its own:
+KneadData and MetaPhlAn run on every sample. HUMAnN, mOTUs, Nonpareil and every
+add-on are switched by a parameter of their own:
 
 | Parameter | Default | Needs |
 | --- | --- | --- |
 | `run_humann` | `true` | `humann_chocophlan`, `humann_uniref`, `humann_utility_mapping` |
+| `run_motus` | `true` | `motus_db` |
+| `run_nonpareil` | `true` | nothing; `nonpareil_mode` is `kmer` unless set to `alignment` |
 
-A pipeline file sets it with `params_set`, like any other parameter, so it lands
+`motus_args` and `nonpareil_args` add options to each tool, as `metaphlan_args`
+does to MetaPhlAn.
+
+A pipeline file sets each with `params_set`, like any other parameter, so it lands
 in the params file and in the manifest a rerun is rebuilt from. A form question
 could switch it just as `hostremoval_reference` chooses a reference.
 
@@ -142,7 +158,7 @@ BioContainers images (`marker-magu:0.4.0--pyhdfd78af_1`,
    `${params.outdir}/<tool>/`. Pin the container by tag, and give the per-sample
    process a `stub:` block. Both tools can filter reads themselves (`-q`, `-f`);
    leave that off when KneadData has run.
-2. **`workflows/biobakery/nextflow.config`** — `run_<tool> = false` and the
+2. **`workflows/biobakery/nextflow.config`** — `run_<tool> = true` and the
    database parameter.
 3. **`workflows/biobakery/main.nf`** — an `if (params.run_<tool>)` block after
    KneadData's, calling `database('<tool>_db')`. EsViritu's `-p` is `unpaired`
@@ -151,8 +167,8 @@ BioContainers images (`marker-magu:0.4.0--pyhdfd78af_1`,
    **`config/biobakery/slurm.config`** — its resources.
 5. **A database fetch** with a manifest, as `fetch_taxprofiler_db.sh` does, and
    an entry for it in [`config/databases.json`](../operations/databases.md).
-6. **`pipelines/BIOBAKERY_02.sh`** — `params_set run_<tool> true` and the
-   database path under `$NEXTFLOW_DB_DIR`; repoint `BIOBAKERY.sh` at it.
+6. **`pipelines/BIOBAKERY_01.sh`** — `params_set run_<tool> true` and the
+   database path under `$NEXTFLOW_DB_DIR`.
 7. **The dashboard** — rows in `templates/biobakery/outputs.conf`, a
    `dashboard_tab` in `biobakery_upload.sh`, and a sentence in
    `biobakery_methods.sh` citing the tool from `config/references.json`.
@@ -206,6 +222,13 @@ sample has no such count. It is built from the `READ COUNT` lines of every log
 rather than by `kneaddata_read_count_table`, which names each sample by its log's
 name up to the first dot and so would merge `P3.stool.T1` and `P3.stool.T2`.
 
+**KneadData logs no count after Tandem Repeats Finder.** Its `decontaminated` and
+`final` counts come from host depletion, so they take in what TRF removed as
+well, and a run with no host logs nothing after `trimmed`. For that run
+`KNEADDATA` counts the final files itself and appends them to the log as
+`final` lines in KneadData's own format, which is what keeps the retained reads
+from reading as the trimmed ones.
+
 
 ## MetaPhlAn
 
@@ -223,9 +246,10 @@ otherwise, and refuses a directory holding several with none named like it.
 
 `METAPHLAN_MERGE` joins them with `merge_metaphlan_tables.py` into
 `metaphlan/metaphlan-relab.tsv`, every clade at every rank with one column per
-sample, and `metaphlan-species-relab.tsv`, the species rows alone. The merge
-keeps only relative abundance, which is why the per-sample profiles stay
-published.
+sample, and `metaphlan-species-relab.tsv`, the species rows and the
+`UNCLASSIFIED` row alone — so each sample's column accounts for every read, and
+this is the table that says how much of a sample went unclassified. The merge
+keeps only relative abundance.
 
 **The read counts are merged by `METAPHLAN_MERGE` itself.** An awk pass over the
 same profiles takes `estimated_number_of_reads_from_the_clade` — the clade's
@@ -234,13 +258,39 @@ marker coverage multiplied by its genome length — into
 tables: whole numbers, and 0 where a sample did not report a clade. These are
 what taxprofiler publishes as `count_tables/metaphlan-reads.tsv`.
 
-Its species rows are the feature table: `metaphlan-species-reads.tsv` in classic
-tabular BIOM form, one row per species named without its `s__` prefix and its
-lineage in a `taxonomy` column, and the same converted by `biom convert` — which
-the MetaPhlAn container ships — into `metaphlan-species-reads.json.biom`
-(BIOM 1.0) and `metaphlan-species-reads.hdf5.biom` (BIOM 2.1). These are the
-tables to rarefy or hand to a count-based differential abundance method. Unlike
-ampliseq's and taxprofiler's, they carry no tree.
+Its SGB rows are the feature table, written by
+[`bin/metaphlan_sgb_biom.py`](../../workflows/biobakery/bin/metaphlan_sgb_biom.py)
+with the biom-format and DendroPy libraries the MetaPhlAn container ships:
+`metaphlan-sgb-reads.tsv` in classic tabular BIOM form, and the same table as
+`metaphlan-sgb-reads.json.biom` (BIOM 1.0) and `metaphlan-sgb-reads.hdf5.biom`
+(BIOM 2.1). One row per SGB, keyed by the bare SGB number, with its lineage from
+kingdom to `t__SGB…` as the taxonomy. A `t__SGB…_group` row is that SGB. These
+are the tables to rarefy or hand to a count-based differential abundance method.
+
+**The rows are SGBs, not species, because the tree's tips are.** MetaPhlAn 4's
+unit is the SGB, and one species name can cover several of them — so a
+species-level table has no tip to put each row on. Collapsing on the species
+rank of the taxonomy gives the species table back.
+
+**The tree is MetaPhlAn's own SGB phylogeny**, the same file taxprofiler reads
+(see [The MetaPhlAn phylogeny](taxprofiler.md#the-metaphlan-phylogeny)).
+MetaPhlAn ships it inside its package as `utils/<database>.nwk`, and the copy in
+the 4.1.1 container has the same md5 as the one `fetch_taxprofiler_db.sh`
+verifies, so the workflow reads it from there by the database named in the
+profiles and needs no parameter for it. It is pruned to the SGBs in the table,
+keeping branch lengths — checked against `ape::keep.tip` — and goes into the
+BIOM 2.1 file at `observation/group-metadata/phylogeny` and into the BIOM 1.0
+file as the top-level `phylogeny` string rbiom reads, and is published on its own
+as `metaphlan/metaphlan-tree.newick`. rbiom would prune the full tree itself on
+reading, but QIIME 2 and phyloseq would not, and the standalone file wants to be
+this run's tree.
+
+Every row of a table carrying a tree has to be a tip on it, so **SGBs the
+phylogeny lacks are left out of the BIOM tables** — the eukaryotic `t__EUK…`
+bins, which it does not include — and listed in the task's log.
+`metaphlan-reads.tsv` keeps them. A database MetaPhlAn ships no tree for, or a
+run with fewer than two SGBs on it, gets its tables without a tree and without
+`metaphlan-tree.newick`.
 
 
 ## HUMAnN
@@ -255,6 +305,53 @@ doing and what each of the eighteen tables means. Two differences:
   `rel_ab_w_read_stats` is coverage.
 - **It reads KneadData's reads directly**, so nothing has to be published for it
   and deleted afterwards.
+
+
+## Diversity
+
+The Overview's diversity chart is the same one taxprofiler draws, from the same
+two tools; see [Diversity and coverage](taxprofiler.md#diversity-and-coverage)
+for what each reading means and why neither is Shannon or Simpson over the
+MetaPhlAn profile. Both run by default; `run_motus` and `run_nonpareil` switch them off.
+
+**mOTUs** runs once per sample over every cleaned file — mates as `-f` and `-r`,
+orphans as `-s` — with `-c -p`, the same scaled insert counts and NCBI ids
+taxprofiler asks for. `MOTUS_MERGE` joins the profiles with `motus merge` into
+`motus/motus-counts.tsv`. The richness the chart plots is the clusters in a
+sample's profile with a non-zero count, less `unassigned`. Its logs go to
+MultiQC, which has a mOTUs section.
+
+**Nonpareil** runs once per sample in k-mer mode over the first mate of each
+pair, or over a single-end sample's reads, and `NONPAREIL_CURVES` fits every
+curve with `NonpareilCurves.R` into `nonpareil/nonpareil-curves.tsv`, a JSON copy
+that MultiQC plots, and a PDF of them all. Where it runs differs from
+taxprofiler's in two ways worth knowing before comparing the two:
+
+- **It runs after host removal**, on KneadData's final reads, so coverage and Nd
+  describe what is left of the sample once the host is gone. taxprofiler runs it
+  before host removal.
+- **It runs per sample**, on the runs KneadData already concatenated, so there is
+  one curve per sample rather than one per run.
+
+It still reads one mate only, so `effort_gbp` is about half of what was
+sequenced. Nonpareil's k-mer mode refuses reads shorter than 24 bp; KneadData's
+Trimmomatic step drops reads shorter than 60 bp before anything else, and then
+reads shorter than half the read length, which clears it for reads of
+48 bp or longer.
+
+**A sample Nonpareil cannot measure does not fail the run.** `NONPAREIL` is
+retried three times and then ignored, and `NONPAREIL_CURVES` is ignored when it
+fails; the samples it did measure are plotted and the rest are `NA`. mOTUs is
+retried like MetaPhlAn.
+
+[`biobakery_composition.sh`](../../scripts/biobakery_composition.sh) writes both
+into `alpha_diversity.tsv` in the results root, one row per sample: `reads` (the
+reads MetaPhlAn processed), `nonpareil_diversity`, `coverage_pct`,
+`redundancy_pct`, `model_fit`, `effort_gbp`, `effort_95_gbp` and
+`observed_motus`. The chart offers estimated coverage, Nonpareil diversity,
+observed mOTUs, effort for 95% coverage and read depth, in that order, and only
+the ones the run produced. A run with neither tool keeps the composition chart
+alone.
 
 
 ## The dashboard
@@ -276,29 +373,37 @@ plus a fourth, Methods. The navigation bar reads:
   sample's profile at phylum through species, keeps the eleven most abundant taxa
   of each rank and sums the rest into "Other". Shares are of every read MetaPhlAn
   processed, so a column falls short of the top by that sample's unclassified
-  share, as on a taxprofiler run. There is no diversity chart.
+  share, as on a taxprofiler run. The diversity chart beside it is Nonpareil's
+  and mOTUs'; see [Diversity](#diversity).
 - **Read totals** in the sidebar are KneadData's: total reads, and behind
   "details" what was left after trimming and after host depletion, each linking
   to the KneadData table in the QC Report; then the reads retained, and
-  the smallest, median and largest sample.
-- **The Feature Table card** has a MetaPhlAn tab (the species read counts as
-  plain text, JSON and HDF5 BIOM, and the share of reads mapped to a known
-  clade) and a HUMAnN tab (the pathway, gene family and EC tables in reads per
-  kilobase, as plain text, and the share of reads aligned, headed with the
-  ChocoPhlAn and UniRef90 versions `biobakery_composition.sh` reads off the file
-  names in the directories the manifest records). Everything else is
-  in Deliverables. A module a run did not enable leaves its tab off.
+  the smallest, median and largest sample. Each is the reads remaining after
+  that step. Tandem Repeats Finder has no bar of its own, since KneadData logs no
+  count for it: what it removed shows in "After host depletion", or in
+  "Retained reads" for a run with no host.
+- **The Feature Table card** has a MetaPhlAn tab (the SGB read counts as
+  plain text, JSON and HDF5 BIOM) and a HUMAnN tab (the pathway, gene family and
+  EC tables in reads per kilobase, as plain text). Under the downloads, each has
+  one bar, "Mapped reads", read as `19% · 764k / 4M`: the reads MetaPhlAn mapped
+  to a known clade, or HUMAnN aligned, out of the reads KneadData retained. The
+  database is named under the bar — the MetaPhlAn release, or the ChocoPhlAn and
+  UniRef90 versions `biobakery_composition.sh` reads off the file names in the
+  directories the manifest records. Everything else is in Deliverables. A
+  module a run did not enable leaves its tab off.
 - **The QC Report is MultiQC**, over KneadData's FastQC reports and its
-  read count table as a section of its own. It is the only report the run adds;
+  read count table as a section of its own, and mOTUs' logs and Nonpareil's
+  curves on a run with either. It is the only report the run adds;
   there is no Krona chart. `MULTIQC` ignores its own failure, so a run is never
   lost to it.
 
 [`templates/biobakery/outputs.conf`](../../templates/biobakery/outputs.conf) is
 the file index, and [`prune.conf`](../../templates/biobakery/prune.conf) deletes
-the FastQC zips, MultiQC's re-encodings of its own report, MetaPhlAn's per-sample
-profiles, and KneadData's and HUMAnN's per-sample logs before anything is
-published. The profiles are read for the Overview first, by
-`biobakery_composition.sh`. The index ends with a tree of the folders the
+the FastQC zips, MultiQC's re-encodings of its own report and its copy of the
+Nonpareil curves, MetaPhlAn's and mOTUs' per-sample profiles, and KneadData's
+and HUMAnN's per-sample logs before anything is published, and takes the rows no
+sample has out of `motus-counts.tsv`. The profiles are read for the Overview
+first, by `biobakery_composition.sh`. The index ends with a tree of the folders the
 download unpacks into.
 
 ### The Methods page
@@ -346,6 +451,9 @@ given rather than from what the pipeline usually does:
 - **Options** the run added through `kneaddata_args` or `metaphlan_args` are
   written in, and HUMAnN's sentences are left out of a run with `run_humann`
   off.
+- **mOTUs and Nonpareil** get one sentence between them, with their versions
+  and citations, saying they were run with default settings to quantify
+  community diversity. A tool the run did not enable is left out of it.
 
 Citations are written `[@id]` against
 [`config/references.json`](../../config/references.json), and a tool named a
@@ -408,16 +516,17 @@ plus a run directory mounted where `wrike_job.sh` is started.
 
 The workflow runs anywhere Docker does. The `local` profile caps each task at
 the machine's cores and 16 GB; pass a config lowering `process.resourceLimits`
-further on a smaller machine. `-stub` replaces KneadData, MetaPhlAn, HUMAnN's two heavy steps and
-MultiQC with placeholders and runs everything between them for real, which checks
-how the modules are wired together without a database:
+further on a smaller machine. `-stub` replaces KneadData, MetaPhlAn, HUMAnN's
+two heavy steps, mOTUs, Nonpareil and MultiQC with placeholders and runs
+everything between them for real, which checks how the modules are wired
+together without a database:
 
 ```bash
-nextflow run workflows/biobakery -stub -profile docker,local --input samplesheet.csv --outdir results --kneaddata_db db/host --metaphlan_db db/metaphlan --humann_chocophlan db/chocophlan --humann_uniref db/uniref90 --humann_utility_mapping db/utility_mapping
+nextflow run workflows/biobakery -stub -profile docker,local --input samplesheet.csv --outdir results --kneaddata_db db/host --metaphlan_db db/metaphlan --humann_chocophlan db/chocophlan --humann_uniref db/uniref90 --humann_utility_mapping db/utility_mapping --motus_db db/motus
 ```
 
 The databases only have to exist for a stub run; add `--run_humann false` to leave
-HUMAnN out.
+HUMAnN out, and `--run_motus false` or `--run_nonpareil false` for either of those.
 
 The samplesheet is the CSV `biobakery_samplesheet.sh` writes:
 `sample,run_accession,instrument_platform,fastq_1,fastq_2`.
@@ -428,15 +537,19 @@ The samplesheet is the CSV `biobakery_samplesheet.sh` writes:
 [`conf/base.config`](../../workflows/biobakery/conf/base.config) sets a
 reservation and a retry policy per process;
 [`config/biobakery/slurm.config`](../../config/biobakery/slurm.config) resizes the
-two that depend on the node — KneadData at 16 cpus and 32 GB, MetaPhlAn at 16
-cpus and 48 GB, the same as taxprofiler's `METAPHLAN_METAPHLAN` — and caps
-everything at the node's size.
+ones that depend on the node — KneadData at 16 cpus and 32 GB, MetaPhlAn at 16
+cpus and 48 GB, mOTUs at 16 cpus and 32 GB and Nonpareil at 8 cpus and 64 GB, the
+same as taxprofiler's `METAPHLAN_METAPHLAN`, `MOTUS_PROFILE` and
+`NONPAREIL_NONPAREIL` — and caps everything at the node's size. Nonpareil is
+handed its memory as `-R` and fills it with its k-mer table.
 
-- **KneadData and MetaPhlAn retry twice**, with more memory and time each time,
-  then let running tasks finish and stop. Both read the requester's reads or a
-  database over the shared filesystem.
+- **KneadData, MetaPhlAn and mOTUs retry twice**, with more memory and time each
+  time, then let running tasks finish and stop. All three read the requester's
+  reads or a database over the shared filesystem.
 - **HUMAnN** keeps taxprofiler's policy: a sample is retried once with twice the
   memory and time, then left out of the tables.
+- **Nonpareil** is retried three times and then left out of the diversity table,
+  and its summary is ignored when it fails.
 - **MultiQC** is ignored when it fails.
 
 KneadData decompresses a sample's reads onto the node's scratch before it starts
@@ -453,5 +566,5 @@ matches:
 
 1. Add `biobakery :: WGS taxonomic and functional profiling (KneadData, MetaPhlAn, HUMAnN)`
    to the "Nextflow Pipeline" field.
-2. Show the "Taxprofiler --hostremoval_reference" follow-up question for it as
+2. Show the "Host Removal" follow-up question for it as
    well. Unanswered, the pipeline depletes PhiX alone.

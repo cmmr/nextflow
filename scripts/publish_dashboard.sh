@@ -456,7 +456,11 @@ dashboard_tab_end() {
     fi
 
     if [[ -n "$DASHBOARD_STATS" ]]; then
-        body+="<div class=\"flex flex-col gap-5 px-2${DASHBOARD_DOWNLOADS:+ mt-4}\">$DASHBOARD_STATS</div>"
+        #    A block with no heading starts closer under the downloads
+        local gap="mt-4"
+        [[ "$DASHBOARD_STATS" == "<div><h4"* ]] || gap="mt-3"
+
+        body+="<div class=\"flex flex-col gap-5 px-2${DASHBOARD_DOWNLOADS:+ $gap}\">$DASHBOARD_STATS</div>"
     fi
 
     if [[ -n "$body" ]]; then
@@ -523,6 +527,22 @@ dashboard_zip_button() {
     printf '</a>'
 }
 
+# Text as HTML, with every count human_count shortened written as a span whose
+# tooltip is the exact figure: 4.4M over "4,404,860"
+dashboard_count_html() {
+    local text out="" pattern=$'\034([0-9]+)\035([^\036]*)\036'
+
+    text=$(escape_html "$1")
+
+    while [[ "$text" =~ $pattern ]]; do
+        out+="${text%%"${BASH_REMATCH[0]}"*}"
+        out+="<span title=\"$(group_count "${BASH_REMATCH[1]}")\">${BASH_REMATCH[2]}</span>"
+        text=${text#*"${BASH_REMATCH[0]}"}
+    done
+
+    printf '%s' "$out$text"
+}
+
 # Close whichever block of the statistics is open, so the next heading starts
 # its own
 dashboard_end_stat_group() {
@@ -535,11 +555,17 @@ dashboard_end_stat_group() {
 # One block of the sidebar. The note is the run's own setting for what the
 # block reports - the region and instrument over the read totals, the reference
 # database over the classification - so a number is read beside what produced
-# it.
+# it. With neither a heading nor a note, the block opens with no heading line.
 dashboard_stat_group() {
-    local heading="$1" note="${2:-}"
+    local heading="${1:-}" note="${2:-}"
 
     dashboard_end_stat_group
+
+    if [[ -z "$heading$note" ]]; then
+        DASHBOARD_STATS+="<div>"
+        DASHBOARD_STAT_GROUP_OPEN=1
+        return 0
+    fi
 
     DASHBOARD_STATS+="<div><h4 class=\"flex items-baseline justify-between gap-2 font-label-caps text-label-caps text-on-surface-variant mb-2.5\">"
     DASHBOARD_STATS+="<span class=\"shrink-0\">$(escape_html "$heading")</span>"
@@ -588,7 +614,7 @@ dashboard_tiles() {
         esac
 
         DASHBOARD_STATS+="<div class=\"$box\"><span class=\"$value_class $tone\">"
-        DASHBOARD_STATS+="$(escape_html "$value")</span>"
+        DASHBOARD_STATS+="$(dashboard_count_html "$value")</span>"
         DASHBOARD_STATS+="<span class=\"$label_class\">$(escape_html "$label")</span></div>"
     done
 
@@ -632,8 +658,11 @@ dashboard_bar_fill() {
 # Naming a group of detail bars puts a "details" link beside the label, which
 # shows and hides them. The link is written hidden and the page's script reveals
 # it, so a reader without scripting is not offered a control that does nothing.
+#
+# A note is written small under the bar - the database a reading was taken
+# against - and an explanation of what it counts behind an icon beside the label.
 dashboard_stat_bar() {
-    local label="$1" reading="$2" percent="$3" tone="${4:-}" details="${5:-}"
+    local label="$1" reading="$2" percent="$3" tone="${4:-}" details="${5:-}" note="${6:-}" info="${7:-}"
 
     case "$tone" in
         growth)    tone="bg-bio-growth" ;;
@@ -645,6 +674,15 @@ dashboard_stat_bar() {
     DASHBOARD_STATS+="<div class=\"mb-2.5 last:mb-0\"><div class=\"flex justify-between items-baseline gap-2 mb-1\">"
     DASHBOARD_STATS+="<span class=\"font-body-sm text-body-sm font-medium text-on-surface\">$(escape_html "$label")"
 
+    #    An explanation of what the reading counts, as a small icon beside the
+    #    label whose tooltip carries it
+    if [[ -n "$info" ]]; then
+        DASHBOARD_STATS+="<span class=\"material-symbols-outlined ml-0.5 align-[-2px] text-[13px] leading-none"
+        DASHBOARD_STATS+=" text-outline/70 hover:text-on-surface-variant cursor-help select-none\""
+        DASHBOARD_STATS+=" title=\"$(escape_html "$info")\" aria-label=\"$(escape_html "$info")\""
+        DASHBOARD_STATS+=" role=\"img\">info</span>"
+    fi
+
     if [[ -n "$details" ]]; then
         DASHBOARD_STATS+="<button type=\"button\" data-stat-details=\"$(escape_html "$details")\""
         DASHBOARD_STATS+=" aria-expanded=\"false\" style=\"display: none\""
@@ -653,9 +691,16 @@ dashboard_stat_bar() {
     fi
 
     DASHBOARD_STATS+="</span>"
-    DASHBOARD_STATS+="<span class=\"font-code-sm text-code-sm text-on-surface-variant\">$(escape_html "$reading")</span></div>"
+    DASHBOARD_STATS+="<span class=\"font-code-sm text-code-sm text-on-surface-variant\">$(dashboard_count_html "$reading")</span></div>"
     DASHBOARD_STATS+="<div class=\"h-1.5 w-full bg-surface-variant rounded-full overflow-hidden\">"
-    DASHBOARD_STATS+="<div class=\"h-full $tone rounded-full\" style=\"width: $percent%;\"></div></div></div>"
+    DASHBOARD_STATS+="<div class=\"h-full $tone rounded-full\" style=\"width: $percent%;\"></div></div>"
+
+    if [[ -n "$note" ]]; then
+        DASHBOARD_STATS+="<div class=\"mt-1 truncate font-body-sm text-[11px] leading-4 text-outline\""
+        DASHBOARD_STATS+=" title=\"$(escape_html "$note")\">$(escape_html "$note")</div>"
+    fi
+
+    DASHBOARD_STATS+="</div>"
 
     return 0
 }
@@ -692,7 +737,7 @@ dashboard_stat_detail() {
     DASHBOARD_STATS+="<div class=\"flex justify-between items-baseline gap-2 mb-1\">"
     DASHBOARD_STATS+="$open$(escape_html "$label")$close"
     DASHBOARD_STATS+="<span class=\"font-code-sm text-code-sm text-outline shrink-0\">"
-    DASHBOARD_STATS+="$(escape_html "$reading")</span></div>"
+    DASHBOARD_STATS+="$(dashboard_count_html "$reading")</span></div>"
     DASHBOARD_STATS+="<div class=\"h-1 w-full bg-surface-variant rounded-full overflow-hidden\">"
     DASHBOARD_STATS+="<div class=\"h-full bg-primary-container/60 rounded-full\" style=\"width: $percent%;\"></div>"
     DASHBOARD_STATS+="</div></div>"
@@ -739,6 +784,18 @@ dashboard_stat_share() {
 
     dashboard_stat_bar "$label" "$reading% · $(human_count "$count")" "$percent" \
         "$tone" "$details"
+}
+
+# The same reading with the total written beside the count - "19% · 764k / 4.0M" -
+# a note under the bar, and an explanation behind an icon beside the label
+dashboard_stat_share_of() {
+    local label="$1" count="$2" total="$3" note="${4:-}" info="${5:-}"
+    local percent reading
+
+    read -r percent reading < <(dashboard_share_reading "$count" "$total") || return 0
+
+    dashboard_stat_bar "$label" "$reading% · $(human_count "$count") / $(human_count "$total")" \
+        "$percent" growth "" "$note" "$info"
 }
 
 # The same reading as one of the steps behind a bar's "details" link

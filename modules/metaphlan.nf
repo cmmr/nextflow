@@ -75,9 +75,11 @@ process METAPHLAN {
 }
 
 // The per-sample profiles as one table of relative abundances and one of
-// estimated read counts, sample by column, and each restricted to species rows.
-// The species read counts are also written as JSON (BIOM 1.0) and HDF5 (BIOM
-// 2.1) tables.
+// estimated read counts, sample by column, and the relative abundances again
+// restricted to species rows and UNCLASSIFIED. The SGB read counts are written
+// as classic tabular, JSON (BIOM 1.0) and HDF5 (BIOM 2.1) tables carrying the
+// SGB phylogeny MetaPhlAn ships, pruned to those SGBs and also written on its
+// own, by bin/metaphlan_sgb_biom.py.
 process METAPHLAN_MERGE {
     container 'quay.io/biocontainers/metaphlan:4.1.1--pyhdfd78af_0'
 
@@ -90,7 +92,8 @@ process METAPHLAN_MERGE {
     path 'metaphlan-relab.tsv'        , emit: merged
     path 'metaphlan-species-relab.tsv', emit: species
     path 'metaphlan-reads.tsv'        , emit: reads
-    path 'metaphlan-species-reads.*'  , emit: species_reads
+    path 'metaphlan-sgb-reads.*'      , emit: sgb_reads
+    path 'metaphlan-tree.newick'      , emit: tree, optional: true
 
     script:
     """
@@ -137,33 +140,9 @@ process METAPHLAN_MERGE {
         }
     ' named/*.txt > metaphlan-reads.tsv
 
-    awk -F'\\t' 'NR <= 2 || (\$1 ~ /\\|s__/ && \$1 !~ /\\|t__/)' metaphlan-relab.tsv \\
+    awk -F'\\t' 'NR <= 2 || \$1 == "UNCLASSIFIED" || (\$1 ~ /\\|s__/ && \$1 !~ /\\|t__/)' metaphlan-relab.tsv \\
         > metaphlan-species-relab.tsv
 
-    # The species read counts as a BIOM table in classic tabular form: one row per
-    # species, named without its s__ prefix, with its lineage as the taxonomy
-    awk -F'\\t' -v OFS='\\t' '
-        NR == 1 { next }
-
-        NR == 2 {
-            \$1 = "#OTU ID"
-            print "# Constructed from biom file"
-            print \$0, "taxonomy"
-            next
-        }
-
-        \$1 ~ /\\|s__/ && \$1 !~ /\\|t__/ {
-            taxonomy = \$1
-            gsub(/\\|/, "; ", taxonomy)
-            sub(/.*\\|s__/, "", \$1)
-            print \$0, taxonomy
-        }
-    ' metaphlan-reads.tsv > metaphlan-species-reads.tsv
-
-    biom convert -i metaphlan-species-reads.tsv -o metaphlan-species-reads.json.biom \\
-        --to-json --table-type "Taxon table" --process-obs-metadata taxonomy
-
-    biom convert -i metaphlan-species-reads.tsv -o metaphlan-species-reads.hdf5.biom \\
-        --to-hdf5 --table-type "Taxon table" --process-obs-metadata taxonomy
+    metaphlan_sgb_biom.py metaphlan-reads.tsv metaphlan-sgb-reads metaphlan-tree.newick
     """
 }

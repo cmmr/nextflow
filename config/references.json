@@ -239,6 +239,18 @@
       "pages": "D590–D596",
       "doi": "10.1093/nar/gks1219"
     },
+    "rodriguezr2018": {
+      "type": "article",
+      "author": ["Rodriguez-R, LM", "Gunturu, S", "Tiedje, JM", "Cole, JR", "Konstantinidis, KT"],
+      "title": "Nonpareil 3: fast estimation of metagenomic coverage and sequence diversity",
+      "journal": "mSystems",
+      "journal_abbrev": "mSystems",
+      "year": 2018,
+      "volume": "3",
+      "number": "3",
+      "pages": "e00039-18",
+      "doi": "10.1128/mSystems.00039-18"
+    },
     "ruscheweyh2022": {
       "type": "article",
       "author": ["Ruscheweyh, HJ", "Milanese, A", "Paoli, L"],

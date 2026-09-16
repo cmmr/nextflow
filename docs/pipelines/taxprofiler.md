@@ -1116,7 +1116,7 @@ look for.
 ### 9. Register the pipeline in Wrike
 
 `taxprofiler` is one of the "Nextflow Pipeline" options on the "Bioinformatics
-Pipeline" request form, and picking it asks the "Taxprofiler --hostremoval_reference" follow-up
+Pipeline" request form, and picking it asks the "Host Removal" follow-up
 question. Both are [set up on the Wrike side](../wrike/account.md#the-request-forms-questions);
 nothing runs until they are, since the form is where a requester picks a pipeline
 and `wrike_task_handler.sh` matches what they picked against `pipelines/`.
@@ -1125,7 +1125,7 @@ and `wrike_task_handler.sh` matches what they picked against `pipelines/`.
 
 One more reference build, plus one `case` arm in
 [`TAXPROFILER_01.sh`](../../pipelines/TAXPROFILER_01.sh) and one more option on the
-"Taxprofiler --hostremoval_reference" field. Neither touches a reference already
+"Host Removal" field. Neither touches a reference already
 in place, and runs
 that chose a different host reproduce unchanged — their manifests name the
 reference by path, not by the answer that selected it.

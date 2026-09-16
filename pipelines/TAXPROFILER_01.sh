@@ -101,7 +101,7 @@ params_set taxpasta_add_idlineage           true
 params_set perform_shortread_redundancyestimation true
 params_set shortread_redundancyestimation_mode    "kmer"
 
-# "Taxprofiler --hostremoval_reference" answers "None", "PhiX", "Human + PhiX"
+# "Host Removal" answers "None", "PhiX", "Human + PhiX"
 # and "Mouse + PhiX", so the first word names the host and the rest is the PhiX
 # every depleting answer includes. PhiX when unanswered.
 TAXPROFILER_HOST=$(form_answer hostremoval_reference)

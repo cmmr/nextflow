@@ -43,7 +43,7 @@ Every question is listed in `WRIKE_FORM_ANSWERS` in
 | `kraken2_ref_taxonomy` | Ampliseq --kraken2_ref_taxonomy | silva=138, rdp=18, greengenes=13.5, standard=20240904 |
 | `picrust` | Ampliseq --picrust | No, Yes |
 | `exclude_taxa` | Ampliseq --exclude_taxa | mitochondria, chloroplast, Francisella |
-| `hostremoval_reference` | Taxprofiler --hostremoval_reference | None, PhiX, Human + PhiX, Mouse + PhiX |
+| `hostremoval_reference` | Host Removal | None, PhiX, Human + PhiX, Mouse + PhiX |
 
 **Every key but the first three names the nextflow parameter its field is titled
 after**, so a pipeline applies one by asking for its own parameter name — see

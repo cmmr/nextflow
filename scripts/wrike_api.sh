@@ -80,7 +80,7 @@ WRIKE_FORM_ANSWERS=(
     "kraken2_ref_taxonomy|Ampliseq --kraken2_ref_taxonomy|IEAAIKU5JUANE5VD|silva=138,rdp=18,greengenes=13.5,standard=20240904"
     "picrust|Ampliseq --picrust|IEAAIKU5JUANE5VL|No,Yes"
     "exclude_taxa|Ampliseq --exclude_taxa|IEAAIKU5JUANE5VR|mitochondria,chloroplast,Francisella"
-    "hostremoval_reference|Taxprofiler --hostremoval_reference|IEAAIKU5JUANE5WC|None,PhiX,Human + PhiX,Mouse + PhiX"
+    "hostremoval_reference|Host Removal|IEAAIKU5JUANE5WC|None,PhiX,Human + PhiX,Mouse + PhiX"
 )
 
 # The "Nextflow Pipeline" answer that names no pipeline: it asks for an earlier

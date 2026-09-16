@@ -1,7 +1,8 @@
-// bioBakery shotgun metagenomics: KneadData, then MetaPhlAn, then HUMAnN.
+// bioBakery shotgun metagenomics: KneadData, then MetaPhlAn, then HUMAnN, with
+// mOTUs and Nonpareil beside them for diversity.
 //
-// KneadData and MetaPhlAn run on every sample. HUMAnN, and any add-on module,
-// runs behind a run_<tool> parameter of its own. Modules are in modules/ and
+// KneadData and MetaPhlAn run on every sample. HUMAnN, mOTUs, Nonpareil and any
+// add-on module run behind a run_<tool> parameter of their own. Modules are in modules/ and
 // read two channels: ch_reads, KneadData's cleaned reads as [meta, reads], and
 // ch_profiles, MetaPhlAn's profile per sample as [meta, profile]. An add-on
 // publishes under <outdir>/<tool>/.
@@ -14,6 +15,8 @@ nextflow.enable.dsl = 2
 include { KNEADDATA; KNEADDATA_COUNTS }                           from '../../modules/kneaddata.nf'
 include { METAPHLAN; METAPHLAN_MERGE }                            from '../../modules/metaphlan.nf'
 include { HUMANN_PREPARE_PROFILE; HUMANN_PROFILE; HUMANN_TABLES } from '../../modules/humann.nf'
+include { MOTUS; MOTUS_MERGE }                                    from '../../modules/motus.nf'
+include { NONPAREIL; NONPAREIL_CURVES }                           from '../../modules/nonpareil.nf'
 include { MULTIQC }                                               from '../../modules/multiqc.nf'
 
 // A database parameter as a path, failing the run before any task starts when
@@ -80,6 +83,24 @@ workflow {
 
     ch_profiles = METAPHLAN.out.profile
 
+    ch_multiqc = KNEADDATA.out.fastqc.mix(KNEADDATA_COUNTS.out.multiqc)
+
+    if (params.run_motus) {
+        def motus_db = database('motus_db')
+
+        MOTUS(ch_reads, motus_db)
+        MOTUS_MERGE(MOTUS.out.profile.map { meta, profile -> profile }.collect(), motus_db)
+
+        ch_multiqc = ch_multiqc.mix(MOTUS.out.log)
+    }
+
+    if (params.run_nonpareil) {
+        NONPAREIL(ch_reads)
+        NONPAREIL_CURVES(NONPAREIL.out.npo.map { meta, npo -> npo }.collect())
+
+        ch_multiqc = ch_multiqc.mix(NONPAREIL_CURVES.out.json)
+    }
+
     if (params.run_humann) {
         HUMANN_PREPARE_PROFILE(ch_profiles.map { meta, profile -> [ meta.id, profile ] })
 
@@ -100,5 +121,5 @@ workflow {
         )
     }
 
-    MULTIQC(KNEADDATA.out.fastqc.mix(KNEADDATA_COUNTS.out.multiqc).flatten().collect())
+    MULTIQC(ch_multiqc.flatten().collect())
 }

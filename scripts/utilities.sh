@@ -104,18 +104,37 @@ human_size() {
     }'
 }
 
-# A count, in the units a sidebar has room for: 16600 -> 17k, 2400000 -> 2M.
-# Rounded to the unit rather than given a decimal, so a column of them lines
-# up. Anything under a thousand is written out in full.
+# A count, in the units a sidebar has room for, to at least two significant
+# digits: 16600 -> 17k, 4404860 -> 4.4M, 999960 -> 1.0M. Anything under a
+# thousand is written out in full.
+#
+# A shortened count carries its exact figure with it, as
+# \034<count>\035<shortened>\036, which dashboard_count_html turns into the
+# shortened count with the exact one in a tooltip.
 human_count() {
     local count="$1"
 
     LC_ALL=C awk -v n="$count" 'BEGIN {
         split("k M G", unit, " ")
         if (n < 1000) { printf "%d", n; exit }
+
+        exact = sprintf("%d", n)
         i = 0
         while (n >= 1000 && i < 3) { n /= 1000; i++ }
-        printf "%d%s", n + 0.5, unit[i]
+
+        if (n < 9.95) {
+            text = sprintf("%.1f", n)
+        } else {
+            text = sprintf("%d", n + 0.5)
+
+            if (text + 0 >= 1000 && i < 3) {
+                n /= 1000
+                i++
+                text = sprintf("%.1f", n)
+            }
+        }
+
+        printf "\034%s\035%s%s\036", exact, text, unit[i]
     }'
 }
 

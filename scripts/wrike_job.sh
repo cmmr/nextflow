@@ -308,9 +308,105 @@ if [[ ${#NEXTFLOW_ARGS[@]} -eq 0 ]]; then
     fail "Pipeline $PIPELINE_UPPER did not define NEXTFLOW_ARGS."
 fi
 
+# A JSON value as it was printed, or null when nothing valid was, so one record
+# that cannot be read does not cost the manifest the rest
+json_or_null() {
+    local value="$1"
+
+    if [[ -n "$value" ]] && jq -e . > /dev/null 2>&1 <<< "$value"; then
+        printf '%s' "$value"
+    else
+        printf 'null'
+    fi
+}
+
+# The code this run executed: the commit NEXTFLOW_DIR is checked out at, the
+# repository it was cloned from with any credentials in the address removed, and
+# the names of tracked files changed since that commit. Names only - .env is
+# tracked. Nothing outside a git checkout.
+code_json() {
+    local -a git=(git -c "safe.directory=$NEXTFLOW_DIR" -C "$NEXTFLOW_DIR")
+    local commit repository changed
+
+    commit=$("${git[@]}" rev-parse HEAD 2>/dev/null) || return 0
+    repository=$("${git[@]}" remote get-url origin 2>/dev/null | sed -E 's#://[^/@]*@#://#') || true
+    changed=$("${git[@]}" status --porcelain --untracked-files=no 2>/dev/null | cut -c4-) || true
+
+    jq -n --arg commit "$commit" --arg repository "$repository" --arg changed "$changed" \
+        '{commit: $commit, repository: $repository,
+          uncommitted_changes: ($changed | split("\n") | map(select(length > 0)))}'
+}
+
+# The software outside the containers that ran it: nextflow, the JVM under it,
+# and the apptainer that ran every container. The containers themselves are
+# pinned by tag in the modules, which the commit above records.
+software_json() {
+    local nextflow="" java="" apptainer=""
+
+    nextflow=$("$NEXTFLOW_DIR/bin/nextflow" -v 2>/dev/null | sed -n 's/^nextflow version //p') || true
+
+    if command -v java > /dev/null; then
+        java=$(java -version 2>&1 | head -n 1) || true
+    fi
+
+    if command -v apptainer > /dev/null; then
+        apptainer=$(apptainer --version 2>/dev/null) || true
+    fi
+
+    jq -n --arg nextflow "$nextflow" --arg java "$java" --arg apptainer "$apptainer" \
+        '{nextflow: $nextflow, java: $java, apptainer: $apptainer}'
+}
+
+# Every reference database the run was pointed at: each parameter, and each field
+# of a file in this directory a parameter names, that is a path under
+# NEXTFLOW_DB_DIR. Each carries the provenance fetch_taxprofiler_db.sh or a
+# build_*_reference.sh script wrote for it - <release>.manifest.json beside the
+# release, so the nearest one up the path - copied in whole, since the databases
+# directory will not outlast this record. Its file count and size are as they
+# stood when the run started.
+databases_json() {
+    local root="${NEXTFLOW_DB_DIR%/}" value path dir manifest files bytes
+
+    [[ -n "$root" ]] || return 0
+
+    {
+        while IFS= read -r value; do
+            if [[ "$value" == "$root"/* ]]; then
+                printf '%s\n' "$value"
+            elif [[ "$value" != */* && -f "$value" ]]; then
+                grep -o "$root/[^,;\"'[:space:]]*" "$value" || true
+            fi
+        done < <(params_json | jq -r '.[] | strings')
+    } | sed 's#/*$##' | sort -u | while IFS= read -r path; do
+        [[ -e "$path" ]] || continue
+
+        manifest="null"
+        dir="$path"
+
+        while [[ "$dir" == "$root"/* ]]; do
+            if [[ -f "$dir.manifest.json" ]]; then
+                manifest=$(json_or_null "$(cat "$dir.manifest.json")")
+                break
+            fi
+
+            dir=${dir%/*}
+        done
+
+        read -r files bytes < <(find -L "$path" -type f -printf '%s\n' 2>/dev/null \
+            | awk '{ n++; b += $1 } END { printf "%d %.0f\n", n, b }')
+
+        jq -n --arg path "$path" --arg resolved "$(readlink -f "$path")" \
+            --argjson files "${files:-0}" --argjson bytes "${bytes:-0}" \
+            --argjson manifest "$manifest" \
+            '{path: $path, resolved: $resolved, files: $files, bytes: $bytes,
+              manifest: $manifest}'
+    done | jq -s '.'
+}
+
 # Everything needed to run this again: the pipeline version, its command line,
-# and every parameter as resolved. wrike_task_handler.sh reads this back off S3
-# when a later request asks to reproduce this run.
+# every parameter as resolved, the commit and software that ran them, and the
+# provenance of each database they read. wrike_task_handler.sh reads this back
+# off S3 when a later request asks to reproduce this run.
 #
 # The sample count rides along because the published copy outlives the run
 # directory: wrike_expiration.sh reads it for the page it leaves where an
@@ -330,9 +426,13 @@ if ! MANIFEST=$(jq -n \
         --argjson nextflow_args "$(printf '%s\n' "${NEXTFLOW_ARGS[@]}" \
             | jq -R -s 'split("\n") | map(select(length > 0))')" \
         --argjson params "$(params_json)" \
+        --argjson code "$(json_or_null "$(code_json)")" \
+        --argjson software "$(json_or_null "$(software_json)")" \
+        --argjson databases "$(json_or_null "$(databases_json)")" \
         '{schema: $schema, run_id: $run_id, wrike_task_id: $wrike_task_id,
           recorded_utc: $recorded_utc, pipeline: $pipeline, pipeline_name: $pipeline_name,
-          params_file: $params_file, nextflow_args: $nextflow_args, params: $params}
+          params_file: $params_file, nextflow_args: $nextflow_args, params: $params,
+          code: $code, software: $software, databases: $databases}
          | if $region    != "" then . + {region: $region}       else . end
          | if $retention != "" then . + {retention: $retention} else . end
          | if $rerun_of  != "" then . + {rerun_of: $rerun_of}   else . end

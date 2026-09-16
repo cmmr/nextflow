@@ -143,9 +143,10 @@ group_count() {
 # placeholder; the name/value pairs after the template are substituted in the
 # order given, each replacing its name wrapped in doubled underscores.
 #
-# Replacements are variable expansions rather than literal text, so bash inserts
-# them as-is - no second pass over backslashes, which a task name is free to
-# contain.
+# Replacements are quoted variable expansions, so bash inserts them as-is - no
+# second pass over backslashes, which a task name is free to contain, and no
+# bash 5.2 reading of an ampersand as the text that matched, which every HTML
+# entity in a value carries.
 render_template() {
     local file="$1"
     shift
@@ -163,15 +164,15 @@ render_template() {
     css=$(<"$common")
     markup=$(<"$head")
 
-    page=${page//__COMMON_CSS__/$css}
-    page=${page//__COMMON_HEAD__/$markup}
+    page=${page//__COMMON_CSS__/"$css"}
+    page=${page//__COMMON_HEAD__/"$markup"}
 
     while (( $# >= 2 )); do
         name="$1"
         value="$2"
         shift 2
 
-        page=${page//__"${name}"__/$value}
+        page=${page//__"${name}"__/"$value"}
     done
 
     printf '%s\n' "$page"

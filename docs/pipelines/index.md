@@ -158,6 +158,17 @@ line, and every parameter as resolved — plus the sample count, which rides alo
 because the published copy outlives the results it was published with: it is one
 of the few things [an expired dashboard](../operations/expiration.md) keeps.
 
+It also records what a rerun years later would need and cannot look up then:
+
+| Key | What |
+|---|---|
+| `.manifest.code` | the commit `NEXTFLOW_DIR` was checked out at, the repository it came from, and the names of any tracked files changed since that commit |
+| `.manifest.software` | the nextflow, Java and Apptainer versions outside the containers; the containers are pinned by tag in the modules, at that commit |
+| `.manifest.databases` | every path under `NEXTFLOW_DB_DIR` a parameter names, or a file a parameter names lists (taxprofiler's database sheet), with its resolved path, file count and size, and the `<release>.manifest.json` its fetch or build script wrote — source URLs and checksums — copied in whole |
+
+A copy of the state file as it stood at upload is also in the results folder, so
+it is listed in the File Explorer and carried in the download zip.
+
 A request that picks `prev_run_id` on the form and names a run in "Nextflow
 Previous Run ID" — or `run --rerun <run_id> samples.txt` — is handled by fetching
 that state file from S3, reading `.manifest` out of it, and using that in place

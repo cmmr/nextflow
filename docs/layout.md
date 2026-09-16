@@ -50,6 +50,8 @@ scripts/
                            taxprofiler_samplesheet.sh and keeps its CSV.
   biobakery_composition.sh    Works out what the Overview plots from MetaPhlAn's
                            profiles. Run by biobakery_upload.sh.
+  biobakery_methods.sh        Writes the Methods page's paragraph and references
+                           from the run's manifest. Run by biobakery_upload.sh.
   biobakery_upload.sh         POST_PROCESS_CMDS for the biobakery pipelines.
   build_host_reference.sh     Builds a host-depletion reference. Setup, not part of a run.
   build_16s_reference.sh      Builds the 16S landmarks the region detector aligns to. Likewise.
@@ -67,9 +69,13 @@ nix/                  Container images this system builds for itself, one .nix
                       nix installation they are built in and is not tracked.
   rbiom.nix           R with rbiom, h5lite and phyloseq, which
                       scripts/R/ampliseq_tables.R runs in.
-config/               Nextflow config, passed to `nextflow run -c`.
+config/               Nextflow config, passed to `nextflow run -c`, and the
+                      records the scripts read about the databases.
   slurm.config        Executor + apptainer settings used by the pipelines.
   local.config        Same, for running off the scheduler.
+  databases.json      What is in db/, where each database came from, and how to
+                      rebuild it; see docs/operations/databases.md.
+  references.json     The citations a Methods page draws on, by id.
   taxprofiler/
     database.csv      Database sheet for the taxprofiler pipelines.
     slurm.config      Executor + apptainer settings for the taxprofiler pipelines.
@@ -79,9 +85,10 @@ templates/            Web pages published to S3 alongside a run's results.
   tailwind.html       The head every page below it shares: the Tailwind runtime,
                       the fonts, and the design system as its theme.
   dashboard.html      Landing page template: the navigation bar and its frame.
-                      Pipeline-agnostic, as are the four below.
+                      Pipeline-agnostic, as are the five below.
   overview.html       The view it opens on: the run, its plots and its sidebar.
   files.html          The annotated index of everything the run published.
+  methods.html        A methods paragraph for a manuscript, and its references.
   progress.html       Live progress page template: the task dial and the
                       per-process bars.
   expired.html        The page left where an expired dashboard was.
@@ -135,6 +142,7 @@ docs/                 Source of the documentation site; one page per file.
     expiration.md     The daily pass that retires dashboards past their date.
     running-by-hand.md  The `run` CLI, and why it files a task rather than running one.
     cluster-requirements.md  What has to be installed on the cluster.
+    databases.md      config/databases.json: the record of what is in db/.
     globus.md         Installing globus-cli, and sharing a dataset by link only.
 
 mkdocs.yml            Documentation site config; docs_hooks.py rewrites the

@@ -149,11 +149,13 @@ BioContainers images (`marker-magu:0.4.0--pyhdfd78af_1`,
    or `paired` from `meta.single_end`.
 4. **`workflows/biobakery/conf/base.config`** and
    **`config/biobakery/slurm.config`** — its resources.
-5. **A database fetch** with a manifest, as `fetch_taxprofiler_db.sh` does.
+5. **A database fetch** with a manifest, as `fetch_taxprofiler_db.sh` does, and
+   an entry for it in [`config/databases.json`](../operations/databases.md).
 6. **`pipelines/BIOBAKERY_02.sh`** — `params_set run_<tool> true` and the
    database path under `$NEXTFLOW_DB_DIR`; repoint `BIOBAKERY.sh` at it.
-7. **The dashboard** — rows in `templates/biobakery/outputs.conf` and a
-   `dashboard_tab` in `biobakery_upload.sh`.
+7. **The dashboard** — rows in `templates/biobakery/outputs.conf`, a
+   `dashboard_tab` in `biobakery_upload.sh`, and a sentence in
+   `biobakery_methods.sh` citing the tool from `config/references.json`.
 
 
 ## Preparing a run
@@ -225,6 +227,21 @@ sample, and `metaphlan-species-relab.tsv`, the species rows alone. The merge
 keeps only relative abundance, which is why the per-sample profiles stay
 published.
 
+**The read counts are merged by `METAPHLAN_MERGE` itself.** An awk pass over the
+same profiles takes `estimated_number_of_reads_from_the_clade` — the clade's
+marker coverage multiplied by its genome length — into
+`metaphlan/metaphlan-reads.tsv`, in the same layout as the relative abundance
+tables: whole numbers, and 0 where a sample did not report a clade. These are
+what taxprofiler publishes as `count_tables/metaphlan-reads.tsv`.
+
+Its species rows are the feature table: `metaphlan-species-reads.tsv` in classic
+tabular BIOM form, one row per species named without its `s__` prefix and its
+lineage in a `taxonomy` column, and the same converted by `biom convert` — which
+the MetaPhlAn container ships — into `metaphlan-species-reads.json.biom`
+(BIOM 1.0) and `metaphlan-species-reads.hdf5.biom` (BIOM 2.1). These are the
+tables to rarefy or hand to a count-based differential abundance method. Unlike
+ampliseq's and taxprofiler's, they carry no tree.
+
 
 ## HUMAnN
 
@@ -243,7 +260,16 @@ doing and what each of the eighteen tables means. Two differences:
 ## The dashboard
 
 [`biobakery_upload.sh`](../../scripts/biobakery_upload.sh) takes the same steps
-as taxprofiler's upload script, and a run is read through the same three pages.
+as taxprofiler's upload script, and a run is read through the same three pages
+plus a fourth, Methods. The navigation bar reads:
+
+| Link | Page |
+| --- | --- |
+| Overview | `overview.html` |
+| Deliverables | `files.html`, the annotated file index |
+| Methods | `methods.html` — see [The Methods page](#the-methods-page) |
+| QC Report | `multiqc/multiqc_report.html` |
+| File Explorer | `directory_listing.html`, the results folder's own listing |
 
 - **The Overview's composition chart is MetaPhlAn's.**
   [`biobakery_composition.sh`](../../scripts/biobakery_composition.sh) reads each
@@ -253,21 +279,82 @@ as taxprofiler's upload script, and a run is read through the same three pages.
   share, as on a taxprofiler run. There is no diversity chart.
 - **Read totals** in the sidebar are KneadData's: total reads, and behind
   "details" what was left after trimming and after host depletion, each linking
-  to the KneadData table in the Technical Report; then the reads retained, and
+  to the KneadData table in the QC Report; then the reads retained, and
   the smallest, median and largest sample.
-- **The Feature Table card** has a MetaPhlAn tab (species and all-rank tables,
-  and the share of reads mapped to a known clade), a HUMAnN tab (pathway, gene
-  family and EC tables, and the share of reads aligned) and a KneadData tab
-  (the read count table). A module a run did not enable leaves its tab off.
-- **The Technical Report is MultiQC**, over KneadData's FastQC reports and its
+- **The Feature Table card** has a MetaPhlAn tab (the species read counts as
+  plain text, JSON and HDF5 BIOM, and the share of reads mapped to a known
+  clade) and a HUMAnN tab (the pathway, gene family and EC tables in reads per
+  kilobase, as plain text, and the share of reads aligned, headed with the
+  ChocoPhlAn and UniRef90 versions `biobakery_composition.sh` reads off the file
+  names in the directories the manifest records). Everything else is
+  in Deliverables. A module a run did not enable leaves its tab off.
+- **The QC Report is MultiQC**, over KneadData's FastQC reports and its
   read count table as a section of its own. It is the only report the run adds;
   there is no Krona chart. `MULTIQC` ignores its own failure, so a run is never
   lost to it.
 
 [`templates/biobakery/outputs.conf`](../../templates/biobakery/outputs.conf) is
 the file index, and [`prune.conf`](../../templates/biobakery/prune.conf) deletes
-the FastQC zips and MultiQC's re-encodings of its own report before anything is
-published.
+the FastQC zips, MultiQC's re-encodings of its own report, MetaPhlAn's per-sample
+profiles, and KneadData's and HUMAnN's per-sample logs before anything is
+published. The profiles are read for the Overview first, by
+`biobakery_composition.sh`. The index ends with a tree of the folders the
+download unpacks into.
+
+### The Methods page
+
+One paragraph a requester can paste into the methods section of a manuscript,
+describing how the profiles were made from the reads they sent — nothing about
+how those reads were produced — with every reference it cites.
+[`biobakery_methods.sh`](../../scripts/biobakery_methods.sh) writes it into
+`methods_data.json` before the dashboard is rendered, from what this run was
+given rather than from what the pipeline usually does:
+
+- **Versions** are the BioContainers images the modules pin, named in full.
+  KneadData, MetaPhlAn, HUMAnN and MultiQC carry the version in their tag;
+  Trimmomatic, Tandem Repeats Finder, Bowtie2, FastQC and DIAMOND are named and
+  cited without one, since the image that carried each fixes it. Nextflow's
+  version is the one the manifest recorded.
+- **Databases** are the paths in the manifest's parameters, described by their
+  entries in [`config/databases.json`](../operations/databases.md): the MetaPhlAn
+  release, the ChocoPhlAn and UniRef90 releases, and the genomes and RefSeq
+  accessions of the host reference — or a sentence saying no host was removed.
+  A dataset DOI in an entry is written beside its release. None of this
+  pipeline's databases has one; their papers are cited instead.
+- **KneadData's steps** are read from each sample's log in `kneaddata/logs/`,
+  which is why the script runs before `prune.conf` deletes them. KneadData logs
+  every argument it ran with and the Trimmomatic command itself, so the text
+  gives what actually ran rather than what its defaults say. On an unchanged
+  run that is:
+  - **Trimmomatic** `MINLEN:60 ILLUMINACLIP:NexteraPE-PE.fa:2:30:10:8:TRUE
+    SLIDINGWINDOW:4:20 MINLEN:<n>`. The first `MINLEN` drops reads shorter than
+    60 bp before anything is clipped. The last is half the length of the
+    *first read* of the sample, so it can differ between samples; the text
+    gives the range. Single-end samples clip with `2:30:10`.
+  - **Tandem Repeats Finder** with `2 7 7 80 10 50 500`. A read is removed if
+    TRF reports *any* repeat in it scoring 50 or more — not only reads made up
+    mostly of repeats. Each mate is filtered on its own, so a read whose mate
+    goes is kept unpaired, as it is after Trimmomatic.
+  - **Bowtie2** `--very-sensitive-local` against the host, every read aligned
+    as a single-end read. In `strict` pair mode, the default, a read that aligns
+    takes its mate with it.
+
+  A run whose logs are gone is described by those defaults, without the read
+  length.
+- **Samples sequenced in more than one run** — a sample name repeated in the
+  samplesheet — get a sentence saying their runs were concatenated.
+- **Options** the run added through `kneaddata_args` or `metaphlan_args` are
+  written in, and HUMAnN's sentences are left out of a run with `run_humann`
+  off.
+
+Citations are written `[@id]` against
+[`config/references.json`](../../config/references.json), and a tool named a
+second time is not cited again. `publish_dashboard.sh` renders the text with
+author-year citations, and the references it cites twice — formatted in
+alphabetical order, and as BibTeX keyed by the same ids — behind two tab links.
+Each copy button copies what is showing as plain text. A run whose text cannot
+be written — no manifest, or an id missing from the references — publishes
+without the page and without its link.
 
 
 ## Toward a container

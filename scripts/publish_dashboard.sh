@@ -5,21 +5,30 @@
 # Date:   August 26th, 2026
 #
 # Sourced by .env rather than executed. Every pipeline's upload script publishes
-# the same three pages, all built from templates/redesign/code.html:
+# the same three pages, all built from templates/redesign/code.html, and a fourth
+# for a pipeline that declares methods data:
 #
 #   index.html     the navigation bar, and a frame the rest of it loads into
 #   overview.html  the run itself - what it was, what it found, what to take
 #   files.html     the annotated index of everything it published
+#   methods.html   a paragraph for a manuscript saying how the results were made,
+#                  and the references it cites
 #
 # The bar is the only chrome that survives navigation. Each of its links names a
-# whole page: the two above, and the pipeline's own reports as they were
-# written.
+# whole page: the ones above, the pipeline's own reports as they were written,
+# and the results folder's listing.
 #
 # An upload script declares what its pipeline produced and then publishes:
 #
 #   dashboard_reset      <results_dir> <catalog>
 #   dashboard_view       <id> <label> <path>      once per report the bar offers
 #   dashboard_index_view [label]                  where the file index sits in it
+#   dashboard_methods_view <data> [label]         where the Methods page sits in
+#                                                 it, rendered from the data a
+#                                                 methods script wrote; nothing
+#                                                 when that file is missing
+#   dashboard_listing_view [label]                where the results folder's own
+#                                                 listing sits in it
 #   dashboard_tab        <id> <label>             opens a tab of the Feature
 #                                                 Table card; the buttons,
 #                                                 formats, folders and stat
@@ -33,7 +42,7 @@
 #                                                 unless the label says
 #                                                 otherwise; false when the glob
 #                                                 named nothing
-#   dashboard_formats    <heading> <label|path> ...
+#   dashboard_formats    <heading> <[title|]label|path> ...
 #                                                 one file offered in several
 #                                                 formats, as a row of boxes
 #                                                 under one heading, or under
@@ -45,10 +54,13 @@
 #   dashboard_folder     <folder/> [label]        a link to a folder's listing;
 #                                                 false when the run has no such
 #                                                 folder
-#   dashboard_bundle     <url> [bytes]            the one archive the run
+#   dashboard_bundle     <url> [bytes] [folder...] the one archive the run
 #                                                 publishes to Globus, which is
 #                                                 what "Download everything"
-#                                                 takes and how big it says it is
+#                                                 takes and how big it says it
+#                                                 is; the folders zipped into
+#                                                 it are drawn as a tree under
+#                                                 its row in the file index
 #   dashboard_stat_group <heading> [note]         opens a block of the statistics
 #   dashboard_stat_row   <label> <value>          a reading with no bar under it
 #   dashboard_stat_tiles <value|label|tone> ...   a row of counts
@@ -71,6 +83,12 @@
 #                        that href, or nothing when it carries no such section
 #   render_dashboard  <run_id> <task_name> <subtitle> <pipeline> \
 #                     <run_date> <sample_count> <expires> [plot_data]
+#   dashboard_stage_records                       copies the run's record and
+#                                                 the progress page's final
+#                                                 state into the results folder
+#   dashboard_late_files                          the files to add to the
+#                                                 download once the pages are
+#                                                 written and the folders indexed
 #   publish_results   <s3_dir>
 #
 # Each of those skips a file the run did not produce, so the pages describe the
@@ -96,7 +114,10 @@
 #
 # The file index comes from the catalog - templates/<pipeline>/outputs.conf -
 # which names paths, globs and folders in the order they should be read, grouped
-# under headings. A folder is listed as one row pointing at the
+# under headings. A line naming no path is a paragraph under its heading, saying
+# how the group's files were made. An entry naming several paths, or a glob
+# matching several files, is one block of rows under one description. A folder
+# is listed as one row pointing at the
 # directory_listing.html index_directories.sh wrote into it. A path that is an
 # absolute address instead is written as one row leading there, which is how the
 # archive served from Globus is listed among the files it holds.
@@ -110,16 +131,18 @@
 # biotech, database, filter_alt, science, folder_zip, data_object and so on.
 #
 # Defines: dashboard_reset, dashboard_view, dashboard_index_view,
-#          dashboard_tab, dashboard_tab_end, dashboard_button,
+#          dashboard_methods_view, dashboard_listing_view, dashboard_tab, dashboard_tab_end, dashboard_button,
 #          dashboard_formats, dashboard_folder, dashboard_bundle,
 #          dashboard_stat_group, dashboard_stat_row, dashboard_stat_tiles,
 #          dashboard_stat_chips, dashboard_stat_bar, dashboard_stat_detail,
 #          dashboard_report_section, render_dashboard,
+#          dashboard_stage_records, dashboard_late_files,
 #          publish_results, DASHBOARD_PAGES, TEXT_EXTENSIONS,
 #          DOWNLOAD_EXTENSIONS
-# Requires: aws, GNU find; the escape_html/escape_url/human_size/render_template
+# Requires: aws, GNU find, jq; the escape_html/escape_url/human_size/render_template
 #           and warn helpers from utilities.sh
-# Env:      NEXTFLOW_DIR, and PROGRESS_STATE_KEY from run_state.sh
+# Env:      NEXTFLOW_DIR, and RUN_STATE_FILE, RUN_STATE_KEY and
+#           PROGRESS_STATE_KEY from run_state.sh
 
 # Extensions uploaded as text rather than left for aws to type from the name.
 # Without this a browser is handed a table as an application/octet-stream and
@@ -141,9 +164,9 @@ readonly DASHBOARD_NAV_OFF="text-primary-fixed/80 hover:text-on-primary hover:bg
 readonly DASHBOARD_TAB_ON="font-label-caps text-label-caps font-bold text-primary border-b-2 border-primary pb-0.5"
 readonly DASHBOARD_TAB_OFF="font-label-caps text-label-caps font-bold text-on-surface-variant opacity-60 hover:opacity-100 transition-opacity pb-0.5"
 
-# The three pages this script writes into the results folder. Named here because
-# the upload sends them last, after everything they frame.
-readonly DASHBOARD_PAGES=(overview.html files.html index.html)
+# The pages this script writes into the results folder. Named here because the
+# upload sends them last, after everything they frame.
+readonly DASHBOARD_PAGES=(overview.html files.html methods.html index.html)
 
 DASHBOARD_RESULTS_DIR=""
 DASHBOARD_CATALOG=""
@@ -151,6 +174,9 @@ DASHBOARD_VIEWS=()
 DASHBOARD_DOWNLOADS=""
 DASHBOARD_STATS=""
 DASHBOARD_STAT_GROUP_OPEN=""
+
+# The methods data the Methods page is rendered from; empty for a run without one
+DASHBOARD_METHODS=""
 
 # The Feature Table card's tabs, in the order they were declared, and the one
 # being declared now. While a tab is open, DASHBOARD_DOWNLOADS and
@@ -166,9 +192,11 @@ DASHBOARD_CARD_STATS=""
 # how big it came out. The address is what "Download everything" takes and what
 # a catalog entry of __BUNDLE_URL__ is read as; both are empty for a run that
 # published none, which leaves the button off the page and that entry out of the
-# index.
+# index. The folders are the ones it was zipped from, as the paths they are
+# stored under in it.
 DASHBOARD_BUNDLE_URL=""
 DASHBOARD_BUNDLE_SIZE=""
+DASHBOARD_BUNDLE_FOLDERS=()
 
 dashboard_reset() {
     DASHBOARD_RESULTS_DIR="${1%/}"
@@ -185,6 +213,8 @@ dashboard_reset() {
     DASHBOARD_CARD_STATS=""
     DASHBOARD_BUNDLE_URL=""
     DASHBOARD_BUNDLE_SIZE=""
+    DASHBOARD_BUNDLE_FOLDERS=()
+    DASHBOARD_METHODS=""
 }
 
 # True when a path is one a browser should be told to save
@@ -238,6 +268,37 @@ dashboard_view() {
 # rather than one the run produced, so it is declared rather than found.
 dashboard_index_view() {
     DASHBOARD_VIEWS+=("files|${1:-File Explorer}|files.html")
+}
+
+# Where the Methods page sits among those links, for a run whose methods script
+# wrote its data: a JSON object of paragraphs citing [@id] and the references
+# those ids name, as biobakery_methods.sh writes it
+dashboard_methods_view() {
+    local data="$1" label="${2:-Methods}"
+
+    [[ -s "$data" ]] || return 0
+
+    DASHBOARD_METHODS="$data"
+    DASHBOARD_VIEWS+=("methods|$label|methods.html")
+}
+
+# Take a declared link back out of the navigation bar
+dashboard_drop_view() {
+    local entry
+    local kept=()
+
+    for entry in ${DASHBOARD_VIEWS[@]+"${DASHBOARD_VIEWS[@]}"}; do
+        [[ "${entry%%|*}" == "$1" ]] || kept+=("$entry")
+    done
+
+    DASHBOARD_VIEWS=(${kept[@]+"${kept[@]}"})
+}
+
+# Where the results folder's own listing sits among those links.
+# index_directories.sh writes it after the pages, so it is declared rather than
+# found.
+dashboard_listing_view() {
+    DASHBOARD_VIEWS+=("listing|${1:-File Explorer}|directory_listing.html")
 }
 
 # How many samples the run covered, as the pill beside the statistics heading -
@@ -321,14 +382,23 @@ dashboard_link_row() {
 # A format the run did not write is left out rather than offered and broken, and
 # a heading whose formats are all missing is not drawn at all. An empty heading
 # draws the row on its own, for the file the card is already named after.
+#
+# An entry is "label|path", set large as BIOM, or "title|label|path" to set the
+# title large instead.
 dashboard_formats() {
     local heading="$1"
-    local entry label name boxes=""
+    local entry title label name boxes=""
     shift
 
     for entry in "$@"; do
-        label=${entry%%|*}
-        name=${entry#*|}
+        title="BIOM"
+        name=${entry##*|}
+        label=${entry%|*}
+
+        if [[ "$label" == *"|"* ]]; then
+            title=${label%%|*}
+            label=${label#*|}
+        fi
 
         [[ -r "$DASHBOARD_RESULTS_DIR/$name" ]] || continue
 
@@ -337,7 +407,7 @@ dashboard_formats() {
         boxes+=" hover:border-primary hover:bg-surface-container transition-colors group\""
         boxes+=" href=\"$(escape_url "$name")\" download"
         boxes+=" title=\"$(escape_html "$name")\">"
-        boxes+="<span class=\"font-bold text-body-md leading-5 text-primary\">BIOM</span>"
+        boxes+="<span class=\"font-bold text-body-md leading-5 text-primary\">$(escape_html "$title")</span>"
         boxes+="<span class=\"font-label-caps text-[10px] leading-3 tracking-[0.06em]"
         boxes+=" text-secondary group-hover:text-primary transition-colors\">"
         boxes+="$(escape_html "$label")</span></a>"
@@ -407,12 +477,16 @@ dashboard_tab_end() {
 # The size is the archive as it stands on the collection, in bytes, and is what
 # the button says a reader is about to start. It is left off for a run that
 # could not be measured, which only drops the figure from the label.
+#
+# The folders are what was zipped, in the order it was zipped, and are drawn as
+# the tree the archive unpacks into.
 dashboard_bundle() {
     local url="$1" bytes="${2:-}"
 
     [[ -n "$url" ]] || return 0
 
     DASHBOARD_BUNDLE_URL="$url"
+    DASHBOARD_BUNDLE_FOLDERS=("${@:3}")
 
     [[ "$bytes" =~ ^[0-9]+$ ]] && DASHBOARD_BUNDLE_SIZE="$bytes"
 
@@ -865,10 +939,69 @@ dashboard_trim() {
     printf '%s' "$s"
 }
 
-# One row of the file index: what it is called, what it holds, and how big it is.
-# An href that is already a whole address is written as it stands - it was built
-# here, not read off a disk - and always downloads, since the only such row is
-# the archive the collection serves as an attachment.
+# The folders under one directory, one line each, drawn below the line naming it
+# with the prefix that line's place in the tree gives them
+dashboard_tree_lines() {
+    local dir="$1" prefix="$2"
+    local children=() i last branch next
+
+    mapfile -t children < <(find -L "$dir" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' \
+        | LC_ALL=C sort)
+
+    last=$(( ${#children[@]} - 1 ))
+
+    for (( i = 0; i <= last; i++ )); do
+        branch="├── "
+        next="│   "
+
+        if (( i == last )); then
+            branch="└── "
+            next="    "
+        fi
+
+        printf '%s%s%s/\n' "$prefix" "$branch" "$(escape_html "${children[i]}")"
+        dashboard_tree_lines "$dir/${children[i]}" "$prefix$next"
+    done
+}
+
+# What the archive unpacks into: the folders dashboard_bundle was given and every
+# folder under them, with the archive's own name at the root. Files are left
+# out, so the tree reads as a map of where things are. Nothing for an upload
+# script that named no folders, or when none of them is still there.
+dashboard_bundle_tree() {
+    local folder name last i
+    local folders=()
+
+    for folder in ${DASHBOARD_BUNDLE_FOLDERS[@]+"${DASHBOARD_BUNDLE_FOLDERS[@]}"}; do
+        [[ -d "$folder" ]] && folders+=("${folder%/}")
+    done
+
+    last=$(( ${#folders[@]} - 1 ))
+    (( last >= 0 )) || return 0
+
+    name=${DASHBOARD_BUNDLE_URL%%\?*}
+    name=${name##*/}
+
+    printf '<pre class="tree">%s\n' "$(escape_html "$name")"
+
+    for (( i = 0; i <= last; i++ )); do
+        if (( i == last )); then
+            printf '└── %s/\n' "$(escape_html "${folders[i]}")"
+            dashboard_tree_lines "${folders[i]}" "    "
+        else
+            printf '├── %s/\n' "$(escape_html "${folders[i]}")"
+            dashboard_tree_lines "${folders[i]}" "│   "
+        fi
+    done
+
+    printf '</pre>'
+}
+
+# One row of the file index: what it is called, how big it is, and - on the
+# last row of its entry - what it holds. An href that is already a whole address
+# is written as it stands - it was built here, not read off a disk - and always
+# downloads, since the only such row is the archive the collection serves as an
+# attachment.
 #
 # A held row names a folder this copy of the page does not publish: the reads,
 # which are only inside that archive. It is greyed and carries the note saying
@@ -893,7 +1026,9 @@ dashboard_row() {
 
     [[ -n "$tag" ]] && printf '<span class="tag">%s</span>' "$(escape_html "$tag")"
 
-    printf '<span class="desc">%s</span>' "$(escape_html "$description")"
+    [[ -n "$description" ]] && printf '<span class="desc">%s</span>' "$(escape_html "$description")"
+
+    [[ "$href" == "$DASHBOARD_BUNDLE_URL" ]] && dashboard_bundle_tree
 
     #    Where those files actually are, since the row leading to them is the
     #    one place a reader would look for them first
@@ -903,18 +1038,28 @@ dashboard_row() {
     printf '</td><td class="size">%s</td></tr>\n' "$(escape_html "$size")"
 }
 
-# Every row one catalog entry produces. A folder is one row naming its listing
-# page; a glob is one row per file it matches, in name order; an absolute address
-# is one row leading there, for the archive published to the guest collection
-# rather than into the results folder - and that one row reports the size the
-# archive came out at, which is the only size here not read off a file that is
-# present.
+# One file of a catalog entry, appended to the hrefs, labels, sizes, tags and
+# helds its caller declared
+dashboard_add_file() {
+    hrefs+=("$1")
+    labels+=("$2")
+    sizes+=("$3")
+    tags+=("$4")
+    helds+=("${5:-}")
+}
+
+# The files one path of a catalog entry names. A folder is one file naming its
+# listing page; a glob is one per file it matches, in name order; an absolute
+# address is one leading there, for the archive published to the guest
+# collection rather than into the results folder - and that one reports the size
+# the archive came out at, which is the only size here not read off a file that
+# is present.
 #
 # A path marked HELD is the folder listed but not published. It is counted where
 # the run staged it - beside the results rather than in them - and its row leads
 # to the listing index_directories.sh wrote for it inside them.
-dashboard_entry() {
-    local path="$1" label="$2" description="$3"
+dashboard_entry_files() {
+    local path="$1" label="$2"
     local full match name count size
 
     if [[ "$path" == http://* || "$path" == https://* ]]; then
@@ -924,7 +1069,7 @@ dashboard_entry() {
             size=$(human_size "$DASHBOARD_BUNDLE_SIZE")
         fi
 
-        dashboard_row "$path" "${label:-${path##*/}}" "$description" "$size" ""
+        dashboard_add_file "$path" "${label:-${path##*/}}" "$size" ""
         return 0
     fi
 
@@ -937,7 +1082,7 @@ dashboard_entry() {
         count=$(find -L "$full" -type f ! -name directory_listing.html | wc -l)
         (( count > 0 )) || return 0
 
-        dashboard_row "${path}directory_listing.html" "${label:-$path}" "$description" \
+        dashboard_add_file "${path}directory_listing.html" "${label:-$path}" \
             "$count files" "folder" held
         return 0
     fi
@@ -952,7 +1097,7 @@ dashboard_entry() {
         count=$(find -L "$full" -type f ! -name directory_listing.html | wc -l)
         (( count > 0 )) || return 0
 
-        dashboard_row "${path}directory_listing.html" "${label:-$path}" "$description" \
+        dashboard_add_file "${path}directory_listing.html" "${label:-$path}" \
             "$count files" "folder"
         return 0
     fi
@@ -976,14 +1121,45 @@ dashboard_entry() {
             size=$(human_size "$(stat -c %s "$full")")
         fi
 
-        dashboard_row "$name" "$match" "$description" "$size" ""
+        dashboard_add_file "$name" "$match" "$size" ""
     done
 }
 
+# One catalog entry as one block of the index: a row per file its
+# whitespace-separated paths name, in the order they are written, and the
+# description once, under the last. Prints nothing when no path matched.
+dashboard_entry() {
+    local paths="$1" label="$2" description="$3"
+    local path i last text
+    local list=() hrefs=() labels=() sizes=() tags=() helds=()
+
+    read -ra list <<< "$paths"
+
+    for path in "${list[@]}"; do
+        dashboard_entry_files "$path" "$label"
+    done
+
+    last=$(( ${#hrefs[@]} - 1 ))
+    (( last >= 0 )) || return 0
+
+    printf '<tbody>'
+
+    for (( i = 0; i <= last; i++ )); do
+        text=""
+        (( i == last )) && text="$description"
+
+        dashboard_row "${hrefs[i]}" "${labels[i]}" "$text" "${sizes[i]}" \
+            "${tags[i]}" "${helds[i]}"
+    done
+
+    printf '</tbody>'
+}
+
 # One group of the file index, kept only when the run produced something to put
-# in it. Appends to the GROUP_NAV and SECTIONS its caller declared.
+# in it: its heading, what the group's own lines say about it, and its entries.
+# Appends to the GROUP_NAV and SECTIONS its caller declared.
 dashboard_end_group() {
-    local group="$1" rows="$2" slug
+    local group="$1" about="$2" rows="$3" slug
 
     [[ -n "$group" && -n "$rows" ]] || return 0
 
@@ -991,8 +1167,9 @@ dashboard_end_group() {
 
     GROUP_NAV+="<a href=\"#$slug\">$(escape_html "$group")</a>"
     SECTIONS+="<section class=\"group\" id=\"$slug\">"
-    SECTIONS+="<h2>$(escape_html "$group")</h2><table><tbody>"
-    SECTIONS+="$rows</tbody></table></section>"
+    SECTIONS+="<h2>$(escape_html "$group")</h2>"
+    [[ -n "$about" ]] && SECTIONS+="<div class=\"about\">$about</div>"
+    SECTIONS+="<table>$rows</table></section>"
 }
 
 # The file index, and the menu beside it. Both are built in one pass over the
@@ -1002,7 +1179,7 @@ dashboard_end_group() {
 # pass has to produce both.
 dashboard_index() {
     local line group path label description
-    local current="" group_rows=""
+    local current="" group_about="" group_rows=""
 
     GROUP_NAV=""
     SECTIONS=""
@@ -1020,24 +1197,35 @@ dashboard_index() {
         label=$(dashboard_trim "$label")
         description=$(dashboard_trim "$description")
 
+        [[ -n "$group" ]] || continue
+
+        if [[ "$group" != "$current" ]]; then
+            dashboard_end_group "$current" "$group_about" "$group_rows"
+            current="$group"
+            group_about=""
+            group_rows=""
+        fi
+
+        # A line naming no path and no label describes the group itself, one
+        # paragraph per line. Judged before the archive's address is
+        # substituted, so a run without one does not turn its row into this.
+        if [[ -z "$path" && -z "$label" ]]; then
+            [[ -n "$description" ]] && group_about+="<p>$(escape_html "$description")</p>"
+            continue
+        fi
+
         # The one entry for something served from the guest collection rather
         # than published into the results folder. Substituted before the entry
         # is judged empty, so a run that published no archive drops the row
         # rather than listing the results folder itself.
-        path=${path//__BUNDLE_URL__/$DASHBOARD_BUNDLE_URL}
+        path=${path//__BUNDLE_URL__/"$DASHBOARD_BUNDLE_URL"}
 
-        [[ -n "$group" && -n "$path" ]] || continue
-
-        if [[ "$group" != "$current" ]]; then
-            dashboard_end_group "$current" "$group_rows"
-            current="$group"
-            group_rows=""
-        fi
+        [[ -n "$path" ]] || continue
 
         group_rows+=$(dashboard_entry "$path" "$label" "$description")
     done < "$DASHBOARD_CATALOG"
 
-    dashboard_end_group "$current" "$group_rows"
+    dashboard_end_group "$current" "$group_about" "$group_rows"
 }
 
 # The plots the overview draws, as the object its script reads. A run that
@@ -1086,6 +1274,125 @@ render_overview() {
         FOOTER_NOTE "$(dashboard_footer_note "$run_date" "$pipeline" "$run_id")"
 }
 
+# One part of the Methods page, as markup: "text", the paragraphs with their
+# [@id] citations written author-year; "references", the references they cite in
+# alphabetical order, each linked to its DOI or its address; or "bibtex", the
+# same references as BibTeX entries keyed by their ids.
+#
+# A reference is the structured entry config/references.json holds. Its
+# citation, its formatted form and its BibTeX are all derived here: an author is
+# "Family, Initials" or an organisation, and et_al marks a list cut short.
+dashboard_methods_html() {
+    local part="$1"
+
+    jq -r --arg part "$part" '
+        def ids: [scan("@([A-Za-z0-9_]+)") | .[0]];
+        def cited: [scan("\\[@[^\\]]*\\]") | ids[]];
+        def firsts: reduce .[] as $id ([]; if any(.[]; . == $id) then . else . + [$id] end);
+
+        def person: contains(", ");
+        def family: if person then split(", ")[0] else . end;
+        def initials: split(", ")[1] // "";
+        def stop: if test("[.?!]$") then . else . + "." end;
+        def link: if .doi then "https://doi.org/" + .doi else (.url // "") end;
+
+        def citation:
+            .cite // (
+                (.author | map(family)) as $names
+                | (if (.et_al // false) or ($names | length) > 2 then $names[0] + " et al."
+                   elif ($names | length) == 2 then $names[0] + " and " + $names[1]
+                   else $names[0] end)
+                + ", " + (.year | tostring));
+
+        def formatted:
+            ((.author | map(if person then family + " " + initials else . end) | join(", "))
+             + (if .et_al then ", et al" else "" end) | stop)
+            + " " + (.title | stop) + " "
+            + if .type == "article" then
+                (.journal_abbrev // .journal) + ". " + (.year | tostring)
+                + (if .volume then ";" + .volume else "" end)
+                + (if .number then "(" + .number + ")" else "" end)
+                + (if .pages then ":" + .pages else "" end) + "."
+              else
+                (if .publisher then .publisher + "; " else "" end) + (.year | tostring) + "."
+              end;
+
+        def latex: gsub("(?<c>[&%$#_])"; "\\" + .c);
+        def bibname:
+            if person
+            then family + ", " + (initials | explode | map([.] | implode + ".") | join(" "))
+            else "{" + . + "}" end;
+
+        def bibtex($id):
+            "@" + (if .type == "article" then "article" else "misc" end) + "{" + $id + ",\n"
+            + ([["author", ((.author | map(bibname)) + (if .et_al then ["others"] else [] end)
+                            | join(" and "))],
+                ["title", "{" + (.title | latex) + "}"],
+                ["journal", (.journal // null | if . then latex else . end)],
+                ["publisher", (.publisher // null | if . then latex else . end)],
+                ["year", (.year | tostring)],
+                ["volume", .volume],
+                ["number", .number],
+                ["pages", (.pages // null | if . then gsub("–"; "--") else . end)],
+                ["doi", .doi],
+                ["url", (if .doi then null else .url end)]]
+               | map(select(.[1] != null) | "  " + .[0] + " = {" + .[1] + "}")
+               | join(",\n"))
+            + "\n}";
+
+        . as $data
+        | ([$data.paragraphs[] | cited[]] | firsts) as $order
+        | ($data.references // {}) as $refs
+        | [$order[] | . as $id | {id: $id, ref: ($refs[$id] // {author: [$id], title: $id, year: ""})}]
+          as $cited
+
+        | if $part == "text" then
+            [$data.paragraphs[]
+             | gsub("\\[(?<group>@[^\\]]*)\\]";
+                    "(" + (.group | ids | map(($refs[.] // null) as $ref
+                                              | if $ref then $ref | citation else . end)
+                           | join("; ")) + ")")
+             | "<p>" + @html + "</p>"]
+            | join("")
+
+          elif $part == "references" then
+            $cited
+            | map(.ref | {text: formatted, link: link})
+            | sort_by(.text | ascii_downcase)
+            | map("<li>" + (.text | @html)
+                  + (.link | if . == "" then ""
+                             else " <a href=\"" + @html + "\" target=\"_blank\" rel=\"noopener\">"
+                                  + @html + "</a>" end)
+                  + "</li>")
+            | "<ul class=\"methods-refs\">" + join("") + "</ul>"
+
+          else
+            $cited
+            | sort_by(.id)
+            | map(.id as $id | .ref | bibtex($id))
+            | "<pre class=\"methods-bibtex\">" + (join("\n\n") | @html) + "</pre>"
+          end
+    ' "$DASHBOARD_METHODS"
+}
+
+# How the run's results were made, for a manuscript
+render_methods() {
+    local run_id="$1" task_name="$2" pipeline="$3" run_date="$4"
+    local text references bibtex
+
+    text=$(dashboard_methods_html text) || return 1
+    references=$(dashboard_methods_html references) || return 1
+    bibtex=$(dashboard_methods_html bibtex) || return 1
+
+    render_template "$NEXTFLOW_DIR/templates/methods.html" \
+        TASK_NAME   "$(escape_html "$task_name")" \
+        TEXT        "$text" \
+        REFERENCES  "$references" \
+        BIBTEX      "$bibtex" \
+        YEAR        "$(date '+%Y')" \
+        FOOTER_NOTE "$(dashboard_footer_note "$run_date" "$pipeline" "$run_id")"
+}
+
 # Everything the run published, annotated
 render_files() {
     local run_id="$1" task_name="$2" pipeline="$3" run_date="$4"
@@ -1108,8 +1415,8 @@ render_files() {
         FOOTER_NOTE "$(dashboard_footer_note "$run_date" "$pipeline" "$run_id")"
 }
 
-# Write the three pages into the results folder, from what the run produced and
-# what the upload script declared. Prints whatever failed.
+# Write the pages into the results folder, from what the run produced and what
+# the upload script declared. Prints whatever failed.
 #
 # Into the folder rather than straight to the bucket, because the zip published
 # to the guest collection is made from this folder: a reader who unpacks it gets
@@ -1126,13 +1433,23 @@ render_dashboard() {
 
     local name page
 
-    for name in overview files shell; do
+    for name in overview files methods shell; do
         case "$name" in
             overview) page=$(render_overview "$run_id" "$task_name" "$subtitle" \
                                  "$pipeline" "$run_date" "$sample_count" "$plot_data") ;;
             files)    page=$(render_files "$run_id" "$task_name" "$pipeline" "$run_date") ;;
+            methods)  [[ -n "$DASHBOARD_METHODS" ]] || continue
+                      page=$(render_methods "$run_id" "$task_name" "$pipeline" "$run_date") ;;
             shell)    page=$(render_shell "$run_id" "$task_name" "$expires") ;;
         esac
+
+        #    The Methods page is left out, and its link with it, rather than
+        #    costing the run its dashboard
+        if [[ "$name" == methods && -z "$page" ]]; then
+            warn "The Methods page could not be built from $DASHBOARD_METHODS; leaving it out."
+            dashboard_drop_view methods
+            continue
+        fi
 
         if [[ -z "$page" ]]; then
             printf 'The %s page could not be built from its template.' "$name"
@@ -1148,7 +1465,30 @@ render_dashboard() {
     done
 }
 
-# Copy the results folder to its prefix, then the three pages on top of it.
+# The two files published beside the results that nothing in the run writes into
+# them - the run's own record as it stands, and the progress page's state file as
+# publish_results leaves it - copied into the results folder, so the folder
+# listings name them and the download carries them. wrike_followup.sh publishes
+# the record once more when the run is marked complete, over the copy sent here.
+dashboard_stage_records() {
+    cp "$RUN_STATE_FILE" "$DASHBOARD_RESULTS_DIR/$RUN_STATE_KEY" || return 1
+    printf '{"state":"final"}\n' > "$DASHBOARD_RESULTS_DIR/$PROGRESS_STATE_KEY"
+}
+
+# What goes into the download after it was first built, one path per line: the
+# pages, the records dashboard_stage_records copied in, and every folder
+# listing, all of which are written after the archive whose size the pages state
+dashboard_late_files() {
+    local name
+
+    for name in "${DASHBOARD_PAGES[@]}" "$RUN_STATE_KEY" "$PROGRESS_STATE_KEY"; do
+        [[ -f "$DASHBOARD_RESULTS_DIR/$name" ]] && printf '%s\n' "$DASHBOARD_RESULTS_DIR/$name"
+    done
+
+    find "$DASHBOARD_RESULTS_DIR" -name directory_listing.html -type f
+}
+
+# Copy the results folder to its prefix, then the pages on top of it.
 #
 # The copy runs in two passes, so that the tables, logs and configuration files
 # a reader clicks open in the browser instead of downloading: aws types an
@@ -1172,8 +1512,9 @@ publish_results() {
         text+=(--include "*.$extension")
     done
 
-    # After the includes, which is what lets an exclude overrule one
-    for page in "${DASHBOARD_PAGES[@]}"; do
+    # After the includes, which is what lets an exclude overrule one. The
+    # progress page's state file is written below, after the pages.
+    for page in "${DASHBOARD_PAGES[@]}" "$PROGRESS_STATE_KEY"; do
         other+=(--exclude "$page")
         text+=(--exclude "$page")
     done

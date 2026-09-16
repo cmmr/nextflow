@@ -171,7 +171,10 @@ __COMMON_HEAD__
   // it. The report's own plots and the listings under the file index are pages
   // of a view rather than views of their own, so the longest match wins and a
   // page under no view's folder - a listing in the results tree - leaves the
-  // bar naming whichever view led there.
+  // bar naming whichever view led there. Every folder listing belongs to a view
+  // that is the top listing, where the bar has one.
+  var LISTING = "directory_listing.html";
+
   function viewFor(href) {
     var page = href.replace(/[?#].*$/, "");
     var view = null;
@@ -183,6 +186,7 @@ __COMMON_HEAD__
       var match = 0;
 
       if (page === target) match = target.length + 1;
+      else if (target === LISTING && page.slice(-LISTING.length - 1) === "/" + LISTING) match = page.length;
       else if (folder && page.indexOf(folder) === 0) match = folder.length;
 
       if (match > reach) {

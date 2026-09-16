@@ -12,16 +12,17 @@ navigation, and each of the pipeline's own reports is read inside it exactly as
 the pipeline wrote it.
 
 [`publish_dashboard.sh`](../../scripts/publish_dashboard.sh) renders three of
-those pages from what the run produced and uploads them last, once everything
-they link to is in place:
+those pages from what the run produced — four for a pipeline that declares
+methods data — and uploads them last, once everything they link to is in place:
 
 | Template | Lands as | What it is |
 |---|---|---|
 | [`dashboard.html`](../../templates/dashboard.html) | `index.html` | the navigation bar, and the frame the rest load into |
 | [`overview.html`](../../templates/overview.html) | `overview.html` | the run itself: what it was, what it found, what to take away |
 | [`files.html`](../../templates/files.html) | `files.html` | the annotated index of everything the run published |
+| [`methods.html`](../../templates/methods.html) | `methods.html` | a methods paragraph for a manuscript, and its references; biobakery only, see [The Methods page](../pipelines/biobakery.md#the-methods-page) |
 
-All three are laid out to the [Alkek design
+All of them are laid out to the [Alkek design
 system](../../templates/redesign/DESIGN.md), and every link in them is relative,
 because they are served from S3 alongside the objects they point at.
 
@@ -32,13 +33,20 @@ far end. Overview is always first and is the view a reader lands on; the rest
 are what the pipeline declared, and the file index sits where the pipeline put
 it.
 
-| Link | ampliseq | taxprofiler |
-|---|---|---|
-| `#overview` | `overview.html` | `overview.html` |
-| `#report` | `summary_report/summary_report.html` | — |
-| `#krona` | — | `krona/kraken2_<db>.html` — see [why that one](../pipelines/taxprofiler.md) |
-| `#quality` | `multiqc/multiqc_report.html` | `multiqc/multiqc_report.html` |
-| `#files` | `files.html` | `files.html` |
+| Link | ampliseq | taxprofiler | biobakery |
+|---|---|---|---|
+| `#overview` | `overview.html` | `overview.html` | `overview.html` |
+| `#report` | `summary_report/summary_report.html` | — | — |
+| `#krona` | — | `krona/kraken2_<db>.html` — see [why that one](../pipelines/taxprofiler.md) | — |
+| `#files` | — | — | `files.html`, as "Deliverables" |
+| `#methods` | — | — | `methods.html` |
+| `#quality` | `multiqc/multiqc_report.html` | `multiqc/multiqc_report.html` | `multiqc/multiqc_report.html`, as "QC Report" |
+| `#files` | `files.html` | `files.html` | — |
+| `#listing` | — | — | `directory_listing.html`, as "File Explorer" |
+
+A link is named what its pipeline calls it; ampliseq and taxprofiler call the
+MultiQC report "Technical Report" and the file index "File Explorer". A folder
+listing opened from anywhere keeps `#listing` marked, where the bar has one.
 
 The open view is remembered in the URL fragment, so `#quality` is a link
 straight to the Technical Report with the bar still around it. Each link also
@@ -217,6 +225,12 @@ Sequences  | qiime2/representative_sequences/          | | The same sequences af
 ```
 
 - A **path** may be a glob, which lists one row per file it matches.
+- An entry may name **several paths**, separated by spaces — an `-rpk.tsv` and
+  its `-relab.tsv`, say. Its rows, like every row one glob matches, are set as
+  one block with the description written once beneath them.
+- A line with **no path and no label** describes the group itself, as a
+  paragraph under its heading; the biobakery catalogue uses these to say how
+  each tool made its files.
 - A path ending in `/` is a **folder**, listed as one row linking to the
   `directory_listing.html` inside it — see [Browsable
   folders](browsable-folders.md) — and counted rather than sized.

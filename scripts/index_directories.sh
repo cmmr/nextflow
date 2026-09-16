@@ -38,8 +38,9 @@
 #            results_dir defaults to ./results, the outdir set in the ampliseq
 #            params file; the reads directory is left out by a pipeline that
 #            stages none
-# Called by: ampliseq_upload.sh and taxprofiler_upload.sh, after prune_results.sh
-#            and before the upload
+# Called by: ampliseq_upload.sh, taxprofiler_upload.sh and biobakery_upload.sh,
+#            once the dashboard's pages and the run's records are in the results
+#            folder, and before the upload
 # Requires:  GNU find and awk
 # Reads:     templates/listing.html, the listing template
 # Env:       NEXTFLOW_DIR and the log/warn/fail, escape_html and render_template
@@ -82,16 +83,20 @@ fi
 # as links that do not resolve where the page is published. Both are for the
 # staged reads, and are empty for every folder of the results.
 #
+# Files named in the last argument open in the whole window rather than in the
+# frame the listing is read in, which is how the results folder's listing links
+# the landing page without opening the dashboard inside itself.
+#
 # Symlinks are followed, because publishDir may link a published file rather
 # than copy it and because the upload follows them too: what the row reports is
 # what S3 will hold.
 render_rows() {
-    local dir="$1" omit="${2:-}" prefix="${3:-}" held="${4:-}"
+    local dir="$1" omit="${2:-}" prefix="${3:-}" held="${4:-}" top="${5:-}"
 
     find -L "$dir" -mindepth 1 -maxdepth 1 -printf '%y\t%s\t%f\n' \
         | LC_ALL=C sort -t$'\t' -k1,1 -k3,3 \
         | LC_ALL=C awk -F'\t' -v omit="$omit" -v listing="$LISTING_NAME" \
-              -v prefix="$prefix" -v held="$held" '
+              -v prefix="$prefix" -v held="$held" -v top="$top" '
             # HTML-escape, a character at a time
             function esc(s,   out, i, c) {
                 out = ""
@@ -132,6 +137,8 @@ render_rows() {
                 split("B KB MB GB TB PB", unit, " ")
                 split(omit, hidden, " ")
                 for (i in hidden) skip[hidden[i]] = 1
+                split(top, whole, " ")
+                for (i in whole) window[whole[i]] = 1
             }
 
             $1 == "f" && ($3 in skip) { next }
@@ -157,8 +164,9 @@ render_rows() {
                                "<td class=\"size\"></td></tr>\n", row, prefix, enc(name[i]), \
                                listing, esc(name[i])
                     else
-                        printf "%s<td class=\"name\"><a href=\"%s%s\">%s</a></td>" \
+                        printf "%s<td class=\"name\"><a href=\"%s%s\"%s>%s</a></td>" \
                                "<td class=\"size\">%s</td></tr>\n", row, prefix, enc(name[i]), \
+                               (name[i] in window) ? " target=\"_top\"" : "", \
                                esc(name[i]), human(size[i])
                 }
                 print "</tbody></table>"
@@ -170,20 +178,21 @@ render_rows() {
 # built is not worth failing a run over, and whatever rows did come out are
 # kept: the folder gets a page either way, so the link that led here resolves.
 #
-# The last three arguments are for the one listing that sits somewhere other
-# than the folder it lists - the staged reads: where the page goes, the way back
-# from there to the files it names, and the note saying why it had to be written
-# that way. Naming a page directory is also what holds its rows back, since a
-# listing written away from its files is one whose files are not published.
+# The three arguments after omit are for the one listing that sits somewhere
+# other than the folder it lists - the staged reads: where the page goes, the way
+# back from there to the files it names, and the note saying why it had to be
+# written that way. Naming a page directory is also what holds its rows back,
+# since a listing written away from its files is one whose files are not
+# published. The last names the files that open in the whole window.
 #
 # Rows are never escaped - render_rows emits the markup itself, having escaped
 # and encoded every name it read off the disk.
 write_listing() {
     local dir="$1" title="$2" up_link="$3" omit="${4:-}"
-    local page="${5:-$dir}" prefix="${6:-}" note="${7:-}"
+    local page="${5:-$dir}" prefix="${6:-}" note="${7:-}" top="${8:-}"
     local rows=""
 
-    if ! rows=$(render_rows "$dir" "$omit" "$prefix" "${5:-}"); then
+    if ! rows=$(render_rows "$dir" "$omit" "$prefix" "${5:-}" "$top"); then
         warn "The contents of $dir could not be listed in full."
     fi
 
@@ -246,11 +255,11 @@ fi
 # inside itself, and loading it into its own frame would open a second copy of
 # the dashboard in the first.
 #
-# The landing page is left out of the listing as well as being what the link at
-# the top goes to. It is never on disk here - the upload script pipes it
-# straight to S3 - but a rerun over an unpacked copy would otherwise list it.
+# Every file published there is listed, the dashboard's own pages and the run's
+# records included - the upload scripts run this once those are written - and
+# the landing page opens in the whole window, like the link at the top.
 write_listing "$RESULTS_DIR" "All output files" \
     "<a href=\"index.html\" target=\"_top\">&uarr; Results dashboard</a>" \
-    "$LISTING_NAME index.html"
+    "$LISTING_NAME" "" "" "" "index.html"
 
 log "Indexed $INDEXED folders, plus the results folder itself."

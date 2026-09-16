@@ -1,0 +1,270 @@
+{
+  "about": "What is in db/ (NEXTFLOW_DB_DIR), which git does not track: one entry per database, by its path under db/. Each says what reads it, what it was built from, the command that rebuilds it, the dataset DOI where the publisher minted one, and the config/references.json ids to cite it by. The setup scripts write a <release>.manifest.json beside what they fetch, with checksums and when it was fetched; this file is the index of those. biobakery_methods.sh reads it for the Methods page. See docs/operations/databases.md.",
+  "databases": [
+    {
+      "path": "kraken2/pluspf_20260626",
+      "name": "Kraken2/Bracken PlusPF",
+      "release": "2026-06-26",
+      "description": "RefSeq archaea, bacteria, viruses, plasmids, human, UniVec_Core, protozoa and fungi, with nodes.dmp and names.dmp and Bracken distributions for 50-300-mers.",
+      "used_by": [
+        "taxprofiler: config/taxprofiler/database.csv (kraken2, bracken), taxpasta_taxonomy_dir"
+      ],
+      "setup": "scripts/fetch_taxprofiler_db.sh kraken2",
+      "manifest": "kraken2/pluspf_20260626.manifest.json",
+      "sources": [
+        {
+          "url": "https://genome-idx.s3.amazonaws.com/kraken/k2_pluspf_20260626.tar.gz",
+          "checksums": "https://genome-idx.s3.amazonaws.com/kraken/pluspf_20260626/pluspf.md5"
+        }
+      ],
+      "homepage": "https://benlangmead.github.io/aws-indexes/k2",
+      "doi": null,
+      "cite": ["wood2019", "lu2017"]
+    },
+    {
+      "path": "metaphlan/mpa_vJun23_CHOCOPhlAnSGB_202403",
+      "name": "MetaPhlAn mpa_vJun23_CHOCOPhlAnSGB_202403",
+      "release": "mpa_vJun23_CHOCOPhlAnSGB_202403",
+      "description": "MetaPhlAn 4 SGB marker database: the bowtie2 index, the pickled marker metadata, and the SGB phylogeny (.nwk). The newest release MetaPhlAn 4.1.1 reads, and the one HUMAnN 3.9 accepts profiles from.",
+      "used_by": [
+        "taxprofiler: config/taxprofiler/database.csv (metaphlan)",
+        "biobakery: metaphlan_db"
+      ],
+      "setup": "scripts/fetch_taxprofiler_db.sh metaphlan",
+      "manifest": "metaphlan/mpa_vJun23_CHOCOPhlAnSGB_202403.manifest.json",
+      "sources": [
+        { "url": "https://cmprod1.cibio.unitn.it/biobakery4/metaphlan_databases/bowtie2_indexes/mpa_vJun23_CHOCOPhlAnSGB_202403_bt2.tar" },
+        { "url": "https://cmprod1.cibio.unitn.it/biobakery4/metaphlan_databases/mpa_vJun23_CHOCOPhlAnSGB_202403.tar" },
+        { "url": "https://cmprod1.cibio.unitn.it/biobakery4/metaphlan_databases/mpa_vJun23_CHOCOPhlAnSGB_202403.nwk" }
+      ],
+      "doi": null,
+      "cite": ["blancomiguez2023"]
+    },
+    {
+      "path": "motus/db_mOTU_v3.1.0",
+      "name": "mOTUs db_mOTU_v3.1.0",
+      "release": "3.1.0",
+      "description": "The database motus downloadDB installs for mOTUs 3.1.0, with the db_mOTU_versions file that command writes.",
+      "used_by": [
+        "taxprofiler: config/taxprofiler/database.csv (motus)"
+      ],
+      "setup": "scripts/fetch_taxprofiler_db.sh motus",
+      "manifest": "motus/db_mOTU_v3.1.0.manifest.json",
+      "sources": [
+        {
+          "url": "https://zenodo.org/record/7778108/files/db_mOTU_v3.1.0.tar.gz",
+          "md5": "f841c36150025af837f7a9a358c9a3c3"
+        }
+      ],
+      "doi": "10.5281/zenodo.7778108",
+      "cite": ["ruscheweyh2022"]
+    },
+    {
+      "path": "humann/v201901b",
+      "name": "HUMAnN 3 databases",
+      "release": "v201901b",
+      "description": "The three databases HUMAnN 3.9 reads, one directory each.",
+      "components": {
+        "chocophlan": {
+          "name": "ChocoPhlAn",
+          "release": "v201901_v31",
+          "url": "http://huttenhower.sph.harvard.edu/humann_data/chocophlan/full_chocophlan.v201901_v31.tar.gz"
+        },
+        "uniref90": {
+          "name": "UniRef90",
+          "release": "v201901b",
+          "url": "http://huttenhower.sph.harvard.edu/humann_data/uniprot/uniref_annotated/uniref90_annotated_v201901b_full.tar.gz",
+          "cite": ["suzek2015"]
+        },
+        "utility_mapping": {
+          "name": "HUMAnN utility mapping",
+          "release": "v201901b",
+          "url": "http://huttenhower.sph.harvard.edu/humann_data/full_mapping_v201901b.tar.gz"
+        }
+      },
+      "used_by": [
+        "taxprofiler: humann_chocophlan, humann_uniref, humann_utility_mapping (workflows/humann)",
+        "biobakery: humann_chocophlan, humann_uniref, humann_utility_mapping"
+      ],
+      "setup": "scripts/fetch_taxprofiler_db.sh humann",
+      "manifest": "humann/v201901b.manifest.json",
+      "doi": null,
+      "cite": ["beghini2021"]
+    },
+    {
+      "path": "hostremoval/phix",
+      "name": "PhiX",
+      "description": "bowtie2 index (phix/), FASTA (phix.fa) and minimap2 map-ont index (phix.mmi).",
+      "used_by": [
+        "taxprofiler: hostremoval_reference, shortread_hostremoval_index, longread_hostremoval_index",
+        "biobakery: kneaddata_db"
+      ],
+      "setup": "scripts/build_host_reference.sh phix GCF_000819615.1",
+      "manifest": "hostremoval/phix.manifest.json",
+      "sources": [
+        {
+          "label": "bacteriophage phiX174",
+          "accession": "GCF_000819615.1",
+          "assembly": "ViralProj14015",
+          "url": "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/819/615/"
+        }
+      ],
+      "doi": null,
+      "cite": ["oleary2016"]
+    },
+    {
+      "path": "hostremoval/chm13v2phix",
+      "name": "Human T2T-CHM13v2.0 + PhiX",
+      "description": "bowtie2 index (chm13v2phix/), FASTA (chm13v2phix.fa) and minimap2 map-ont index (chm13v2phix.mmi).",
+      "used_by": [
+        "taxprofiler: hostremoval_reference, shortread_hostremoval_index, longread_hostremoval_index",
+        "biobakery: kneaddata_db"
+      ],
+      "setup": "scripts/build_host_reference.sh chm13v2phix GCF_009914755.1 GCF_000819615.1",
+      "manifest": "hostremoval/chm13v2phix.manifest.json",
+      "sources": [
+        {
+          "label": "human T2T-CHM13v2.0",
+          "accession": "GCF_009914755.1",
+          "assembly": "T2T-CHM13v2.0",
+          "url": "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/009/914/755/",
+          "cite": ["nurk2022"]
+        },
+        {
+          "label": "bacteriophage phiX174",
+          "accession": "GCF_000819615.1",
+          "assembly": "ViralProj14015",
+          "url": "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/819/615/"
+        }
+      ],
+      "doi": null,
+      "cite": ["oleary2016"]
+    },
+    {
+      "path": "hostremoval/grcm39phix",
+      "name": "Mouse GRCm39 + PhiX",
+      "description": "bowtie2 index (grcm39phix/), FASTA (grcm39phix.fa) and minimap2 map-ont index (grcm39phix.mmi).",
+      "used_by": [
+        "taxprofiler: hostremoval_reference, shortread_hostremoval_index, longread_hostremoval_index",
+        "biobakery: kneaddata_db"
+      ],
+      "setup": "scripts/build_host_reference.sh grcm39phix GCF_000001635.27 GCF_000819615.1",
+      "manifest": "hostremoval/grcm39phix.manifest.json",
+      "sources": [
+        {
+          "label": "mouse GRCm39",
+          "accession": "GCF_000001635.27",
+          "assembly": "GRCm39",
+          "url": "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/001/635/"
+        },
+        {
+          "label": "bacteriophage phiX174",
+          "accession": "GCF_000819615.1",
+          "assembly": "ViralProj14015",
+          "url": "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/819/615/"
+        }
+      ],
+      "doi": null,
+      "cite": ["oleary2016"]
+    },
+    {
+      "path": "ampliseq",
+      "name": "SILVA 138.2 for DADA2",
+      "release": "138.2",
+      "description": "silva_nr99_v138.2_toSpecies_trainset.fa.gz and silva_v138.2_assignSpecies.fa.gz, downloaded by nf-core/ampliseq itself on its first run with dada_ref_taxonomy silva=138.2 and kept here as ref_taxonomy_storage. No manifest: ampliseq writes none.",
+      "used_by": [
+        "ampliseq: dada_ref_taxonomy silva=138.2, ref_taxonomy_storage"
+      ],
+      "setup": "Any AMPLISEQ run; nf-core/ampliseq fetches what ref_taxonomy_storage lacks.",
+      "manifest": null,
+      "sources": [
+        { "url": "https://zenodo.org/records/14169026/files/silva_nr99_v138.2_toSpecies_trainset.fa.gz" },
+        { "url": "https://zenodo.org/records/14169026/files/silva_v138.2_assignSpecies.fa.gz" }
+      ],
+      "doi": "10.5281/zenodo.14169026",
+      "cite": ["callahan2024", "quast2013"]
+    },
+    {
+      "path": "pplace",
+      "name": "SBDI GTDB bacterial 16S placement reference",
+      "release": "sbdi-gtdb-sativa R11-RS232-1 bac120",
+      "description": "bac16s.alnfna, the aligned 16S of each GTDB species representative, and bac16s.newick, the tree built from it (GTR+F+I+G4).",
+      "used_by": [
+        "ampliseq: pplace_aln, pplace_tree"
+      ],
+      "setup": "scripts/build_pplace_reference.sh",
+      "manifest": "pplace/manifest.json",
+      "sources": [
+        { "file": "bac16s.alnfna", "url": "https://ndownloader.figshare.com/files/64711224" },
+        { "file": "bac16s.newick", "url": "https://ndownloader.figshare.com/files/64711197" }
+      ],
+      "doi": "10.17044/scilifelab.14869077",
+      "cite": ["sbdi2021", "parks2022"]
+    },
+    {
+      "path": "16s",
+      "name": "16S landmark reference",
+      "description": "The 16S rRNA gene of eight RefSeq genomes (landmarks.fasta), each aligned to E. coli K-12 MG1655 (landmarks.sam), and every landmark base in E. coli numbering (ecoli_positions.tsv). Built here rather than downloaded.",
+      "used_by": [
+        "ampliseq: scripts/ampliseq_detect_region.sh"
+      ],
+      "setup": "scripts/build_16s_reference.sh",
+      "manifest": "16s/manifest.json",
+      "sources": [
+        { "label": "Escherichia coli K-12 MG1655", "accession": "GCF_000005845.2" },
+        { "label": "Pseudomonas aeruginosa PAO1", "accession": "GCF_000006765.1" },
+        { "label": "Bacillus subtilis 168", "accession": "GCF_000009045.1" },
+        { "label": "Staphylococcus aureus NCTC 8325", "accession": "GCF_000013425.1" },
+        { "label": "Bacteroides fragilis NCTC 9343", "accession": "GCF_000025985.1" },
+        { "label": "Bifidobacterium longum NCC2705", "accession": "GCF_000007525.1" },
+        { "label": "Akkermansia muciniphila BAA-835", "accession": "GCF_000020225.1" },
+        { "label": "Methanobrevibacter smithii ATCC 35061", "accession": "GCF_000016525.1" }
+      ],
+      "doi": null,
+      "cite": ["oleary2016"]
+    },
+    {
+      "path": "sylph",
+      "name": "sylph GTDB r220 c200",
+      "release": "gtdb-r220-c200-dbv1",
+      "description": "gtdb-r220-c200-dbv1.syldb, the sylph sketch of the GTDB r220 species representatives at c=200, and gtdb_r220_metadata.tsv.gz, the sylph-tax table that names them. Not read by any pipeline: sylph was taken out of taxprofiler when HUMAnN went in, and this can be deleted.",
+      "used_by": [],
+      "setup": "scripts/fetch_taxprofiler_db.sh sylph, as it stood at commit d7b7500 (removed in adeee55)",
+      "manifest": "sylph/gtdb-r220-c200-dbv1.manifest.json",
+      "sources": [
+        {
+          "url": "https://faust.compbio.cs.cmu.edu/sylph-stuff/gtdb-r220-c200-dbv1.syldb",
+          "bytes": 14061572967
+        },
+        {
+          "url": "https://zenodo.org/records/14320496/files/gtdb_r220_metadata.tsv.gz",
+          "md5": "ad14ff1636ad93506da1f46b65494fb8",
+          "doi": "10.5281/zenodo.14320496"
+        }
+      ],
+      "doi": null,
+      "cite": ["shaw2024", "parks2022"]
+    },
+    {
+      "path": "test-fastq",
+      "name": "Test reads",
+      "description": "Small paired-end and single-end Illumina runs from nf-core/test-datasets, for trying a pipeline by hand. ERX5474932 has two runs (ERR5766176 and ERR5766176_B); ERX5474936 is single-end.",
+      "used_by": [
+        "by hand: a samplesheet naming them, for a quick test run; nothing in the repository reads them"
+      ],
+      "setup": "curl -sSfLO for each url below, into db/test-fastq/",
+      "manifest": null,
+      "sources": [
+        { "url": "https://raw.githubusercontent.com/nf-core/test-datasets/taxprofiler/data/fastq/ERX5474932_ERR5766176_1.fastq.gz" },
+        { "url": "https://raw.githubusercontent.com/nf-core/test-datasets/taxprofiler/data/fastq/ERX5474932_ERR5766176_2.fastq.gz" },
+        { "url": "https://raw.githubusercontent.com/nf-core/test-datasets/taxprofiler/data/fastq/ERX5474932_ERR5766176_B_1.fastq.gz" },
+        { "url": "https://raw.githubusercontent.com/nf-core/test-datasets/taxprofiler/data/fastq/ERX5474932_ERR5766176_B_2.fastq.gz" },
+        { "url": "https://raw.githubusercontent.com/nf-core/test-datasets/taxprofiler/data/fastq/ERX5474936_ERR5766180_1.fastq.gz" },
+        { "url": "https://raw.githubusercontent.com/nf-core/test-datasets/taxprofiler/data/fastq/ERX5474937_ERR5766181_1.fastq.gz" },
+        { "url": "https://raw.githubusercontent.com/nf-core/test-datasets/taxprofiler/data/fastq/ERX5474937_ERR5766181_2.fastq.gz" }
+      ],
+      "doi": null,
+      "cite": []
+    }
+  ]
+}

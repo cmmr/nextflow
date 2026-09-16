@@ -23,7 +23,9 @@
 # Called by: biobakery_upload.sh, before it prunes, indexes and uploads the results
 # Requires:  GNU awk
 # Reads:     <results_dir>/metaphlan/profiles/, <results_dir>/kneaddata/read-counts.tsv
-#            and <results_dir>/humann/alignment-summary.tsv, each optional
+#            and <results_dir>/humann/alignment-summary.tsv, each optional; and
+#            the HUMAnN database directories the manifest in ./run_state.json
+#            records
 # Outputs:   ./composition_data.json, and the "statistics" of ./run_state.json
 # Env:       the log/warn/fail helpers and the run state helpers, sourced from .env
 
@@ -340,6 +342,48 @@ humann_mapping() {
     ' "$DEPTHS" "$HUMANN_SUMMARY"
 }
 
+# The HUMAnN databases this run was given, as wrike_job.sh recorded them in the
+# manifest, by the versions their files are named with, e.g.
+# "ChocoPhlAn v201901_v31 · UniRef90 v201901b". A database whose directory cannot
+# be read is left out.
+humann_databases() {
+    local directory path name
+    local -a names=()
+
+    #    g__<genus>.s__<species>.centroids.<version>.ffn.gz
+    directory=$(state_get manifest.params.humann_chocophlan)
+
+    if [[ -d "$directory" ]]; then
+        path=$(find -L "$directory" -maxdepth 1 -name '*.centroids.*.ffn.gz' -print -quit)
+
+        if [[ -n "$path" ]]; then
+            name=${path##*.centroids.}
+            names+=("ChocoPhlAn ${name%%.*}")
+        fi
+    fi
+
+    #    uniref<identity>_<version>_<subset>.dmnd
+    directory=$(state_get manifest.params.humann_uniref)
+
+    if [[ -d "$directory" ]]; then
+        path=$(find -L "$directory" -maxdepth 1 -name '*.dmnd' -print -quit)
+        name=${path##*/}
+        name=${name%.dmnd}
+
+        if [[ "$name" =~ ^uniref([0-9]+)_v?([^_]+) ]]; then
+            names+=("UniRef${BASH_REMATCH[1]} v${BASH_REMATCH[2]}")
+        elif [[ -n "$name" ]]; then
+            names+=("$name")
+        fi
+    fi
+
+    (( ${#names[@]} > 0 )) || return 0
+
+    printf 'humann_database\t%s' "${names[0]}"
+    (( ${#names[@]} > 1 )) && printf ' · %s' "${names[@]:1}"
+    printf '\n'
+}
+
 write_run_statistics() {
     local platform
 
@@ -361,6 +405,7 @@ write_run_statistics() {
 
         if [[ -s "$DEPTHS" && -s "$HUMANN_SUMMARY" ]]; then
             humann_mapping
+            humann_databases
         fi
     } | state_set_tsv "$STATS_KEY"
 }

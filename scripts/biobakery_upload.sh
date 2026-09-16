@@ -6,26 +6,29 @@
 # Date:   September 15th, 2026
 #
 # The biobakery counterpart of taxprofiler_upload.sh, taking the same steps in
-# the same order: work out what the Overview plots, delete what
-# templates/biobakery/prune.conf names, write a listing page into every folder,
-# declare what the dashboard offers, package the staged reads and the results as
-# one zip on the Globus guest collection, render the pages, and copy the results
-# to s3://$AWS_S3_BUCKET/$S3_RUN_PREFIX/<uid>/ with the pages last.
+# the same order: work out what the Overview plots and write the Methods page's
+# text, delete what templates/biobakery/prune.conf names, declare what the
+# dashboard offers, package the staged reads and the results as one zip on the
+# Globus guest collection, copy in the run's record and render the pages, write
+# a listing page into every folder, add those to the zip, and copy the results to
+# s3://$AWS_S3_BUCKET/$S3_RUN_PREFIX/<uid>/ with the pages last.
 #
 # The Overview's composition chart is MetaPhlAn's, and it has no diversity half.
 # The sidebar carries KneadData's read totals and a Feature Table tab each for
-# MetaPhlAn, HUMAnN and KneadData; a tool the run did not enable leaves its tab
-# off.
+# MetaPhlAn and HUMAnN; a tool the run did not enable leaves its tab off.
+#
+# The navigation bar reads Overview, Deliverables (the file index), Methods, QC
+# Report (MultiQC) and File Explorer (the results folder's listing).
 #
 # Usage:     biobakery_upload.sh [results_dir]
 #            defaults to ./results, the outdir set in the biobakery params file
 # Called by: wrike_job.sh, as the last POST_PROCESS_CMDS entry of the biobakery pipelines
 # Requires:  aws, zip, curl and jq (via the Wrike helpers)
 # Reads:     templates/biobakery/outputs.conf and templates/biobakery/prune.conf;
-#            ./composition_data.json, and the run's statistics and manifest out
-#            of ./run_state.json
-# Runs:      biobakery_composition.sh, prune_results.sh and index_directories.sh,
-#            over the results folder
+#            ./composition_data.json and ./methods_data.json, and the run's
+#            statistics and manifest out of ./run_state.json
+# Runs:      biobakery_composition.sh, biobakery_methods.sh, prune_results.sh and
+#            index_directories.sh, over the results folder
 # Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, WRIKE_DASHBOARD_URL_CFID,
 #            the Wrike, Globus and dashboard helper functions and the
 #            log/fail/is_valid_uid helpers, all sourced from .env
@@ -45,6 +48,7 @@ FASTQ_DIR="raw-sequences"
 
 STATS_KEY="statistics"
 PLOT_DATA_FILE="composition_data.json"
+METHODS_DATA_FILE="methods_data.json"
 RUN_MANIFEST_KEY="manifest"
 
 SUBTITLE="Shotgun metagenomic taxonomic and functional profiling"
@@ -79,9 +83,14 @@ command -v zip > /dev/null \
 
 [[ -d "$FASTQ_DIR" ]] || log "No $FASTQ_DIR directory; the download will hold the results alone."
 
-# 2. What the Overview plots and the sidebar reports
+# 2. What the Overview plots and the sidebar reports, and the Methods page's text
 if ! "$NEXTFLOW_DIR/scripts/biobakery_composition.sh" "$RESULTS_DIR"; then
     warn "The composition data could not be built; the plots will be missing."
+fi
+
+if ! "$NEXTFLOW_DIR/scripts/biobakery_methods.sh" "$RESULTS_DIR"; then
+    warn "The methods text could not be written; the dashboard will have no Methods page."
+    rm -f "$METHODS_DATA_FILE"
 fi
 
 # 3. Delete what the run wrote for itself, ahead of the listings
@@ -89,16 +98,13 @@ if ! "$NEXTFLOW_DIR/scripts/prune_results.sh" "$RESULTS_DIR" "$PRUNE_LIST"; then
     warn "The results could not be pruned; the run will publish its working files too."
 fi
 
-# 4. A listing page in every folder, and one for the staged reads
-if ! "$NEXTFLOW_DIR/scripts/index_directories.sh" "$RESULTS_DIR" "$FASTQ_DIR"; then
-    warn "The results folders could not be indexed; their listings will be missing."
-fi
-
-# 5. What the pages offer, from what the run produced
+# 4. What the pages offer, from what the run produced
 dashboard_reset "$RESULTS_DIR" "$OUTPUT_CATALOG"
 
-dashboard_view quality "Technical Report" "$MULTIQC_REPORT_HREF"
-dashboard_index_view   "File Explorer"
+dashboard_index_view   "Deliverables"
+dashboard_methods_view "$METHODS_DATA_FILE" "Methods"
+dashboard_view quality "QC Report" "$MULTIQC_REPORT_HREF"
+dashboard_listing_view "File Explorer"
 
 PIPELINE=""
 
@@ -116,7 +122,7 @@ done < <(state_get_tsv "$STATS_KEY")
 
 #    Reads as sequenced, what trimming and host depletion each left, and what
 #    was kept. Each step behind "details" links to KneadData's table in the
-#    Technical Report.
+#    QC Report.
 TOTAL_READS=${STATS[raw_total]:-}
 
 if [[ "$TOTAL_READS" =~ ^[0-9]+$ ]] && (( TOTAL_READS > 0 )); then
@@ -142,11 +148,14 @@ if [[ "$TOTAL_READS" =~ ^[0-9]+$ ]] && (( TOTAL_READS > 0 )); then
                          "$(human_count "${STATS[reads_max]:-0}")|Max"
 fi
 
-#    The Feature Table card, one tab per tool
+#    The Feature Table card, one tab per tool: the species read counts in three
+#    BIOM formats, and HUMAnN's RPK tables in classic tabular form
 dashboard_tab metaphlan "MetaPhlAn"
-dashboard_button "metaphlan/metaphlan-species-relab.tsv" "Species abundance table" || true
-dashboard_button "metaphlan/metaphlan-relab.tsv" "Abundance table, every rank" || true
-dashboard_folder "metaphlan/" "All MetaPhlAn outputs" || true
+
+dashboard_formats "" \
+    "Species|BIOM (tsv)|metaphlan/metaphlan-species-reads.tsv" \
+    "Species|BIOM (json)|metaphlan/metaphlan-species-reads.json.biom" \
+    "Species|BIOM (hdf5)|metaphlan/metaphlan-species-reads.hdf5.biom" || true
 
 if [[ -n "${STATS[metaphlan_total]:-}" ]]; then
     dashboard_stat_group "CLASSIFICATION" "${STATS[metaphlan_database]:-}"
@@ -154,19 +163,16 @@ if [[ -n "${STATS[metaphlan_total]:-}" ]]; then
 fi
 
 dashboard_tab humann "HUMAnN"
-dashboard_button "humann/pathway-abundance-relab.tsv" "Pathway abundances" || true
-dashboard_button "humann/gene-families-relab.tsv" "Gene family abundances" || true
-dashboard_button "humann/ec-relab.tsv" "Enzyme (EC) abundances" || true
-dashboard_folder "humann/" "All HUMAnN outputs" || true
+
+dashboard_formats "" \
+    "Pathways|BIOM (tsv)|humann/pathway-abundance-rpk.tsv" \
+    "Genes|BIOM (tsv)|humann/gene-families-rpk.tsv" \
+    "Enzymes|BIOM (tsv)|humann/ec-rpk.tsv" || true
 
 if [[ -n "${STATS[humann_total]:-}" ]]; then
-    dashboard_stat_group "CLASSIFICATION"
+    dashboard_stat_group "CLASSIFICATION" "${STATS[humann_database]:-}"
     dashboard_stat_share "Mapped reads" "${STATS[humann_mapped]:-}" "${STATS[humann_total]}"
 fi
-
-dashboard_tab kneaddata "KneadData"
-dashboard_button "kneaddata/read-counts.tsv" "Read count table" || true
-dashboard_folder "kneaddata/" "All KneadData outputs" || true
 
 dashboard_tab_end
 
@@ -196,7 +202,7 @@ if [[ -n "$SAMPLE_COUNT" && ! "$SAMPLE_COUNT" =~ ^[0-9]+$ ]]; then
     SAMPLE_COUNT=""
 fi
 
-# 6. The reads as they went in and the results, as the one download. Built
+# 5. The reads as they went in and the results, as the one download. Built
 #    before the pages, which state its size and address; the reads are stored
 #    as they are, being gzipped already.
 BUNDLE_NAME=$(globus_bundle_name "$RUN_ID" "$TASK_NAME")
@@ -210,24 +216,32 @@ if ! ZIP_OUTPUT=$(globus_archive "$RUN_ID" "$BUNDLE_NAME" "${BUNDLE_PARTS[@]}");
     fail "This run could not be packaged for download:"$'\n'"$ZIP_OUTPUT"
 fi
 
+#    The folders it was zipped from, for the tree the file index draws of it
 dashboard_bundle "$(globus_run_url "$RUN_ID" "$BUNDLE_NAME")" \
-    "$(globus_archive_size "$RUN_ID" "$BUNDLE_NAME")"
+    "$(globus_archive_size "$RUN_ID" "$BUNDLE_NAME")" "${BUNDLE_PARTS[@]%%|*}"
 
-# 7. The three pages, into the results folder
+# 6. The run's record into the results folder, for the file index to list, and
+#    the three pages
+dashboard_stage_records \
+    || warn "The run's record could not be copied into the results; the download will not carry it."
+
 if ! RENDER_OUTPUT=$(render_dashboard "$RUN_ID" "$TASK_NAME" "$SUBTITLE" \
         "$PIPELINE" "$(date '+%b %-d, %Y')" "$SAMPLE_COUNT" "$EXPIRES_ON" \
         "$PLOT_DATA_FILE"); then
     fail "The pages that present these results could not be built:"$'\n'"$RENDER_OUTPUT"
 fi
 
-# 8. And into the archive, which was built without them
-BUNDLE_PAGES=()
-for PAGE in "${DASHBOARD_PAGES[@]}"; do
-    BUNDLE_PAGES+=("$RESULTS_DIR/$PAGE")
-done
+# 7. A listing page in every folder, and one for the staged reads, once every
+#    file published beside them is in place
+if ! "$NEXTFLOW_DIR/scripts/index_directories.sh" "$RESULTS_DIR" "$FASTQ_DIR"; then
+    warn "The results folders could not be indexed; their listings will be missing."
+fi
 
-if ! ZIP_OUTPUT=$(globus_archive_add "$RUN_ID" "$BUNDLE_NAME" "${BUNDLE_PAGES[@]}"); then
-    warn "The download will not carry the dashboard's own pages:"$'\n'"$ZIP_OUTPUT"
+# 8. And all of that into the archive, which was built without it
+mapfile -t BUNDLE_LATE < <(dashboard_late_files)
+
+if ! ZIP_OUTPUT=$(globus_archive_add "$RUN_ID" "$BUNDLE_NAME" "${BUNDLE_LATE[@]}"); then
+    warn "The download will not carry the dashboard's pages, listings and record:"$'\n'"$ZIP_OUTPUT"
 fi
 
 # 9. Everything, the pages last - the landing page replaces the progress page

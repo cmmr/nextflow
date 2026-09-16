@@ -5,8 +5,9 @@
 # Author: Daniel Smith
 # Date:   August 19th, 2026
 #
-# Deletes what the run wrote for itself, gives every folder below the results
-# root a listing page, and copies the folder to
+# Deletes what the run wrote for itself, gives every folder of the results a
+# listing page once the dashboard's pages and the run's own record are in it,
+# and copies the folder to
 # s3://$AWS_S3_BUCKET/$S3_RUN_PREFIX/<uid>/ from the inside out - so
 # multiqc/multiqc_report.html lands directly under the uid - landing the pages
 # that frame it last. Nextflow's work/ directory is left behind.
@@ -168,7 +169,8 @@ fi
 #    would mislead, is deleted rather than published beside it.
 #
 #    The folder's own listing page is passed over: index_directories.sh writes
-#    it after this, and it sorts ahead of every chart in it.
+#    it after this, and on a second upload over the same folder it would sort
+#    ahead of every chart in it.
 KRONA_CHART=""
 KRONA_FALLBACK=""
 
@@ -200,16 +202,7 @@ if ! "$NEXTFLOW_DIR/scripts/prune_results.sh" "$RESULTS_DIR" "$PRUNE_LIST"; then
     warn "The results could not be pruned; the run will publish its working files too."
 fi
 
-# 6. Give every folder below the results root a listing page, so that the folder
-#    links the landing page carries still resolve once the results are objects in
-#    a bucket rather than directories on disk. The staged reads get one too,
-#    written inside the results under their own name: it names every file and its
-#    size, greyed, since those files are only in the download.
-if ! "$NEXTFLOW_DIR/scripts/index_directories.sh" "$RESULTS_DIR" "$FASTQ_DIR"; then
-    warn "The results folders could not be indexed; their listings will be missing."
-fi
-
-# 7. Build the pages that frame all of it, from what the run produced.
+# 6. Build the pages that frame all of it, from what the run produced.
 dashboard_reset "$RESULTS_DIR" "$OUTPUT_CATALOG"
 
 #    The navigation bar, after the Overview every run opens on
@@ -394,15 +387,16 @@ if [[ -n "$SAMPLE_COUNT" && ! "$SAMPLE_COUNT" =~ ^[0-9]+$ ]]; then
     SAMPLE_COUNT=""
 fi
 
-# 8. Package the whole run - the reads as they went in, and the results - as the
+# 7. Package the whole run - the reads as they went in, and the results - as the
 #    one file the dashboard offers. Named after the task and the uid, so a
 #    requester can tell it apart in a downloads folder and still quote the run
 #    back to us.
 #
 #    Built before the pages, because they say how big it is and what address it
-#    is at; the pages then go in on top of it, in step 10. What that leaves out
-#    of the figure the button shows is three HTML files, which is not a size a
-#    reader is being told anything by.
+#    is at; the pages, the folder listings and the run's record then go in on
+#    top of it, in step 10. What that leaves out of the figure the button shows
+#    is a few small text files, which is not a size a reader is being told
+#    anything by.
 #
 #    The reads go in stored (-0), being already gzipped; the results are
 #    deflated, being mostly HTML and tables.
@@ -422,23 +416,35 @@ fi
 dashboard_bundle "$(globus_run_url "$RUN_ID" "$BUNDLE_NAME")" \
     "$(globus_archive_size "$RUN_ID" "$BUNDLE_NAME")"
 
-# 9. Write the three pages into the results folder, so the copy in that archive
-#    is the same dashboard the bucket will serve.
+# 8. Copy the run's record into the results folder, for the file index to list,
+#    and write the three pages there, so the copy in that archive is the same
+#    dashboard the bucket will serve.
+dashboard_stage_records \
+    || warn "The run's record could not be copied into the results; the download will not carry it."
+
 if ! RENDER_OUTPUT=$(render_dashboard "$RUN_ID" "$TASK_NAME" "$SUBTITLE" \
         "$PIPELINE" "$(date '+%b %-d, %Y')" "$SAMPLE_COUNT" "$EXPIRES_ON" \
         "$PLOT_DATA_FILE"); then
     fail "The pages that present these results could not be built:"$'\n'"$RENDER_OUTPUT"
 fi
 
-# 10. And into the archive, which was built without them. A download missing
-#     them is still every file the run produced, so this warns rather than fails.
-BUNDLE_PAGES=()
-for PAGE in "${DASHBOARD_PAGES[@]}"; do
-    BUNDLE_PAGES+=("$RESULTS_DIR/$PAGE")
-done
+# 9. Give every folder of the results a listing page, now that every file
+#    published beside them is in place, so that the folder links the landing
+#    page carries still resolve once the results are objects in a bucket rather
+#    than directories on disk. The staged reads get one too, written inside the
+#    results under their own name: it names every file and its size, greyed,
+#    since those files are only in the download.
+if ! "$NEXTFLOW_DIR/scripts/index_directories.sh" "$RESULTS_DIR" "$FASTQ_DIR"; then
+    warn "The results folders could not be indexed; their listings will be missing."
+fi
 
-if ! ZIP_OUTPUT=$(globus_archive_add "$RUN_ID" "$BUNDLE_NAME" "${BUNDLE_PAGES[@]}"); then
-    warn "The download will not carry the dashboard's own pages:"$'\n'"$ZIP_OUTPUT"
+# 10. And all of that into the archive, which was built without it. A download
+#     missing them is still every file the run produced, so this warns rather
+#     than fails.
+mapfile -t BUNDLE_LATE < <(dashboard_late_files)
+
+if ! ZIP_OUTPUT=$(globus_archive_add "$RUN_ID" "$BUNDLE_NAME" "${BUNDLE_LATE[@]}"); then
+    warn "The download will not carry the dashboard's pages, listings and record:"$'\n'"$ZIP_OUTPUT"
 fi
 
 # 11. Publish everything, the pages last - the landing page overwrites the

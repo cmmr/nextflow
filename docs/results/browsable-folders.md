@@ -9,6 +9,13 @@ before the upload: it walks the results folder and renders
 directory of it, the results folder included — subfolders first, then files with
 their sizes, every entry linked, and a link back up.
 
+**A listing names every file uploaded beside it, except the listings.** The
+upload scripts run it last, once the dashboard's three pages are written and
+`dashboard_stage_records` has copied `run_state.json` and the progress page's
+final `progress.json` into the results folder, so the top listing names those
+too. The listings are then added to the zip with the pages and the records,
+since the zip was built before any of them existed.
+
 Names are HTML-escaped for the page and percent-encoded for the href beside it,
 a byte at a time, since a filename is bytes and a `#` in one would otherwise cut
 its own link short.
@@ -49,8 +56,8 @@ it link up normally and stay in the frame.
 That matters because the landing page reads these listings *inside itself*, and
 the top of a run is the dashboard — so a chain that walked up into it without
 breaking out would open a second copy of the dashboard in the dashboard's own
-frame. The root listing also leaves `index.html` out of its rows for the same
-reason.
+frame. For the same reason the root listing's `index.html` row carries
+`target="_top"` as well.
 
 The one link that would otherwise reach the same dead end is in ampliseq's
 report: its `Final notes` section says the read count report "can be found in

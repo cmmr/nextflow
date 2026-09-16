@@ -5,7 +5,9 @@
   Rendered by publish_dashboard.sh into the results folder as files.html and
   loaded into the landing page's frame. It is the pipeline's output catalog -
   templates/<pipeline>/outputs.conf - as a grouped, annotated index of
-  everything the run published, with a menu of the groups beside it.
+  everything the run published, with a menu of the groups beside it. A group
+  may open with paragraphs saying how its files were made, and each catalog
+  entry is one tbody, so files that share a description share a block.
 
   The rows come out of the same renderer the rest of the page does, so they
   carry class names rather than utilities; the style block below is what those
@@ -55,13 +57,30 @@ __COMMON_HEAD__
   text-transform: uppercase;
   color: var(--muted);
 }
+/* How the group's files were made, between its heading and its rows */
+.groups .group .about {
+  margin: 10px 0 6px;
+  padding: 10px 14px;
+  border-left: 3px solid var(--border);
+  background: #faf9f9;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--muted);
+}
+.groups .group .about p { margin: 0; max-width: 80ch; }
+.groups .group .about p + p { margin-top: 8px; }
+
+/* One catalog entry is one tbody: a row per file, closely set, and a single
+   rule and description under the last of them */
 .groups table { width: 100%; border-collapse: collapse; }
 .groups td {
   padding: 10px;
   border-bottom: 1px solid var(--border);
   vertical-align: top;
 }
-.groups tr:hover { background: var(--row); }
+.groups tbody tr:not(:last-child) td { padding-bottom: 1px; border-bottom: 0; }
+.groups tbody tr + tr td { padding-top: 1px; }
+.groups tbody:hover td { background: var(--row); }
 .groups td.name {
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 13px;
@@ -119,6 +138,19 @@ html.local .groups tr.held .held-note { display: none; }
   text-transform: uppercase;
   color: var(--muted);
   vertical-align: 1px;
+}
+
+/* The folders the archive unpacks into */
+.groups pre.tree {
+  margin: 10px 0 2px;
+  padding: 10px 14px;
+  border-radius: 4px;
+  background: #faf9f9;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--text);
+  overflow-x: auto;
 }
 
 .menu a {

@@ -61,7 +61,7 @@ process METAPHLAN {
         printf '#SampleID\\t${meta.id}\\n'
         printf '#estimated_reads_mapped_to_known_clades:1500\\n'
         printf '#clade_name\\tclade_taxid\\trelative_abundance\\tcoverage\\testimated_number_of_reads_from_the_clade\\n'
-        printf 'UNCLASSIFIED\\t-1\\t25.0\\t\\n'
+        printf 'UNCLASSIFIED\\t-1\\t25.0\\t-\\t500\\n'
         printf 'k__Bacteria\\t2\\t75.0\\t-\\t1500\\n'
         printf 'k__Bacteria|p__Bacillota\\t2|1239\\t75.0\\t-\\t1500\\n'
         printf 'k__Bacteria|p__Bacillota|c__Clostridia\\t2|1239|186801\\t75.0\\t-\\t1500\\n'
@@ -74,8 +74,10 @@ process METAPHLAN {
     """
 }
 
-// The per-sample profiles as one table of relative abundances, sample by
-// column, and the same restricted to species rows
+// The per-sample profiles as one table of relative abundances and one of
+// estimated read counts, sample by column, and each restricted to species rows.
+// The species read counts are also written as JSON (BIOM 1.0) and HDF5 (BIOM
+// 2.1) tables.
 process METAPHLAN_MERGE {
     container 'quay.io/biocontainers/metaphlan:4.1.1--pyhdfd78af_0'
 
@@ -87,6 +89,8 @@ process METAPHLAN_MERGE {
     output:
     path 'metaphlan-relab.tsv'        , emit: merged
     path 'metaphlan-species-relab.tsv', emit: species
+    path 'metaphlan-reads.tsv'        , emit: reads
+    path 'metaphlan-species-reads.*'  , emit: species_reads
 
     script:
     """
@@ -101,7 +105,65 @@ process METAPHLAN_MERGE {
 
     merge_metaphlan_tables.py named/*.txt > metaphlan-relab.tsv
 
+    # The estimated_number_of_reads_from_the_clade column in the same layout: the
+    # database line, then clade_name and one column per sample. A clade a sample
+    # did not report, or reported as -, is 0.
+    awk -F'\\t' '
+        FNR == 1 {
+            version = \$0
+            name = FILENAME
+            sub(/.*\\//, "", name)
+            sub(/\\.txt\$/, "", name)
+            samples[++n] = name
+        }
+
+        /^#/ { next }
+
+        !(\$1 in seen) { seen[\$1]; clades[++m] = \$1 }
+
+        { reads[\$1, n] = \$5 + 0 }
+
+        END {
+            print version
+            printf "clade_name"
+            for (j = 1; j <= n; j++) printf "\\t%s", samples[j]
+            print ""
+
+            for (i = 1; i <= m; i++) {
+                printf "%s", clades[i]
+                for (j = 1; j <= n; j++) printf "\\t%d", reads[clades[i], j]
+                print ""
+            }
+        }
+    ' named/*.txt > metaphlan-reads.tsv
+
     awk -F'\\t' 'NR <= 2 || (\$1 ~ /\\|s__/ && \$1 !~ /\\|t__/)' metaphlan-relab.tsv \\
         > metaphlan-species-relab.tsv
+
+    # The species read counts as a BIOM table in classic tabular form: one row per
+    # species, named without its s__ prefix, with its lineage as the taxonomy
+    awk -F'\\t' -v OFS='\\t' '
+        NR == 1 { next }
+
+        NR == 2 {
+            \$1 = "#OTU ID"
+            print "# Constructed from biom file"
+            print \$0, "taxonomy"
+            next
+        }
+
+        \$1 ~ /\\|s__/ && \$1 !~ /\\|t__/ {
+            taxonomy = \$1
+            gsub(/\\|/, "; ", taxonomy)
+            sub(/.*\\|s__/, "", \$1)
+            print \$0, taxonomy
+        }
+    ' metaphlan-reads.tsv > metaphlan-species-reads.tsv
+
+    biom convert -i metaphlan-species-reads.tsv -o metaphlan-species-reads.json.biom \\
+        --to-json --table-type "Taxon table" --process-obs-metadata taxonomy
+
+    biom convert -i metaphlan-species-reads.tsv -o metaphlan-species-reads.hdf5.biom \\
+        --to-hdf5 --table-type "Taxon table" --process-obs-metadata taxonomy
     """
 }

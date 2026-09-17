@@ -22,7 +22,8 @@
 #
 # The sidebar's numbers go to the "statistics" of the state file: KneadData's
 # read counts after each step, the share of reads MetaPhlAn mapped to a known
-# clade, and the share HUMAnN aligned.
+# clade, the share HUMAnN aligned, and the share Marker-MAGu aligned to a
+# marker gene.
 #
 # Usage:     biobakery_composition.sh [results_dir]
 #            defaults to ./results, the outdir set in the biobakery params file
@@ -30,9 +31,11 @@
 # Requires:  GNU awk
 # Reads:     <results_dir>/metaphlan/profiles/, <results_dir>/kneaddata/read-counts.tsv,
 #            <results_dir>/humann/alignment-summary.tsv,
-#            <results_dir>/nonpareil/nonpareil-curves.tsv and
-#            <results_dir>/motus/profiles/, each optional; and the HUMAnN
-#            database directories the manifest in ./run_state.json records
+#            <results_dir>/nonpareil/nonpareil-curves.tsv,
+#            <results_dir>/motus/profiles/ and
+#            <results_dir>/markermagu/virus-{profile,read-counts}.tsv, each
+#            optional; and the HUMAnN database directories the manifest in
+#            ./run_state.json records
 # Outputs:   ./composition_data.json, <results_dir>/alpha_diversity.tsv, and the
 #            "statistics" of ./run_state.json
 # Env:       the log/warn/fail helpers and the run state helpers, sourced from .env
@@ -51,6 +54,9 @@ readonly HUMANN_SUMMARY="$RESULTS_DIR/humann/alignment-summary.tsv"
 readonly NONPAREIL_SUMMARY="$RESULTS_DIR/nonpareil/nonpareil-curves.tsv"
 readonly MOTUS_DIR="$RESULTS_DIR/motus/profiles"
 readonly MOTUS_SUFFIX=".motus_profile.txt"
+readonly MARKERMAGU_PROFILE="$RESULTS_DIR/markermagu/virus-profile.tsv"
+readonly MARKERMAGU_READS="$RESULTS_DIR/markermagu/virus-read-counts.tsv"
+readonly MARKERMAGU_COUNTS="$RESULTS_DIR/markermagu/virus-counts.tsv"
 readonly ALPHA_TABLE="$RESULTS_DIR/alpha_diversity.tsv"
 
 readonly PLOT_DATA="composition_data.json"
@@ -532,6 +538,38 @@ humann_mapping() {
     ' "$DEPTHS" "$HUMANN_SUMMARY"
 }
 
+# The same for Marker-MAGu: the reads it read, and the reads it aligned to a
+# marker gene of a species-level genome bin it went on to report. Unlike
+# MetaPhlAn's, these are marker gene reads rather than an estimate of every read
+# the organisms contributed, so the share is a much smaller one.
+markermagu_mapping() {
+    LC_ALL=C awk -F'\t' '
+        NR == FNR { if (FNR > 1) total += $2; next }
+
+        FNR == 1 { next }
+
+        { mapped += $5 }
+
+        END {
+            if (total > 0)
+                printf "markermagu_total\t%d\nmarkermagu_mapped\t%d\n", total, mapped
+        }
+    ' "$MARKERMAGU_READS" "$MARKERMAGU_PROFILE"
+}
+
+# The Marker-MAGu database this run read, as its tables name it on their first
+# line, e.g. "Marker-MAGu_markerDB_v1.1"
+markermagu_database() {
+    local database
+
+    database=$(head -n 1 "$MARKERMAGU_COUNTS")
+    database=${database#\#}
+
+    [[ -n "$database" ]] || return 0
+
+    printf 'markermagu_database\t%s\n' "$database"
+}
+
 # The HUMAnN databases this run was given, as wrike_job.sh recorded them in the
 # manifest, by the versions their files are named with, e.g.
 # "ChocoPhlAn v201901_v31 · UniRef90 v201901b". A database whose directory cannot
@@ -596,6 +634,14 @@ write_run_statistics() {
         if [[ -s "$DEPTHS" && -s "$HUMANN_SUMMARY" ]]; then
             humann_mapping
             humann_databases
+        fi
+
+        if [[ -s "$MARKERMAGU_READS" && -s "$MARKERMAGU_PROFILE" ]]; then
+            markermagu_mapping
+
+            if [[ -s "$MARKERMAGU_COUNTS" ]]; then
+                markermagu_database
+            fi
         fi
     } | state_set_tsv "$STATS_KEY"
 }

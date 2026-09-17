@@ -20,7 +20,7 @@ include { HUMANN_PREPARE_PROFILE; HUMANN_PROFILE; HUMANN_TABLES } from '../../mo
 include { MOTUS; MOTUS_MERGE }                                    from '../../modules/motus.nf'
 include { NONPAREIL; NONPAREIL_CURVES }                           from '../../modules/nonpareil.nf'
 include { ESVIRITU; ESVIRITU_SUMMARY }                            from '../../modules/esviritu.nf'
-include { MARKERMAGU; MARKERMAGU_MERGE }                          from '../../modules/markermagu.nf'
+include { MARKERMAGU; MARKERMAGU_MERGE; MARKERMAGU_TABLES }       from '../../modules/markermagu.nf'
 include { MULTIQC }                                               from '../../modules/multiqc.nf'
 
 // A database parameter as a path, failing the run before any task starts when
@@ -111,11 +111,19 @@ workflow {
     }
 
     if (params.run_markermagu) {
-        MARKERMAGU(ch_reads, database('markermagu_db'))
+        def markermagu_db = database('markermagu_db')
+
+        MARKERMAGU(ch_reads, markermagu_db)
 
         MARKERMAGU_MERGE(
             MARKERMAGU.out.profile.map { meta, profile -> profile }.collect(),
             MARKERMAGU.out.stats.collect()
+        )
+
+        MARKERMAGU_TABLES(
+            MARKERMAGU_MERGE.out.profile,
+            MARKERMAGU_MERGE.out.read_counts,
+            markermagu_db
         )
     }
 

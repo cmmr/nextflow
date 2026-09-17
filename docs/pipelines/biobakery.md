@@ -34,6 +34,7 @@ For how a request becomes a run at all, see the [Overview](../index.md).
 | Nonpareil | **3.5.5** | `quay.io/biocontainers/nonpareil:3.5.5--r43hdcf5f25_0`, in `modules/nonpareil.nf` |
 | EsViritu | **1.3.3** | `quay.io/biocontainers/esviritu:1.3.3--pyhdfd78af_0`, in `modules/esviritu.nf` |
 | Marker-MAGu | **0.4.0** | `quay.io/biocontainers/marker-magu:0.4.0--pyhdfd78af_1`, in `modules/markermagu.nf` |
+| biom-format | **2.1.17** | `quay.io/biocontainers/biom-format:2.1.17`, in `modules/markermagu.nf`, for Marker-MAGu's BIOM tables |
 | MultiQC | **1.35** | `quay.io/biocontainers/multiqc:1.35--pyhdfd78af_1`, in `modules/multiqc.nf` |
 | MetaPhlAn database | **mpa_vJun23_CHOCOPhlAnSGB_202403** | `db/metaphlan/…`, shared with taxprofiler |
 | HUMAnN databases | **v201901_v31** / **v201901b** | `db/humann/v201901b/…`, shared with taxprofiler |
@@ -127,6 +128,7 @@ workflows/biobakery/
   nextflow.config      parameter defaults, profiles, execution reports
   conf/base.config     per-process resources and retries
   bin/                 helper scripts Nextflow puts on each task's PATH
+                         metaphlan_sgb_biom.py, markermagu_tables.py
 modules/
   kneaddata.nf         KNEADDATA, KNEADDATA_COUNTS
   metaphlan.nf         METAPHLAN, METAPHLAN_MERGE
@@ -134,7 +136,7 @@ modules/
   motus.nf             MOTUS, MOTUS_MERGE
   nonpareil.nf         NONPAREIL, NONPAREIL_CURVES
   esviritu.nf          ESVIRITU, ESVIRITU_SUMMARY
-  markermagu.nf        MARKERMAGU, MARKERMAGU_MERGE
+  markermagu.nf        MARKERMAGU, MARKERMAGU_MERGE, MARKERMAGU_TABLES
   multiqc.nf           MULTIQC
 config/biobakery/
   slurm.config         the cluster: executor, node sizes, apptainer
@@ -470,14 +472,23 @@ least three markers — and at least four markers and ten reads back it. Its abu
 reads per kilobase of marker per million reads, rescaled so that each sample's
 abundances sum to 1.
 
-**This overlaps MetaPhlAn on purpose, and the phages are the point.** Under
-`relaxed` the bacteria and archaea come out much as MetaPhlAn 4 reports them;
-under `default`, the setting this pipeline uses, they are somewhat fewer and
-somewhat surer. Neither table replaces MetaPhlAn's — Marker-MAGu has no
-unclassified share, so its abundances are shares of what was identified rather
-than of the sample — and the reason to read it is the `k__Viruses` rows, which
-MetaPhlAn has nothing to say about. A phage with fewer than four marker genes
-cannot be detected at all, which leaves out the small single-stranded
+**The threshold is a share of an SGB's markers, so it falls hardest on the
+organisms with the most of them.** A phage in this database has four to seven
+marker genes and needs three or four of them hit; a bacterium has hundreds and
+needs three quarters of them hit, which a shallow sample cannot do however
+clearly the organism is there. On a run of about 1.3M retained reads per
+sample, `default` reported nothing but `k__Viruses` — the bacteria MetaPhlAn
+found in the same reads were all below it. `markermagu_detection` set to
+`relaxed` is what makes the bacterial half of the table comparable with
+MetaPhlAn 4's; on `default` these tables are effectively the phage tables, which
+is why their names carry a `virus-` prefix.
+
+**Either way they do not replace MetaPhlAn's.** Marker-MAGu has no unclassified
+share, so its abundances are shares of what was identified rather than of the
+sample, and its counts are marker gene reads rather than an estimate of every
+read an organism contributed. The reason to read it is the `k__Viruses` rows,
+which MetaPhlAn has nothing to say about. A phage with fewer than four marker
+genes cannot be detected at all, which leaves out the small single-stranded
 microviruses and inoviruses.
 
 - **Every cleaned file goes in at once.** Marker-MAGu pools the reads it is
@@ -492,20 +503,50 @@ microviruses and inoviruses.
   either is missing. A sample nothing passed the thresholds in is not that case:
   it gets a profile holding its header alone.
 
+### The tables
+
 `MARKERMAGU_MERGE` runs Marker-MAGu's own `combine_sample_tables1.R` over every
-sample's profile and publishes under `markermagu/`:
+sample's profile, and `MARKERMAGU_TABLES` turns that long form into **the same
+tables MetaPhlAn's profile is published as**, so the two can be read side by
+side:
 
-| File | Rows |
-| --- | --- |
-| `markermagu-relab.tsv` | one per SGB, one column per sample, relative abundance |
-| `markermagu-counts.tsv` | the same, as the reads aligned to each SGB's markers |
-| `markermagu-profile.tsv` | Marker-MAGu's long form, every sample stacked, with the marker counts behind each call |
-| `read-counts.tsv` | one per sample: the reads and bases it read, which RPKM is per million of |
+| MetaPhlAn | Marker-MAGu | Holds |
+| --- | --- | --- |
+| `metaphlan-counts.tsv`, `metaphlan-relab.tsv` | `virus-counts.tsv`, `virus-relab.tsv` | every clade from kingdom to SGB, one column per sample, as reads and as percentages |
+| `species-counts.tsv`, `species-relab.tsv` | — | a Marker-MAGu lineage ends at its SGB, which is its species, so the feature table is the species table |
+| `taxa-counts.tsv`, `.json.biom`, `.hdf5.biom` | `virus-taxa-counts.tsv`, `.json.biom`, `.hdf5.biom` | the SGB rows as a feature table, keyed by the SGB's own name |
+| `taxa-tree.newick` | — | Marker-MAGu publishes no phylogeny of its SGBs |
+| — | `virus-profile.tsv` | Marker-MAGu's long form: the marker counts behind each call, which no other table carries |
+| — | `virus-read-counts.tsv` | one row per sample: the reads and bases it read, which RPKM is per million of |
 
-The wide tables take their columns from `read-counts.tsv` rather than from the
-profiles, so **a sample Marker-MAGu detected nothing in is a column of zeros**
-rather than a column missing. The per-sample profiles are published under
-`markermagu/profiles/` and pruned before the results are indexed.
+**Every name carries a `virus-` prefix** so that no two files of a run share a
+basename, and because in practice these tables are the viral ones — see the
+threshold note above.
+
+Three differences from MetaPhlAn's tables are worth knowing before reading them
+together:
+
+- **The counts are marker gene reads.** MetaPhlAn scales a clade's marker
+  coverage up by genome length to estimate every read it contributed;
+  Marker-MAGu's counts are the reads that actually aligned to a marker. A
+  sample's column totals its marker gene reads, not its sequencing depth.
+- **There is no `UNCLASSIFIED` row.** Marker-MAGu reports no unclassified share
+  and rescales each sample to 100% of what it identified, so a percentage in
+  `virus-relab.tsv` is a share of what was detected. MetaPhlAn's is a share of
+  the sample.
+- **The feature tables carry no tree**, since there is no phylogeny to put in
+  them, so UniFrac and Faith's PD cannot be computed from them as they can from
+  MetaPhlAn's.
+
+The tables take their sample columns from `virus-read-counts.tsv` rather than
+from the profiles, so **a sample Marker-MAGu detected nothing in is a column of
+zeros** rather than a column missing. The per-sample profiles are published
+under `markermagu/profiles/` and pruned before the results are indexed.
+
+`MARKERMAGU_TABLES` runs in the biom-format container rather than Marker-MAGu's,
+which ships neither biom-format nor numpy;
+[`bin/markermagu_tables.py`](../../workflows/biobakery/bin/markermagu_tables.py)
+is the counterpart of `metaphlan_sgb_biom.py`.
 
 `MARKERMAGU` is retried twice with more memory and time, then lets running tasks
 finish and stops, as mOTUs and EsViritu do.
@@ -550,10 +591,13 @@ plus a fourth, Methods. The navigation bar reads:
   module a run did not enable leaves its tab off. The EsViritu tab offers the
   taxa and genome tables and the interactive report, and one bar, "Samples with
   a virus", out of the samples EsViritu read, with the database release under
-  it. The Marker-MAGu tab offers its three tables and one bar, "Phage taxa",
-  the SGBs it detected whose lineage begins `k__Viruses` out of every SGB it
-  detected. Neither has a link of its own in the navigation bar; their files are
-  sections of Deliverables.
+  it. The Marker-MAGu tab mirrors the MetaPhlAn one: the same three BIOM
+  formats of its own feature table, and one "Mapped reads" bar — the reads it
+  aligned to a marker gene of an SGB it reported, out of the reads KneadData
+  retained. That share is much the smaller of the two, since these are marker
+  gene reads rather than MetaPhlAn's estimate of every read an organism
+  contributed, and the two bars are not comparable. Neither tool has a link of
+  its own in the navigation bar; their files are sections of Deliverables.
 - **The QC Report is MultiQC**, over KneadData's FastQC reports and its
   read count table as a section of its own, and mOTUs' logs and Nonpareil's
   curves on a run with either. It is the only report the run adds;
@@ -722,6 +766,8 @@ catalogue, split into chunks, while it aligns.
 - **KneadData, MetaPhlAn, mOTUs, EsViritu and Marker-MAGu retry twice**, with
   more memory and time each time, then let running tasks finish and stop. All
   five read the requester's reads or a database over the shared filesystem.
+  `MARKERMAGU_TABLES` is a small task beside them: two cpus and 8 GB, over
+  tables of a few hundred rows.
 - **HUMAnN** keeps taxprofiler's policy: a sample is retried once with twice the
   memory and time, then left out of the tables.
 - **Nonpareil** is retried three times and then left out of the diversity table,

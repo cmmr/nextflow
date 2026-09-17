@@ -285,26 +285,26 @@
       "cite": ["shaw2024", "parks2022"]
     },
     {
-      "path": "test-fastq/PRJEB87273",
-      "name": "Global urban virome sewage reads",
-      "release": "PRJEB87273",
-      "description": "Five paired-end Illumina MiSeq runs of untreated urban sewage from the Global Sewage Surveillance project, one per country: Slovakia (ERR14789436), Togo (ERR14789487), Austria (ERR14789258), France (ERR14788854), Cameroon (ERR14788949). Random shotgun sequencing of a virus-enriched extract, 8.0 million read pairs and 1.0 GB in all, for a biobakery run that should detect viruses - which the paleofeces reads beside them do not. samplesheet.csv beside the reads names them as biobakery_samplesheet.csv would.",
+      "path": "test-fastq/PRJEB27054",
+      "name": "Global sewage surveillance reads",
+      "release": "PRJEB27054",
+      "description": "Five paired-end Illumina HiSeq 3000 runs of untreated urban sewage from the global sewage surveillance of antimicrobial resistance, one per country: Kenya (ERR2607483), USA (ERR2607583), Botswana (ERR2607398), Australia (ERR2607380), South Africa (ERR2607593). Sequenced at random with nothing enriched or captured, 7.1 million read pairs of 151 bp and 1.4 GB in all, so bacteria dominate as they do an ordinary metagenome and every module has something to profile. samplesheet.csv beside the reads names them as biobakery_samplesheet.csv would, with South Africa written South_Africa. PRJEB87273, the virome project beside it, is enriched for virus particles instead: EsViritu and Marker-MAGu find plenty there and everything else comes back all but empty (run uvaelmuf).",
       "used_by": [
-        "by hand: db/test-fastq/PRJEB87273/samplesheet.csv, for a positive-control run; nothing in the repository reads them"
+        "by hand: db/test-fastq/PRJEB27054/samplesheet.csv, for a run over real samples; nothing in the repository reads them"
       ],
       "setup": "scripts/fetch_taxprofiler_db.sh sewage",
-      "manifest": "test-fastq/PRJEB87273.manifest.json",
+      "manifest": "test-fastq/PRJEB27054.manifest.json",
       "sources": [
-        { "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/ERR147/036/ERR14789436/ERR14789436_1.fastq.gz", "md5": "cbe17c1edd9b6bb56492571f27bea69f" },
-        { "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/ERR147/036/ERR14789436/ERR14789436_2.fastq.gz", "md5": "0f460134cac05ca72f2b3f841708d0c4" },
-        { "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/ERR147/087/ERR14789487/ERR14789487_1.fastq.gz", "md5": "341f26dddf5685ebc904337ca273427b" },
-        { "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/ERR147/087/ERR14789487/ERR14789487_2.fastq.gz", "md5": "001d15c0eeef0cf5b69e1854b8a58741" },
-        { "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/ERR147/058/ERR14789258/ERR14789258_1.fastq.gz", "md5": "1c312232609a07ada81a72d04165a72f" },
-        { "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/ERR147/058/ERR14789258/ERR14789258_2.fastq.gz", "md5": "f1ce355a8f5cdbbbb5f76214b4e8cc43" },
-        { "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/ERR147/054/ERR14788854/ERR14788854_1.fastq.gz", "md5": "9fb1cbe47795e64805bedfcce2671964" },
-        { "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/ERR147/054/ERR14788854/ERR14788854_2.fastq.gz", "md5": "ff9cbcd8f691c1765534d5149414fdeb" },
-        { "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/ERR147/049/ERR14788949/ERR14788949_1.fastq.gz", "md5": "b6aac2849108909c75603b5f9f0a0e3b" },
-        { "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/ERR147/049/ERR14788949/ERR14788949_2.fastq.gz", "md5": "789954a918c15724c8f76681c813c1a3" }
+        { "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/ERR260/003/ERR2607483/ERR2607483_1.fastq.gz", "md5": "a1c096a9c4e674d9ce01d4aac6d434ab" },
+        { "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/ERR260/003/ERR2607483/ERR2607483_2.fastq.gz", "md5": "f417a501d31b9cea3dd68ae679792b8b" },
+        { "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/ERR260/003/ERR2607583/ERR2607583_1.fastq.gz", "md5": "2798deb7fdab1bc5e58b4b7599a772db" },
+        { "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/ERR260/003/ERR2607583/ERR2607583_2.fastq.gz", "md5": "5da0007a117062fdb59710bf3d6f7223" },
+        { "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/ERR260/008/ERR2607398/ERR2607398_1.fastq.gz", "md5": "ba8b77678f120820f9090acbe217f415" },
+        { "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/ERR260/008/ERR2607398/ERR2607398_2.fastq.gz", "md5": "21ccc6a854d502bed8fdb4f3e9487da3" },
+        { "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/ERR260/000/ERR2607380/ERR2607380_1.fastq.gz", "md5": "939d3ea857285bf45962de0e0e91c7b2" },
+        { "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/ERR260/000/ERR2607380/ERR2607380_2.fastq.gz", "md5": "d6268a9280d253522f6e6d2c77fc5ed5" },
+        { "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/ERR260/003/ERR2607593/ERR2607593_1.fastq.gz", "md5": "0cbbfc2b4fbe21e6aad34b583f034720" },
+        { "url": "https://ftp.sra.ebi.ac.uk/vol1/fastq/ERR260/003/ERR2607593/ERR2607593_2.fastq.gz", "md5": "40bd880d1bef5015a50c2c675dfeb3f4" }
       ],
       "doi": null,
       "cite": []
@@ -312,7 +312,7 @@
     {
       "path": "test-fastq",
       "name": "Test reads",
-      "description": "Small paired-end and single-end Illumina runs from nf-core/test-datasets, for trying a pipeline by hand. ERX5474932 has two runs (ERR5766176 and ERR5766176_B); ERX5474936 is single-end. All of them are subsampled from one ancient human paleofeces sample (ENA PRJEB44507, Eurac ID 2612), so they carry no virus EsViritu can detect; test-fastq/PRJEB87273 is the set for that.",
+      "description": "Small paired-end and single-end Illumina runs from nf-core/test-datasets, for trying a pipeline by hand. ERX5474932 has two runs (ERR5766176 and ERR5766176_B); ERX5474936 is single-end. All of them are subsampled from one ancient human paleofeces sample (ENA PRJEB44507, Eurac ID 2612), so they carry no virus EsViritu can detect; test-fastq/PRJEB27054 is a set of real samples.",
       "used_by": [
         "by hand: a samplesheet naming them, for a quick test run; nothing in the repository reads them"
       ],

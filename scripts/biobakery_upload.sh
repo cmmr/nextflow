@@ -206,26 +206,20 @@ if [[ -r "$ESVIRITU_READ_COUNTS" ]]; then
         "Samples in which EsViritu aligned reads to at least one of the human, animal and plant virus genomes in its database, keeping only reads that align over at least 100 bases and 90% of their length at 80% identity or better. A sample absent from the taxa table had no such read."
 fi
 
-#    Marker-MAGu's profile, and the phage taxa among everything it detected
+#    Marker-MAGu's SGB read counts in the same three BIOM formats, and the
+#    reads it aligned to a marker gene
 dashboard_tab markermagu "Marker-MAGu"
 
 dashboard_formats "" \
-    "Taxa|TSV|markermagu/markermagu-relab.tsv" \
-    "Reads|TSV|markermagu/markermagu-counts.tsv" \
-    "Long|TSV|markermagu/markermagu-profile.tsv" || true
+    "Taxa|BIOM (tsv)|markermagu/virus-taxa-counts.tsv" \
+    "Taxa|BIOM (json)|markermagu/virus-taxa-counts.json.biom" \
+    "Taxa|BIOM (hdf5)|markermagu/virus-taxa-counts.hdf5.biom" || true
 
-MARKERMAGU_PROFILE="$RESULTS_DIR/markermagu/markermagu-profile.tsv"
-
-if [[ -r "$MARKERMAGU_PROFILE" ]]; then
-    MARKERMAGU_TAXA=$(tail -n +2 "$MARKERMAGU_PROFILE" | cut -f1 | LC_ALL=C sort -u | wc -l)
-    MARKERMAGU_PHAGES=$(tail -n +2 "$MARKERMAGU_PROFILE" | cut -f1 | LC_ALL=C sort -u \
-        | grep -c '^k__Viruses' || true)
-    MARKERMAGU_DB=$(state_get "$RUN_MANIFEST_KEY.params.markermagu_db")
-
+if [[ -n "${STATS[markermagu_mapped]:-}" ]]; then
     dashboard_stat_group
-    dashboard_stat_share_of "Phage taxa" "$MARKERMAGU_PHAGES" "$MARKERMAGU_TAXA" \
-        "${MARKERMAGU_DB:+Marker-MAGu database ${MARKERMAGU_DB##*/}}" \
-        "Species-level genome bins whose lineage begins k__Viruses, out of every bin Marker-MAGu detected across the run. The rest are the bacteria, archaea and microeukaryotes MetaPhlAn profiles as well; the phages are what this tool adds."
+    dashboard_stat_share_of "Mapped reads" "${STATS[markermagu_mapped]}" \
+        "${STATS[retained_total]:-${STATS[markermagu_total]:-}}" "${STATS[markermagu_database]:-}" \
+        "Reads aligned to a marker gene of one of the species-level genome bins Marker-MAGu reported, out of the reads KneadData retained. These are marker gene reads, not an estimate of every read those organisms contributed the way MetaPhlAn's are, so this share is a much smaller one and is not comparable with MetaPhlAn's above."
 fi
 
 dashboard_tab_end

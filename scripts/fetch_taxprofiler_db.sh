@@ -34,7 +34,8 @@
 #   <release>.manifest.json   source URLs, checksums, sizes, and when it was fetched
 #
 # "sewage" is the one argument that fetches no database: it is five runs of
-# sewage reads, into db/test-fastq/, for a run that should find viruses.
+# untreated sewage reads, into db/test-fastq/, for a run over samples that carry
+# something.
 #
 # Usage:     fetch_taxprofiler_db.sh <kraken2|metaphlan|motus|humann|esviritu|markermagu|sewage>
 #
@@ -137,26 +138,32 @@ readonly MARKERMAGU_RELEASE="v1.1"
 readonly MARKERMAGU_URL="https://zenodo.org/records/8342581/files/Marker-MAGu_markerDB_$MARKERMAGU_RELEASE.tar.gz"
 readonly MARKERMAGU_MD5="e0947cb1d4a3df09829e98627021e0dd"
 
-# Sewage reads, not a database: five runs of ENA PRJEB87273, the Global Sewage
-# Surveillance project's urban virome, for a run that should find viruses. The
-# nf-core test reads in db/test-fastq are all one ancient paleofeces sample and
-# find none.
+# Sewage reads, not a database: five runs of ENA PRJEB27054, the global sewage
+# surveillance of antimicrobial resistance, for a run over samples that carry
+# something. The nf-core test reads in db/test-fastq are all one ancient
+# paleofeces sample.
 #
-# One run per country, the largest of each that is still small - 1.4 to 1.8
-# million pairs, about 1 GB in all - sequenced at random off a virus-enriched
-# extract, so MetaPhlAn and HUMAnN have something to profile too.
-readonly SEWAGE_PROJECT="PRJEB87273"
+# One run per country, the smallest of each - 1.1 to 1.9 million pairs of 151 bp,
+# about 1.4 GB in all - sequenced at random off untreated sewage, with nothing
+# enriched or captured, so bacteria dominate them as they do an ordinary
+# metagenome and the enteric viruses are there to be found underneath.
+#
+# PRJEB87273, the virome project beside it, is the other choice and was fetched
+# here before this: enriched for virus particles, so EsViritu and Marker-MAGu
+# find plenty and MetaPhlAn, HUMAnN and the diversity readings come back all but
+# empty (run uvaelmuf: 832 of 6.4 million reads on a MetaPhlAn marker).
+readonly SEWAGE_PROJECT="PRJEB27054"
 readonly SEWAGE_BASE="https://ftp.sra.ebi.ac.uk/vol1/fastq"
 
 # run|ENA subdirectory|country|collected|md5 of _1|md5 of _2. ENA derives that
 # subdirectory from the accession by a rule that changes with its length, so it
 # is pinned here rather than worked out. The checksums are ENA's own.
 readonly SEWAGE_RUNS=(
-    "ERR14789436|036|Slovakia|2017-06-22|cbe17c1edd9b6bb56492571f27bea69f|0f460134cac05ca72f2b3f841708d0c4"
-    "ERR14789487|087|Togo|2017-11-27|341f26dddf5685ebc904337ca273427b|001d15c0eeef0cf5b69e1854b8a58741"
-    "ERR14789258|058|Austria|2018-11-08|1c312232609a07ada81a72d04165a72f|f1ce355a8f5cdbbbb5f76214b4e8cc43"
-    "ERR14788854|054|France|2017-11-20|9fb1cbe47795e64805bedfcce2671964|ff9cbcd8f691c1765534d5149414fdeb"
-    "ERR14788949|049|Cameroon|2017-08-18|b6aac2849108909c75603b5f9f0a0e3b|789954a918c15724c8f76681c813c1a3"
+    "ERR2607483|003|Kenya|2016-08-02|a1c096a9c4e674d9ce01d4aac6d434ab|f417a501d31b9cea3dd68ae679792b8b"
+    "ERR2607583|003|USA|2016-02-23|2798deb7fdab1bc5e58b4b7599a772db|5da0007a117062fdb59710bf3d6f7223"
+    "ERR2607398|008|Botswana|2016-01-25|ba8b77678f120820f9090acbe217f415|21ccc6a854d502bed8fdb4f3e9487da3"
+    "ERR2607380|000|Australia|2016-08-02|939d3ea857285bf45962de0e0e91c7b2|d6268a9280d253522f6e6d2c77fc5ed5"
+    "ERR2607593|003|South Africa|2016-04-02|0cbbfc2b4fbe21e6aad34b583f034720|40bd880d1bef5015a50c2c675dfeb3f4"
 )
 
 
@@ -678,7 +685,9 @@ fetch_sewage() {
     local -a md5s=()
 
     # A samplesheet in the columns workflows/biobakery reads, each sample named
-    # after the city's country, since no two of these runs share one
+    # after the city's country, since no two of these runs share one. A space in
+    # a name would reach a task as two arguments, so "South Africa" is written
+    # South_Africa.
     printf 'sample,run_accession,instrument_platform,fastq_1,fastq_2\n' > "$partial/samplesheet.csv"
 
     for entry in "${SEWAGE_RUNS[@]}"; do
@@ -695,14 +704,14 @@ fetch_sewage() {
             record_source "$url" "$md5" "$(stat -c%s "$file")"
         done
 
-        printf '%s,%s,ILLUMINA,%s,%s\n' "$country" "$run" \
+        printf '%s,%s,ILLUMINA,%s,%s\n' "${country// /_}" "$run" \
             "$out_dir/${run}_1.fastq.gz" "$out_dir/${run}_2.fastq.gz" >> "$partial/samplesheet.csv"
     done
 
     mv "$partial" "$out_dir" || fail "Could not move the reads into $out_dir."
 
     write_manifest "$SEWAGE_PROJECT" "$out_dir" "$manifest" \
-        "Five paired-end runs of ENA $SEWAGE_PROJECT, the Global Sewage Surveillance project's urban virome, one per country, for a positive-control run: untreated sewage sequenced at random off a virus-enriched extract. Not a database; nothing in the repository reads them. The md5 of each file is ENA's own. samplesheet.csv names them in the columns workflows/biobakery reads."
+        "Five paired-end runs of ENA $SEWAGE_PROJECT, the global sewage surveillance of antimicrobial resistance, one per country: untreated sewage sequenced at random, nothing enriched or captured, so bacteria dominate as in an ordinary metagenome. Not a database; nothing in the repository reads them. The md5 of each file is ENA's own. samplesheet.csv names them in the columns workflows/biobakery reads."
 
     log "Fetched $SEWAGE_PROJECT:"
     log "  reads:       $out_dir (${#SEWAGE_RUNS[@]} runs, $(du -sh "$out_dir" | cut -f1))"

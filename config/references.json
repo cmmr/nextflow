@@ -319,6 +319,19 @@
       "pages": "6878",
       "doi": "10.1038/s41467-023-42064-1"
     },
+    "tisza2025": {
+      "type": "article",
+      "author": ["Tisza, MJ", "Lloyd, RE", "Hoffman, K", "Smith, DP", "Rewers, M", "Javornik Cregeen, SJ"],
+      "et_al": true,
+      "title": "Longitudinal phage-bacteria dynamics in the early life gut microbiome",
+      "journal": "Nature Microbiology",
+      "journal_abbrev": "Nat Microbiol",
+      "year": 2025,
+      "volume": "10",
+      "number": "2",
+      "pages": "420–430",
+      "doi": "10.1038/s41564-024-01906-4"
+    },
     "wood2019": {
       "type": "article",
       "author": ["Wood, DE", "Lu, J", "Langmead, B"],

@@ -7,15 +7,17 @@ the host, [MetaPhlAn](https://github.com/biobakery/MetaPhlAn) says what was in
 each sample, and [HUMAnN](https://github.com/biobakery/humann) says what those
 communities can do. [mOTUs](https://github.com/motu-tool/mOTUs) and
 [Nonpareil](https://github.com/lmrodriguezr/nonpareil) beside them say how
-diverse each community is, for the Overview's diversity chart, and
+diverse each community is, for the Overview's diversity chart,
 [EsViritu](https://github.com/cmmr/EsViritu) finds the human, animal and plant
-viruses among the reads.
+viruses among the reads, and
+[Marker-MAGu](https://github.com/cmmr/Marker-MAGu) profiles gut phages beside
+the bacteria and archaea in one marker gene pass.
 
-KneadData and MetaPhlAn run on every sample; HUMAnN, mOTUs, Nonpareil and
-EsViritu are modules a run can switch off. The workflow is built so that more
-optional modules can be added beside it — [Marker-MAGu](https://github.com/cmmr/Marker-MAGu)
-is the one planned — and so that the whole of it can later be packaged into one
-Nix image with the databases mounted from outside; see
+KneadData and MetaPhlAn run on every sample; HUMAnN, mOTUs, Nonpareil, EsViritu
+and Marker-MAGu are modules a run can switch off. The workflow is built so that
+more optional modules can be added beside it — see
+[Adding a module](#adding-a-module) — and so that the whole of it can later be
+packaged into one Nix image with the databases mounted from outside; see
 [Toward a container](#toward-a-container).
 
 For how a request becomes a run at all, see the [Overview](../index.md).
@@ -31,11 +33,13 @@ For how a request becomes a run at all, see the [Overview](../index.md).
 | mOTUs | **3.1.0** | `quay.io/biocontainers/motus:3.1.0--pyhdfd78af_0`, in `modules/motus.nf` |
 | Nonpareil | **3.5.5** | `quay.io/biocontainers/nonpareil:3.5.5--r43hdcf5f25_0`, in `modules/nonpareil.nf` |
 | EsViritu | **1.3.3** | `quay.io/biocontainers/esviritu:1.3.3--pyhdfd78af_0`, in `modules/esviritu.nf` |
+| Marker-MAGu | **0.4.0** | `quay.io/biocontainers/marker-magu:0.4.0--pyhdfd78af_1`, in `modules/markermagu.nf` |
 | MultiQC | **1.35** | `quay.io/biocontainers/multiqc:1.35--pyhdfd78af_1`, in `modules/multiqc.nf` |
 | MetaPhlAn database | **mpa_vJun23_CHOCOPhlAnSGB_202403** | `db/metaphlan/…`, shared with taxprofiler |
 | HUMAnN databases | **v201901_v31** / **v201901b** | `db/humann/v201901b/…`, shared with taxprofiler |
 | mOTUs database | **db_mOTU_v3.1.0** | `db/motus/db_mOTU_v3.1.0/db_mOTU`, shared with taxprofiler |
 | EsViritu database | **v3.2.4** ([doi:10.5281/zenodo.17716199](https://doi.org/10.5281/zenodo.17716199)) | `db/esviritu/v3.2.4`, biobakery's alone |
+| Marker-MAGu database | **v1.1** ([doi:10.5281/zenodo.8342581](https://doi.org/10.5281/zenodo.8342581)) | `db/markermagu/v1.1`, biobakery's alone |
 | Host references | PhiX, T2T-CHM13v2.0 + PhiX, GRCm39 + PhiX | `db/hostremoval/…`, shared with taxprofiler |
 
 **Every image is the BioContainers build of the bioconda package.** The
@@ -61,20 +65,31 @@ pin](taxprofiler.md#versions-in-use). Nonpareil needs no database.
 apart from the tool — EsViritu 1.0.0 and later read v3.1.0 or later — and v3.2.4
 is the newest on Zenodo.
 
-**Only EsViritu's database is new.** The MetaPhlAn, HUMAnN and mOTUs databases and
-the host references are the ones [taxprofiler's cluster
-setup](taxprofiler.md#cluster-setup) installs. EsViritu's is fetched once with the
-same script, before the first run with `run_esviritu` on:
+**Marker-MAGu is on its only release.** 0.4.0 is the one version bioconda
+publishes and v1.1 the newest database on Zenodo, and v1.1 is the catalogue the
+paper behind the tool built and used.
+
+**Two databases are this pipeline's alone.** The MetaPhlAn, HUMAnN and mOTUs
+databases and the host references are the ones [taxprofiler's cluster
+setup](taxprofiler.md#cluster-setup) installs. EsViritu's and Marker-MAGu's are
+fetched once with the same script, before the first run with `run_esviritu` or
+`run_markermagu` on:
 
 ```bash
 sbatch --cpus-per-task=2 --mem=4G --time=2:00:00 scripts/fetch_taxprofiler_db.sh esviritu
 ```
 
-It checks the archive against the md5 the Zenodo record lists, unpacks it to
-`db/esviritu/v3.2.4` — `virus_pathogen_database.fna`, its minimap2 index and
-the metadata table — and writes `v3.2.4.manifest.json` beside it. Until it is
-there, every `BIOBAKERY_01` run stops before its first task, for want of
-`esviritu_db`.
+```bash
+sbatch --cpus-per-task=2 --mem=4G --time=4:00:00 scripts/fetch_taxprofiler_db.sh markermagu
+```
+
+Each checks its archive against the md5 the Zenodo record lists, unpacks it, and
+writes a manifest beside it: `db/esviritu/v3.2.4` —
+`virus_pathogen_database.fna`, its minimap2 index and the metadata table — and
+`db/markermagu/v1.1`, which is one 10.5 GB `Marker-MAGu_markerDB.fna` and needs
+about 16 GB free while it unpacks. Until a database is there, every
+`BIOBAKERY_01` run stops before its first task, for want of the parameter that
+names it.
 
 
 ## The pipeline
@@ -85,7 +100,8 @@ form's "Host Removal" answer — `None`, `PhiX`,
 the matching bowtie2 index. `None` still trims; it removes nothing.
 
 [`BIOBAKERY_01.sh`](../../pipelines/BIOBAKERY_01.sh) runs
-`workflows/biobakery` with HUMAnN, mOTUs, Nonpareil and EsViritu on:
+`workflows/biobakery` with HUMAnN, mOTUs, Nonpareil, EsViritu and Marker-MAGu
+on:
 
 | Step | What | Progress page row |
 | --- | --- | --- |
@@ -118,6 +134,7 @@ modules/
   motus.nf             MOTUS, MOTUS_MERGE
   nonpareil.nf         NONPAREIL, NONPAREIL_CURVES
   esviritu.nf          ESVIRITU, ESVIRITU_SUMMARY
+  markermagu.nf        MARKERMAGU, MARKERMAGU_MERGE
   multiqc.nf           MULTIQC
 config/biobakery/
   slurm.config         the cluster: executor, node sizes, apptainer
@@ -135,8 +152,9 @@ HUMAnN is called and how its tables are built.
 
 ### Choosing modules per run
 
-KneadData and MetaPhlAn run on every sample. HUMAnN, mOTUs, Nonpareil, EsViritu
-and every add-on are switched by a parameter of their own:
+KneadData and MetaPhlAn run on every sample. HUMAnN, mOTUs, Nonpareil,
+EsViritu, Marker-MAGu and every add-on are switched by a parameter of their
+own:
 
 | Parameter | Default | Needs |
 | --- | --- | --- |
@@ -144,9 +162,10 @@ and every add-on are switched by a parameter of their own:
 | `run_motus` | `true` | `motus_db` |
 | `run_nonpareil` | `true` | nothing; `nonpareil_mode` is `kmer` unless set to `alignment` |
 | `run_esviritu` | `true` | `esviritu_db` |
+| `run_markermagu` | `true` | `markermagu_db`; `markermagu_detection` is `default` unless set to `relaxed` |
 
-`motus_args`, `nonpareil_args` and `esviritu_args` add options to each tool, as
-`metaphlan_args` does to MetaPhlAn.
+`motus_args`, `nonpareil_args`, `esviritu_args` and `markermagu_args` add
+options to each tool, as `metaphlan_args` does to MetaPhlAn.
 
 A pipeline file sets each with `params_set`, like any other parameter, so it lands
 in the params file and in the manifest a rerun is rebuilt from. A form question
@@ -170,15 +189,14 @@ is the two mates' files followed by KneadData's orphans.
 
 ### Adding a module
 
-Marker-MAGu takes cleaned reads and a database and has a BioContainers image
-(`marker-magu:0.4.0--pyhdfd78af_1` at the time of writing). Adding it is what
-adding EsViritu was:
+A tool that takes cleaned reads and a database and has a BioContainers image
+goes in the way EsViritu and Marker-MAGu did:
 
 1. **`modules/<tool>.nf`** — one process per sample reading `ch_reads`, and a
    second that merges the per-sample tables, publishing under
    `${params.outdir}/<tool>/`. Pin the container by tag, and give both
-   processes a `stub:` block. Marker-MAGu can filter reads itself; leave that
-   off when KneadData has run.
+   processes a `stub:` block. A tool that can trim or deplete reads itself —
+   both of these can — has that left off, since KneadData has done it.
 2. **`workflows/biobakery/nextflow.config`** — `run_<tool> = true` and the
    database parameter.
 3. **`workflows/biobakery/main.nf`** — an `if (params.run_<tool>)` block after
@@ -190,8 +208,10 @@ adding EsViritu was:
 6. **`pipelines/BIOBAKERY_01.sh`** — `params_set run_<tool> true` and the
    database path under `$NEXTFLOW_DB_DIR`.
 7. **The dashboard** — rows in `templates/biobakery/outputs.conf`, a
-   `dashboard_tab` in `biobakery_upload.sh`, and a sentence in
-   `biobakery_methods.sh` citing the tool from `config/references.json`.
+   `dashboard_tab` in `biobakery_upload.sh`, a sentence in
+   `biobakery_methods.sh` citing the tool from `config/references.json`, and a
+   line in `templates/biobakery/prune.conf` for anything it publishes per
+   sample that a merged table already carries.
 
 
 ## Preparing a run
@@ -433,6 +453,64 @@ finish and stops, as mOTUs does: a sample left out would read as a sample with
 no virus.
 
 
+## Marker-MAGu
+
+One `MARKERMAGU` task per sample, over KneadData's final reads, against
+`markermagu_db`. Marker-MAGu is MetaPhlAn 4's marker gene strategy run over a
+bigger catalogue: MetaPhlAn's own vOct22 markers for bacteria, archaea and
+microeukaryotes, with marker genes of the 49,111 phage taxa of the Trove of Gut
+Virus Genomes added, and thresholds retuned so that a phage is called about as
+confidently as a bacterium. minimap2 (`-x sr`) aligns the reads, `samtools view
+-q 1` keeps only those that align to one marker alone, and CoverM counts them
+at 90% identity over at least half the read.
+
+A species-level genome bin is reported when at least 75% of its markers carried
+a read — `markermagu_detection` set to `relaxed` lowers that to 33.3% and at
+least three markers — and at least four markers and ten reads back it. Its abundance is
+reads per kilobase of marker per million reads, rescaled so that each sample's
+abundances sum to 1.
+
+**This overlaps MetaPhlAn on purpose, and the phages are the point.** Under
+`relaxed` the bacteria and archaea come out much as MetaPhlAn 4 reports them;
+under `default`, the setting this pipeline uses, they are somewhat fewer and
+somewhat surer. Neither table replaces MetaPhlAn's — Marker-MAGu has no
+unclassified share, so its abundances are shares of what was identified rather
+than of the sample — and the reason to read it is the `k__Viruses` rows, which
+MetaPhlAn has nothing to say about. A phage with fewer than four marker genes
+cannot be detected at all, which leaves out the small single-stranded
+microviruses and inoviruses.
+
+- **Every cleaned file goes in at once.** Marker-MAGu pools the reads it is
+  given and uses no pairing information, so mates and orphans are all passed
+  together, as they are to mOTUs.
+- **Its own filters are off.** `-q` (fastp) and `-f` (minimap2 against a filter
+  set) repeat what KneadData has done, and both default to off.
+- **`markermagu` always exits 0.** Its Python wrapper drops the exit code of the
+  shell script that does the work, so a missing database, an unreadable read
+  file and a finished profile all leave it exiting 0. `MARKERMAGU` therefore
+  checks for the two tables the run should have written and fails the task when
+  either is missing. A sample nothing passed the thresholds in is not that case:
+  it gets a profile holding its header alone.
+
+`MARKERMAGU_MERGE` runs Marker-MAGu's own `combine_sample_tables1.R` over every
+sample's profile and publishes under `markermagu/`:
+
+| File | Rows |
+| --- | --- |
+| `markermagu-relab.tsv` | one per SGB, one column per sample, relative abundance |
+| `markermagu-counts.tsv` | the same, as the reads aligned to each SGB's markers |
+| `markermagu-profile.tsv` | Marker-MAGu's long form, every sample stacked, with the marker counts behind each call |
+| `read-counts.tsv` | one per sample: the reads and bases it read, which RPKM is per million of |
+
+The wide tables take their columns from `read-counts.tsv` rather than from the
+profiles, so **a sample Marker-MAGu detected nothing in is a column of zeros**
+rather than a column missing. The per-sample profiles are published under
+`markermagu/profiles/` and pruned before the results are indexed.
+
+`MARKERMAGU` is retried twice with more memory and time, then lets running tasks
+finish and stops, as mOTUs and EsViritu do.
+
+
 ## The dashboard
 
 [`biobakery_upload.sh`](../../scripts/biobakery_upload.sh) takes the same steps
@@ -472,8 +550,10 @@ plus a fourth, Methods. The navigation bar reads:
   module a run did not enable leaves its tab off. The EsViritu tab offers the
   taxa and genome tables and the interactive report, and one bar, "Samples with
   a virus", out of the samples EsViritu read, with the database release under
-  it. EsViritu has no link of its own in the navigation bar; its files are a
-  section of Deliverables.
+  it. The Marker-MAGu tab offers its three tables and one bar, "Phage taxa",
+  the SGBs it detected whose lineage begins `k__Viruses` out of every SGB it
+  detected. Neither has a link of its own in the navigation bar; their files are
+  sections of Deliverables.
 - **The QC Report is MultiQC**, over KneadData's FastQC reports and its
   read count table as a section of its own, and mOTUs' logs and Nonpareil's
   curves on a run with either. It is the only report the run adds;
@@ -483,9 +563,9 @@ plus a fourth, Methods. The navigation bar reads:
 [`templates/biobakery/outputs.conf`](../../templates/biobakery/outputs.conf) is
 the file index, and [`prune.conf`](../../templates/biobakery/prune.conf) deletes
 the FastQC zips, MultiQC's re-encodings of its own report and its copy of the
-Nonpareil curves, MetaPhlAn's and mOTUs' per-sample profiles, and KneadData's
-and HUMAnN's per-sample logs before anything is published, and takes the rows no
-sample has out of `motus-counts.tsv`. The profiles are read for the Overview
+Nonpareil curves, MetaPhlAn's, mOTUs' and Marker-MAGu's per-sample profiles, and
+KneadData's and HUMAnN's per-sample logs before anything is published, and takes
+the rows no sample has out of `motus-counts.tsv`. The profiles are read for the Overview
 first, by `biobakery_composition.sh`. The index ends with a tree of the folders the
 download unpacks into.
 
@@ -541,6 +621,9 @@ given rather than from what the pipeline usually does:
   version, the database release and Zenodo DOI, minimap2 and the alignment
   thresholds, dereplication, RPKMF, and the identities species and subspecies
   were assigned at. On a paired run they say unpaired reads were not used.
+- **Marker-MAGu** likewise on a run with `run_markermagu` on: its version, the
+  database release and Zenodo DOI, minimap2 and the unique-alignment thresholds,
+  the detection stringency this run chose, and how abundance was normalised.
 
 Citations are written `[@id]` against
 [`config/references.json`](../../config/references.json), and a tool named a
@@ -604,17 +687,18 @@ plus a run directory mounted where `wrike_job.sh` is started.
 The workflow runs anywhere Docker does. The `local` profile caps each task at
 the machine's cores and 16 GB; pass a config lowering `process.resourceLimits`
 further on a smaller machine. `-stub` replaces KneadData, MetaPhlAn, HUMAnN's
-two heavy steps, mOTUs, Nonpareil, EsViritu and MultiQC with placeholders and runs
+two heavy steps, mOTUs, Nonpareil, EsViritu, Marker-MAGu and MultiQC with
+placeholders and runs
 everything between them for real, which checks how the modules are wired
 together without a database:
 
 ```bash
-nextflow run workflows/biobakery -stub -profile docker,local --input samplesheet.csv --outdir results --kneaddata_db db/host --metaphlan_db db/metaphlan --humann_chocophlan db/chocophlan --humann_uniref db/uniref90 --humann_utility_mapping db/utility_mapping --motus_db db/motus --esviritu_db db/esviritu
+nextflow run workflows/biobakery -stub -profile docker,local --input samplesheet.csv --outdir results --kneaddata_db db/host --metaphlan_db db/metaphlan --humann_chocophlan db/chocophlan --humann_uniref db/uniref90 --humann_utility_mapping db/utility_mapping --motus_db db/motus --esviritu_db db/esviritu --markermagu_db db/markermagu
 ```
 
 The databases only have to exist for a stub run; add `--run_humann false` to leave
-HUMAnN out, and `--run_motus false`, `--run_nonpareil false` or
-`--run_esviritu false` for any of those.
+HUMAnN out, and `--run_motus false`, `--run_nonpareil false`,
+`--run_esviritu false` or `--run_markermagu false` for any of those.
 
 The samplesheet is the CSV `biobakery_samplesheet.sh` writes:
 `sample,run_accession,instrument_platform,fastq_1,fastq_2`.
@@ -628,13 +712,16 @@ reservation and a retry policy per process;
 ones that depend on the node — KneadData at 16 cpus and 32 GB, MetaPhlAn at 16
 cpus and 48 GB, mOTUs at 16 cpus and 32 GB and Nonpareil at 8 cpus and 64 GB, the
 same as taxprofiler's `METAPHLAN_METAPHLAN`, `MOTUS_PROFILE` and
-`NONPAREIL_NONPAREIL`, and EsViritu at 16 cpus and 16 GB — and caps everything
+`NONPAREIL_NONPAREIL`, EsViritu at 16 cpus and 16 GB, and Marker-MAGu at 16 cpus
+and 96 GB — and caps everything
 at the node's size. Nonpareil is
-handed its memory as `-R` and fills it with its k-mer table.
+handed its memory as `-R` and fills it with its k-mer table, and Marker-MAGu is
+the largest reservation here because minimap2 holds the whole 10.5 GB marker
+catalogue, split into chunks, while it aligns.
 
-- **KneadData, MetaPhlAn, mOTUs and EsViritu retry twice**, with more memory and
-  time each time, then let running tasks finish and stop. All four read the
-  requester's reads or a database over the shared filesystem.
+- **KneadData, MetaPhlAn, mOTUs, EsViritu and Marker-MAGu retry twice**, with
+  more memory and time each time, then let running tasks finish and stop. All
+  five read the requester's reads or a database over the shared filesystem.
 - **HUMAnN** keeps taxprofiler's policy: a sample is retried once with twice the
   memory and time, then left out of the tables.
 - **Nonpareil** is retried three times and then left out of the diversity table,

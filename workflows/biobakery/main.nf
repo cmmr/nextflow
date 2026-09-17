@@ -1,8 +1,10 @@
 // bioBakery shotgun metagenomics: KneadData, then MetaPhlAn, then HUMAnN, with
-// mOTUs and Nonpareil beside them for diversity and EsViritu for viruses.
+// mOTUs and Nonpareil beside them for diversity, EsViritu for viruses and
+// Marker-MAGu for phages.
 //
-// KneadData and MetaPhlAn run on every sample. HUMAnN, mOTUs, Nonpareil, EsViritu
-// and any add-on module run behind a run_<tool> parameter of their own. Modules are in modules/ and
+// KneadData and MetaPhlAn run on every sample. HUMAnN, mOTUs, Nonpareil,
+// EsViritu, Marker-MAGu and any add-on module run behind a run_<tool> parameter
+// of their own. Modules are in modules/ and
 // read two channels: ch_reads, KneadData's cleaned reads as [meta, reads], and
 // ch_profiles, MetaPhlAn's profile per sample as [meta, profile]. An add-on
 // publishes under <outdir>/<tool>/.
@@ -18,6 +20,7 @@ include { HUMANN_PREPARE_PROFILE; HUMANN_PROFILE; HUMANN_TABLES } from '../../mo
 include { MOTUS; MOTUS_MERGE }                                    from '../../modules/motus.nf'
 include { NONPAREIL; NONPAREIL_CURVES }                           from '../../modules/nonpareil.nf'
 include { ESVIRITU; ESVIRITU_SUMMARY }                            from '../../modules/esviritu.nf'
+include { MARKERMAGU; MARKERMAGU_MERGE }                          from '../../modules/markermagu.nf'
 include { MULTIQC }                                               from '../../modules/multiqc.nf'
 
 // A database parameter as a path, failing the run before any task starts when
@@ -105,6 +108,15 @@ workflow {
     if (params.run_esviritu) {
         ESVIRITU(ch_reads, database('esviritu_db'))
         ESVIRITU_SUMMARY(ESVIRITU.out.results.map { meta, results -> results }.collect())
+    }
+
+    if (params.run_markermagu) {
+        MARKERMAGU(ch_reads, database('markermagu_db'))
+
+        MARKERMAGU_MERGE(
+            MARKERMAGU.out.profile.map { meta, profile -> profile }.collect(),
+            MARKERMAGU.out.stats.collect()
+        )
     }
 
     if (params.run_humann) {

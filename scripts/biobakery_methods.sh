@@ -11,9 +11,10 @@
 # Nothing before the reads arrived is described.
 #
 # Versions are the BioContainers images the modules pin, which the text names in
-# full: KneadData, MetaPhlAn, HUMAnN, mOTUs, Nonpareil, EsViritu and MultiQC by
-# the version in the tag, and the tools inside those images - Trimmomatic,
-# Bowtie2, DIAMOND, minimap2 and the rest - by the image that carries them.
+# full: KneadData, MetaPhlAn, HUMAnN, mOTUs, Nonpareil, EsViritu, Marker-MAGu
+# and MultiQC by the version in the tag, and the tools inside those images -
+# Trimmomatic, Bowtie2, DIAMOND, minimap2, CoverM and the rest - by the image
+# that carries them.
 #
 # KneadData's steps are described as each sample's log recorded them, not as its
 # defaults read: the Trimmomatic steps it ran, with the minimum length it set
@@ -359,10 +360,14 @@ RUN_HUMANN=$(state_get manifest.params.run_humann)
 RUN_MOTUS=$(state_get manifest.params.run_motus)
 RUN_NONPAREIL=$(state_get manifest.params.run_nonpareil)
 RUN_ESVIRITU=$(state_get manifest.params.run_esviritu)
+RUN_MARKERMAGU=$(state_get manifest.params.run_markermagu)
 HUMANN_CHOCOPHLAN=$(state_get manifest.params.humann_chocophlan)
 HUMANN_UNIREF=$(state_get manifest.params.humann_uniref)
 ESVIRITU_DB=$(state_get manifest.params.esviritu_db)
 ESVIRITU_ARGS=$(state_get manifest.params.esviritu_args)
+MARKERMAGU_DB=$(state_get manifest.params.markermagu_db)
+MARKERMAGU_DETECTION=$(state_get manifest.params.markermagu_detection)
+MARKERMAGU_ARGS=$(state_get manifest.params.markermagu_args)
 LAYOUT=$(state_get statistics.layout)
 
 SAMPLESHEET=$(state_get manifest.params.input)
@@ -388,10 +393,11 @@ fi
     || fail "This run recorded no MetaPhlAn database, so its methods cannot be described."
 
 TOOLS=(kneaddata metaphlan)
-[[ "$RUN_HUMANN" == true ]]    && TOOLS+=(humann)
-[[ "$RUN_MOTUS" == true ]]     && TOOLS+=(motus)
-[[ "$RUN_NONPAREIL" == true ]] && TOOLS+=(nonpareil)
-[[ "$RUN_ESVIRITU" == true ]]  && TOOLS+=(esviritu)
+[[ "$RUN_HUMANN" == true ]]     && TOOLS+=(humann)
+[[ "$RUN_MOTUS" == true ]]      && TOOLS+=(motus)
+[[ "$RUN_NONPAREIL" == true ]]  && TOOLS+=(nonpareil)
+[[ "$RUN_ESVIRITU" == true ]]   && TOOLS+=(esviritu)
+[[ "$RUN_MARKERMAGU" == true ]] && TOOLS+=(marker-magu)
 TOOLS+=(multiqc)
 
 IMAGES=()
@@ -558,8 +564,15 @@ fi
 
 # 7. EsViritu
 if [[ "$RUN_ESVIRITU" == true ]]; then
+    #    EsViritu reads one layout per sample, so a paired sample's unpaired
+    #    reads are left out and a single-end sample's are all it has
     ESVIRITU_READS="the quality-controlled reads"
-    [[ "$LAYOUT" == *paired* ]] && ESVIRITU_READS="the quality-controlled read pairs, without unpaired reads,"
+
+    if [[ "$LAYOUT" == *paired*single* || "$LAYOUT" == *single*paired* ]]; then
+        ESVIRITU_READS="the quality-controlled reads, a paired sample's mates alone,"
+    elif [[ "$LAYOUT" == *paired* ]]; then
+        ESVIRITU_READS="the quality-controlled read pairs, without unpaired reads,"
+    fi
 
     cite tisza2023
     TEXT+=" Human, animal and plant viruses were detected in $ESVIRITU_READS with"
@@ -576,7 +589,33 @@ if [[ "$RUN_ESVIRITU" == true ]]; then
     TEXT+=" at 90% and 95% nucleotide identity to the reference."
 fi
 
-# 8. The paragraph and the references it cites
+# 8. Marker-MAGu
+if [[ "$RUN_MARKERMAGU" == true ]]; then
+    #    A marker gene counts as detected once one read aligns to it: default
+    #    asks for 75% of an SGB's markers, relaxed for 33.3% and at least three
+    MARKERMAGU_DETECTED="at least 75% of its marker genes carried a read"
+
+    if [[ "$MARKERMAGU_DETECTION" == relaxed ]]; then
+        MARKERMAGU_DETECTED="at least 33.3% of its marker genes carried a read, at least three of them did,"
+    fi
+
+    cite tisza2025
+    TEXT+=" Bacteria, archaea, microeukaryotes and bacteriophages were profiled together in the"
+    TEXT+=" quality-controlled reads with $(named Marker-MAGu "$(tool_version marker-magu)")$CITATION"
+
+    database_phrase "$MARKERMAGU_DB"
+    TEXT+=" and $PHRASE$CITATION."
+
+    cite_new li2018
+    TEXT+=" Reads were aligned to its marker genes with minimap2$CITATION, and only reads aligning"
+    TEXT+=" to a single marker over at least 50% of their length at 90% identity or more were"
+    TEXT+=" counted$(extra_options "$MARKERMAGU_ARGS")."
+    TEXT+=" A species-level genome bin was reported when $MARKERMAGU_DETECTED and at least ten"
+    TEXT+=" reads aligned to it in total, and its abundance was taken as reads per kilobase of"
+    TEXT+=" marker gene per million reads, normalised so that each sample sums to one."
+fi
+
+# 9. The paragraph and the references it cites
 if ! jq -n --arg text "$TEXT" --slurpfile refs "$REFERENCES" '
         [$text | scan("\\[@[^\\]]*\\]") | scan("@([A-Za-z0-9_]+)") | .[0]] | unique as $ids
         | ($ids - ($refs[0].references | keys)) as $missing

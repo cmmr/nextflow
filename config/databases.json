@@ -80,6 +80,25 @@
       "cite": ["tisza2023"]
     },
     {
+      "path": "markermagu/v1.1",
+      "name": "Marker-MAGu marker gene",
+      "release": "v1.1",
+      "description": "Marker-MAGu_markerDB.fna, a 10.5 GB multi-FASTA of species-level marker genes: MetaPhlAn 4's vOct22 markers for bacteria, archaea and microeukaryotes, with marker genes of the 49,111 phage taxa of the Trove of Gut Virus Genomes v1.1 added. Each header reads gene_name;lineage;genome_name.",
+      "used_by": [
+        "biobakery: markermagu_db"
+      ],
+      "setup": "scripts/fetch_taxprofiler_db.sh markermagu",
+      "manifest": "markermagu/v1.1.manifest.json",
+      "sources": [
+        {
+          "url": "https://zenodo.org/records/8342581/files/Marker-MAGu_markerDB_v1.1.tar.gz",
+          "md5": "e0947cb1d4a3df09829e98627021e0dd"
+        }
+      ],
+      "doi": "10.5281/zenodo.8342581",
+      "cite": ["tisza2025"]
+    },
+    {
       "path": "humann/v201901b",
       "name": "HUMAnN 3 databases",
       "release": "v201901b",

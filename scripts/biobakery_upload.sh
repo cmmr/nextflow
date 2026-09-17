@@ -16,8 +16,8 @@
 # The Overview's composition chart is MetaPhlAn's, and its diversity chart is
 # Nonpareil's and mOTUs', on a run that enabled either.
 # The sidebar carries KneadData's read totals and a Feature Table tab each for
-# MetaPhlAn, HUMAnN and EsViritu; a tool the run did not enable leaves its tab
-# off.
+# MetaPhlAn, HUMAnN, EsViritu and Marker-MAGu; a tool the run did not enable
+# leaves its tab off.
 #
 # The navigation bar adds Methods to the links every pipeline's carries, between
 # Deliverables and QC Report.
@@ -204,6 +204,28 @@ if [[ -r "$ESVIRITU_READ_COUNTS" ]]; then
     dashboard_stat_share_of "Samples with a virus" "$ESVIRITU_DETECTED" "$ESVIRITU_SAMPLES" \
         "${ESVIRITU_DB:+EsViritu database ${ESVIRITU_DB##*/}}" \
         "Samples in which EsViritu aligned reads to at least one of the human, animal and plant virus genomes in its database, keeping only reads that align over at least 100 bases and 90% of their length at 80% identity or better. A sample absent from the taxa table had no such read."
+fi
+
+#    Marker-MAGu's profile, and the phage taxa among everything it detected
+dashboard_tab markermagu "Marker-MAGu"
+
+dashboard_formats "" \
+    "Taxa|TSV|markermagu/markermagu-relab.tsv" \
+    "Reads|TSV|markermagu/markermagu-counts.tsv" \
+    "Long|TSV|markermagu/markermagu-profile.tsv" || true
+
+MARKERMAGU_PROFILE="$RESULTS_DIR/markermagu/markermagu-profile.tsv"
+
+if [[ -r "$MARKERMAGU_PROFILE" ]]; then
+    MARKERMAGU_TAXA=$(tail -n +2 "$MARKERMAGU_PROFILE" | cut -f1 | LC_ALL=C sort -u | wc -l)
+    MARKERMAGU_PHAGES=$(tail -n +2 "$MARKERMAGU_PROFILE" | cut -f1 | LC_ALL=C sort -u \
+        | grep -c '^k__Viruses' || true)
+    MARKERMAGU_DB=$(state_get "$RUN_MANIFEST_KEY.params.markermagu_db")
+
+    dashboard_stat_group
+    dashboard_stat_share_of "Phage taxa" "$MARKERMAGU_PHAGES" "$MARKERMAGU_TAXA" \
+        "${MARKERMAGU_DB:+Marker-MAGu database ${MARKERMAGU_DB##*/}}" \
+        "Species-level genome bins whose lineage begins k__Viruses, out of every bin Marker-MAGu detected across the run. The rest are the bacteria, archaea and microeukaryotes MetaPhlAn profiles as well; the phages are what this tool adds."
 fi
 
 dashboard_tab_end

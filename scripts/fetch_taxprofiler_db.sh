@@ -24,16 +24,16 @@
 # pin is the newest release compatible with the tool versions nf-core/taxprofiler
 # 2.0.1 uses - notably MetaPhlAn, which is pinned there at 4.1.1 and cannot read
 # the database its own mpa_latest marker now points at, and mOTUs, which is
-# pinned there at 3.1.0 and rejects the v4 catalogues outright. EsViritu, which
-# only the biobakery workflow runs, is pinned to the newest release its 1.3.3
-# reads.
+# pinned there at 3.1.0 and rejects the v4 catalogues outright. EsViritu and
+# Marker-MAGu, which only the biobakery workflow runs, are pinned to the newest
+# release each reads.
 #
 # Writes into db/<tool>/:
 #
 #   <release>/                the database, as the pipeline reads it
 #   <release>.manifest.json   source URLs, checksums, sizes, and when it was fetched
 #
-# Usage:     fetch_taxprofiler_db.sh <kraken2|metaphlan|motus|humann|esviritu>
+# Usage:     fetch_taxprofiler_db.sh <kraken2|metaphlan|motus|humann|esviritu|markermagu>
 #
 #            Submit it rather than running it on the login node; the downloads
 #            are large and slow:
@@ -126,9 +126,17 @@ readonly ESVIRITU_RELEASE="v3.2.4"
 readonly ESVIRITU_URL="https://zenodo.org/records/17716199/files/esviritu_db_$ESVIRITU_RELEASE.tar.gz"
 readonly ESVIRITU_MD5="24d85c1ec3cbffff12e921d2f39c91b2"
 
+# Marker-MAGu. v1.1 is the newest release on Zenodo, and the only one the 0.4.0
+# container is worth running: it is the database that paper built. The archive
+# unpacks to a directory named for the release, holding one 10.5 GB multi-FASTA
+# of marker genes. minimap2 indexes it at run time, in chunks.
+readonly MARKERMAGU_RELEASE="v1.1"
+readonly MARKERMAGU_URL="https://zenodo.org/records/8342581/files/Marker-MAGu_markerDB_$MARKERMAGU_RELEASE.tar.gz"
+readonly MARKERMAGU_MD5="e0947cb1d4a3df09829e98627021e0dd"
+
 
 if [[ $# -ne 1 ]]; then
-    fail "Usage: $0 <kraken2|metaphlan|motus|humann|esviritu>"
+    fail "Usage: $0 <kraken2|metaphlan|motus|humann|esviritu|markermagu>"
 fi
 
 TOOL="$1"
@@ -585,11 +593,52 @@ fetch_esviritu() {
     log "  manifest: $manifest"
 }
 
+fetch_markermagu() {
+    local out_dir="$NEXTFLOW_DIR/db/markermagu/$MARKERMAGU_RELEASE"
+    local manifest="$NEXTFLOW_DIR/db/markermagu/$MARKERMAGU_RELEASE.manifest.json"
+
+    [[ -e "$out_dir" ]] && fail "$out_dir already exists; remove it to re-fetch."
+
+    mkdir -p "$NEXTFLOW_DIR/db/markermagu"
+    require_free_space "$NEXTFLOW_DIR/db/markermagu" 16
+
+    local archive="$WORK_DIR/${MARKERMAGU_URL##*/}"
+
+    download_verified "$MARKERMAGU_URL" "$archive" "$MARKERMAGU_MD5"
+    record_source "$MARKERMAGU_URL" "$MARKERMAGU_MD5" "$(stat -c%s "$archive")"
+
+    log "Extracting ${MARKERMAGU_URL##*/}..."
+    if ! tar -xzf "$archive" -C "$NEXTFLOW_DIR/db/markermagu"; then
+        rm -rf "$out_dir"
+        fail "Could not extract ${MARKERMAGU_URL##*/}."
+    fi
+
+    rm -f "$archive"
+
+    [[ -d "$out_dir" ]] \
+        || fail "The archive did not unpack to a '$MARKERMAGU_RELEASE' directory."
+
+    # The one file Marker-MAGu opens, and the only one the archive holds
+    [[ -s "$out_dir/Marker-MAGu_markerDB.fna" ]] \
+        || fail "The Marker-MAGu database is missing Marker-MAGu_markerDB.fna; the download is incomplete."
+
+    local genes
+    genes=$(grep -c '^>' "$out_dir/Marker-MAGu_markerDB.fna")
+
+    write_manifest "$MARKERMAGU_RELEASE" "$out_dir" "$manifest" \
+        "The Marker-MAGu marker gene database $MARKERMAGU_RELEASE ($genes marker genes): MetaPhlAn 4's vOct22 markers with the Trove of Gut Virus Genomes v1.1 phage markers added. The md5 is the one the Marker-MAGu README and the Zenodo record list."
+
+    log "Fetched Marker-MAGu $MARKERMAGU_RELEASE:"
+    log "  db_path:  $out_dir ($genes marker genes)"
+    log "  manifest: $manifest"
+}
+
 case "$TOOL" in
-    kraken2)   fetch_kraken2 ;;
-    metaphlan) fetch_metaphlan ;;
-    motus)     fetch_motus ;;
-    humann)    fetch_humann ;;
-    esviritu)  fetch_esviritu ;;
-    *)         fail "Unknown database '$TOOL'. Use kraken2, metaphlan, motus, humann or esviritu." ;;
+    kraken2)    fetch_kraken2 ;;
+    metaphlan)  fetch_metaphlan ;;
+    motus)      fetch_motus ;;
+    humann)     fetch_humann ;;
+    esviritu)   fetch_esviritu ;;
+    markermagu) fetch_markermagu ;;
+    *)          fail "Unknown database '$TOOL'. Use kraken2, metaphlan, motus, humann, esviritu or markermagu." ;;
 esac

@@ -33,7 +33,10 @@
 #   <release>/                the database, as the pipeline reads it
 #   <release>.manifest.json   source URLs, checksums, sizes, and when it was fetched
 #
-# Usage:     fetch_taxprofiler_db.sh <kraken2|metaphlan|motus|humann|esviritu|markermagu>
+# "sewage" is the one argument that fetches no database: it is five runs of
+# sewage reads, into db/test-fastq/, for a run that should find viruses.
+#
+# Usage:     fetch_taxprofiler_db.sh <kraken2|metaphlan|motus|humann|esviritu|markermagu|sewage>
 #
 #            Submit it rather than running it on the login node; the downloads
 #            are large and slow:
@@ -134,9 +137,31 @@ readonly MARKERMAGU_RELEASE="v1.1"
 readonly MARKERMAGU_URL="https://zenodo.org/records/8342581/files/Marker-MAGu_markerDB_$MARKERMAGU_RELEASE.tar.gz"
 readonly MARKERMAGU_MD5="e0947cb1d4a3df09829e98627021e0dd"
 
+# Sewage reads, not a database: five runs of ENA PRJEB87273, the Global Sewage
+# Surveillance project's urban virome, for a run that should find viruses. The
+# nf-core test reads in db/test-fastq are all one ancient paleofeces sample and
+# find none.
+#
+# One run per country, the largest of each that is still small - 1.4 to 1.8
+# million pairs, about 1 GB in all - sequenced at random off a virus-enriched
+# extract, so MetaPhlAn and HUMAnN have something to profile too.
+readonly SEWAGE_PROJECT="PRJEB87273"
+readonly SEWAGE_BASE="https://ftp.sra.ebi.ac.uk/vol1/fastq"
+
+# run|ENA subdirectory|country|collected|md5 of _1|md5 of _2. ENA derives that
+# subdirectory from the accession by a rule that changes with its length, so it
+# is pinned here rather than worked out. The checksums are ENA's own.
+readonly SEWAGE_RUNS=(
+    "ERR14789436|036|Slovakia|2017-06-22|cbe17c1edd9b6bb56492571f27bea69f|0f460134cac05ca72f2b3f841708d0c4"
+    "ERR14789487|087|Togo|2017-11-27|341f26dddf5685ebc904337ca273427b|001d15c0eeef0cf5b69e1854b8a58741"
+    "ERR14789258|058|Austria|2018-11-08|1c312232609a07ada81a72d04165a72f|f1ce355a8f5cdbbbb5f76214b4e8cc43"
+    "ERR14788854|054|France|2017-11-20|9fb1cbe47795e64805bedfcce2671964|ff9cbcd8f691c1765534d5149414fdeb"
+    "ERR14788949|049|Cameroon|2017-08-18|b6aac2849108909c75603b5f9f0a0e3b|789954a918c15724c8f76681c813c1a3"
+)
+
 
 if [[ $# -ne 1 ]]; then
-    fail "Usage: $0 <kraken2|metaphlan|motus|humann|esviritu|markermagu>"
+    fail "Usage: $0 <kraken2|metaphlan|motus|humann|esviritu|markermagu|sewage>"
 fi
 
 TOOL="$1"
@@ -633,6 +658,58 @@ fetch_markermagu() {
     log "  manifest: $manifest"
 }
 
+# The sewage reads, and a samplesheet naming them. Downloads land beside the
+# release rather than in it, so a run that stops partway leaves nothing that
+# reads as a complete set.
+fetch_sewage() {
+    local out_dir="$NEXTFLOW_DIR/db/test-fastq/$SEWAGE_PROJECT"
+    local partial="$out_dir.partial"
+    local manifest="$NEXTFLOW_DIR/db/test-fastq/$SEWAGE_PROJECT.manifest.json"
+
+    [[ -e "$out_dir" ]] && fail "$out_dir already exists; remove it to re-fetch."
+
+    mkdir -p "$NEXTFLOW_DIR/db/test-fastq"
+    require_free_space "$NEXTFLOW_DIR/db/test-fastq" 3
+
+    rm -rf "$partial"
+    mkdir -p "$partial"
+
+    local entry run dir country collected md5 mate url file
+    local -a md5s=()
+
+    # A samplesheet in the columns workflows/biobakery reads, each sample named
+    # after the city's country, since no two of these runs share one
+    printf 'sample,run_accession,instrument_platform,fastq_1,fastq_2\n' > "$partial/samplesheet.csv"
+
+    for entry in "${SEWAGE_RUNS[@]}"; do
+        IFS='|' read -r run dir country collected md5s[1] md5s[2] <<< "$entry"
+
+        log "Fetching $run, $country $collected..."
+
+        for mate in 1 2; do
+            url="$SEWAGE_BASE/${run:0:6}/$dir/$run/${run}_$mate.fastq.gz"
+            file="$partial/${run}_$mate.fastq.gz"
+            md5="${md5s[$mate]}"
+
+            download_verified "$url" "$file" "$md5"
+            record_source "$url" "$md5" "$(stat -c%s "$file")"
+        done
+
+        printf '%s,%s,ILLUMINA,%s,%s\n' "$country" "$run" \
+            "$out_dir/${run}_1.fastq.gz" "$out_dir/${run}_2.fastq.gz" >> "$partial/samplesheet.csv"
+    done
+
+    mv "$partial" "$out_dir" || fail "Could not move the reads into $out_dir."
+
+    write_manifest "$SEWAGE_PROJECT" "$out_dir" "$manifest" \
+        "Five paired-end runs of ENA $SEWAGE_PROJECT, the Global Sewage Surveillance project's urban virome, one per country, for a positive-control run: untreated sewage sequenced at random off a virus-enriched extract. Not a database; nothing in the repository reads them. The md5 of each file is ENA's own. samplesheet.csv names them in the columns workflows/biobakery reads."
+
+    log "Fetched $SEWAGE_PROJECT:"
+    log "  reads:       $out_dir (${#SEWAGE_RUNS[@]} runs, $(du -sh "$out_dir" | cut -f1))"
+    log "  samplesheet: $out_dir/samplesheet.csv"
+    log "  manifest:    $manifest"
+}
+
 case "$TOOL" in
     kraken2)    fetch_kraken2 ;;
     metaphlan)  fetch_metaphlan ;;
@@ -640,5 +717,6 @@ case "$TOOL" in
     humann)     fetch_humann ;;
     esviritu)   fetch_esviritu ;;
     markermagu) fetch_markermagu ;;
-    *)          fail "Unknown database '$TOOL'. Use kraken2, metaphlan, motus, humann, esviritu or markermagu." ;;
+    sewage)     fetch_sewage ;;
+    *)          fail "Unknown database '$TOOL'. Use kraken2, metaphlan, motus, humann, esviritu, markermagu or sewage." ;;
 esac

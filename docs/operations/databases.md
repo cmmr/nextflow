@@ -30,7 +30,8 @@ Those manifests are the provenance of one copy on one disk.
 | `pplace` | SBDI GTDB bacterial 16S alignment and tree, R11-RS232-1 | ampliseq | `scripts/build_pplace_reference.sh` |
 | `16s` | 16S landmarks from eight RefSeq genomes | `ampliseq_detect_region.sh` | `scripts/build_16s_reference.sh` |
 | `sylph` | sylph GTDB r220 sketch and taxonomy | nothing | `fetch_taxprofiler_db.sh sylph` as of commit `d7b7500` |
-| `test-fastq` | seven small runs from nf-core/test-datasets | runs by hand | `curl` from the URLs in the entry |
+| `test-fastq` | seven small runs from nf-core/test-datasets, all one ancient paleofeces sample | runs by hand | `curl` from the URLs in the entry |
+| `test-fastq/PRJEB87273` | five paired sewage runs, one per country, that do carry viruses | runs by hand | `scripts/fetch_taxprofiler_db.sh sewage` |
 
 **`sylph/` is unused.** sylph came out of taxprofiler when HUMAnN went in
 (commit `adeee55`), and its fetch function went with it. The entry keeps its

@@ -687,8 +687,13 @@ dashboard_stat_bar() {
 
     DASHBOARD_STATS+="</span>"
     DASHBOARD_STATS+="<span class=\"font-code-sm text-code-sm text-on-surface-variant\">$(dashboard_count_html "$reading")</span></div>"
-    DASHBOARD_STATS+="<div class=\"h-1.5 w-full bg-surface-variant rounded-full overflow-hidden\">"
-    DASHBOARD_STATS+="<div class=\"h-full $tone rounded-full\" style=\"width: $percent%;\"></div></div>"
+
+    #    A sliver of a bar reads as an empty one, so a share under a tenth is
+    #    left as the reading beside its label
+    if awk -v p="$percent" 'BEGIN { exit !(p >= 10) }'; then
+        DASHBOARD_STATS+="<div class=\"h-1.5 w-full bg-surface-variant rounded-full overflow-hidden\">"
+        DASHBOARD_STATS+="<div class=\"h-full $tone rounded-full\" style=\"width: $percent%;\"></div></div>"
+    fi
 
     if [[ -n "$note" ]]; then
         DASHBOARD_STATS+="<div class=\"mt-1 truncate font-body-sm text-[11px] leading-4 text-outline\""
@@ -743,9 +748,12 @@ dashboard_stat_detail() {
 # A count against the total it was taken against, as the fill a bar takes and
 # the reading written beside it.
 #
-# The share is written whole, except where rounding it whole would read 100% for
-# a step that did drop reads: quality filtering keeps 99.5% of a good run, and a
-# sidebar calling that 100% tells the reader nothing happened.
+# The share is written whole, except at either end, where rounding it whole would
+# report that nothing happened when something did: quality filtering keeps 99.5%
+# of a good run, and a sidebar calling that 100% tells the reader nothing was
+# dropped, while a marker gene share of a few hundredths of a percent is a real
+# count of reads and would read as 0%. Those are written to a decimal instead,
+# and a share too small even for that is written "<0.1".
 #
 # Nothing at all when either is not a count, which is how a step the run did not
 # take leaves out its bar rather than reporting a share of nothing.
@@ -762,6 +770,9 @@ dashboard_share_reading() {
         if (text == "100" && c < t) {
             text = sprintf("%.1f", share)
             if (text == "100.0") text = "99.9"
+        } else if (text == "0" && c > 0) {
+            text = sprintf("%.1f", share)
+            if (text == "0.0") text = "<0.1"
         }
 
         printf "%.4f %s\n", share, text
@@ -770,7 +781,8 @@ dashboard_share_reading() {
 
 # One reading as a bar: what it is, how many reads it was, and what share of the
 # total. Green is for the reads that came through; what was taken out is left in
-# the navy every total wears.
+# the navy every total wears. Under 10% no bar is drawn at all - a few pixels of
+# fill says less than the reading beside the label already does.
 dashboard_stat_share() {
     local label="$1" count="$2" total="$3" tone="${4:-growth}" details="${5:-}"
     local percent reading

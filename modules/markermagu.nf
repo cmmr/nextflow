@@ -85,7 +85,7 @@ process MARKERMAGU {
 
     {
         printf 'lineage\\ttotal_genes\\tdetected_genes\\ttotal_length\\ttotal_aligned_reads\\tRPKM\\trel_abundance\\tsampleID\\n'
-        printf 'k__Bacteria|p__Bacillota|c__Clostridia|o__Eubacteriales|f__Lachnospiraceae|g__Blautia|s__GGB9999_SGB99999\\t42\\t40\\t63000\\t900\\t4761.9\\t0.6\\t${meta.id}\\n'
+        printf 'k__Bacteria|p__Bacillota|c__Clostridia|o__Eubacteriales|f__Lachnospiraceae|g__Blautia|s__Blautia_obeum|t__SGB99999\\t42\\t40\\t63000\\t900\\t4761.9\\t0.6\\t${meta.id}\\n'
         printf 'k__Viruses|p__Uroviricota|c__Caudoviricetes|o__Caudovirales|f__Unclassified_viruses|g__VC_1_0|s__vSGB_00001\\t7\\t7\\t8400\\t300\\t3174.6\\t0.4\\t${meta.id}\\n'
     } > ${meta.id}.detected_species.tsv
 
@@ -162,10 +162,10 @@ process MARKERMAGU_MERGE {
 }
 
 // The long table as the three levels of detail METAPHLAN_MERGE publishes: every
-// clade from kingdom to SGB as reads and as percentages, and the SGB rows as a
-// feature table in three BIOM formats. Run in the biom-format container, which
-// is where biom-format, h5py and numpy are; the Marker-MAGu image has none of
-// them.
+// clade from kingdom to SGB as reads and as percentages, the species rows of
+// those two, and the SGB rows as a feature table in three BIOM formats. Run in
+// the biom-format container, which is where biom-format, h5py and numpy are;
+// the Marker-MAGu image has none of them.
 process MARKERMAGU_TABLES {
     container 'quay.io/biocontainers/biom-format:2.1.17'
 
@@ -177,9 +177,11 @@ process MARKERMAGU_TABLES {
     path db
 
     output:
-    path 'virus-counts.tsv'   , emit: counts
-    path 'virus-relab.tsv'    , emit: relab
-    path 'virus-taxa-counts.*', emit: taxa
+    path 'virus-counts.tsv'        , emit: counts
+    path 'virus-relab.tsv'         , emit: relab
+    path 'virus-species-counts.tsv', emit: species_counts
+    path 'virus-species-relab.tsv' , emit: species_relab
+    path 'virus-taxa-counts.*'     , emit: taxa
 
     script:
     """

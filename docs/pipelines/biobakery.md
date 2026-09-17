@@ -286,6 +286,16 @@ reads an index by name, so one directory can hold several releases. The module
 uses the index named like the directory when there is one, the only index
 otherwise, and refuses a directory holding several with none named like it.
 
+**What MetaPhlAn actually recognised is `metaphlan/read-counts.tsv`**: one row
+per sample, the reads it read and the reads bowtie2 placed on one of its marker
+genes. `METAPHLAN` counts them off the `--bowtie2out` file, which holds one line
+per read with a primary marker alignment, before deleting it. That count is the
+Feature Table card's bar, and it is a small share — the markers are a small part
+of each genome, so most reads from a confidently identified organism never touch
+one. The profile's own `estimated_reads_mapped_to_known_clades`, which scales
+each clade's marker coverage up by its genome size, is many times larger and is
+not what the bar reports.
+
 `METAPHLAN_MERGE` publishes the profile at three levels of detail under
 `metaphlan/`:
 
@@ -513,7 +523,7 @@ side:
 | MetaPhlAn | Marker-MAGu | Holds |
 | --- | --- | --- |
 | `metaphlan-counts.tsv`, `metaphlan-relab.tsv` | `virus-counts.tsv`, `virus-relab.tsv` | every clade from kingdom to SGB, one column per sample, as reads and as percentages |
-| `species-counts.tsv`, `species-relab.tsv` | — | a Marker-MAGu lineage ends at its SGB, which is its species, so the feature table is the species table |
+| `species-counts.tsv`, `species-relab.tsv` | `virus-species-counts.tsv`, `virus-species-relab.tsv` | those two cut down to the species rows |
 | `taxa-counts.tsv`, `.json.biom`, `.hdf5.biom` | `virus-taxa-counts.tsv`, `.json.biom`, `.hdf5.biom` | the SGB rows as a feature table, keyed by the SGB's own name |
 | `taxa-tree.newick` | — | Marker-MAGu publishes no phylogeny of its SGBs |
 | — | `virus-profile.tsv` | Marker-MAGu's long form: the marker counts behind each call, which no other table carries |
@@ -523,13 +533,23 @@ side:
 basename, and because in practice these tables are the viral ones — see the
 threshold note above.
 
+**The two halves of the database are not named to the same depth.** A phage
+lineage is seven ranks ending `s__vSGB_<n>`, so its species row and its SGB row
+are the same thing. A bacterial one is MetaPhlAn's own — eight ranks ending
+`t__SGB<n>`, with a species above it that several SGBs can sit under, exactly as
+in MetaPhlAn's tables. The SGB rows are therefore the deepest rank of each
+lineage rather than its `s__` rank, and the feature table keys each by the name
+the database gives it with the rank prefix taken off: `vSGB_8081`, `SGB10000`.
+
 Three differences from MetaPhlAn's tables are worth knowing before reading them
 together:
 
 - **The counts are marker gene reads.** MetaPhlAn scales a clade's marker
   coverage up by genome length to estimate every read it contributed;
   Marker-MAGu's counts are the reads that actually aligned to a marker. A
-  sample's column totals its marker gene reads, not its sequencing depth.
+  sample's column totals its marker gene reads, not its sequencing depth. The
+  two tools' Feature Table bars are the aligned reads either way, so those are
+  comparable even though the tables are not.
 - **There is no `UNCLASSIFIED` row.** Marker-MAGu reports no unclassified share
   and rescales each sample to 100% of what it identified, so a percentage in
   `virus-relab.tsv` is a share of what was detected. MetaPhlAn's is a share of
@@ -583,8 +603,15 @@ plus a fourth, Methods. The navigation bar reads:
 - **The Feature Table card** has a MetaPhlAn tab (the SGB read counts as
   plain text, JSON and HDF5 BIOM) and a HUMAnN tab (the pathway, gene family and
   EC tables in reads per kilobase, as plain text). Under the downloads, each has
-  one bar, "Mapped reads", read as `19% · 764k / 4M`: the reads MetaPhlAn mapped
-  to a known clade, or HUMAnN aligned, out of the reads KneadData retained. The
+  one bar, read as `19% · 764k / 4M`, out of the reads KneadData retained: for
+  MetaPhlAn and Marker-MAGu it is "Marker gene reads", the reads each actually
+  placed on a marker gene rather than either tool's estimate of what the
+  organisms behind them contributed, so both read low and read the same way; for
+  HUMAnN it is "Mapped reads", the reads it aligned. A marker gene share is
+  small enough that the bar itself would say nothing, so **a share under 10%
+  draws no bar**; the reading beside the label is still written in full, to a
+  decimal where a whole number would round it to nothing and as `<0.1%` where
+  even that would — `<0.1% · 832 / 6.4M`. The
   database is named under the bar — the MetaPhlAn release, or the ChocoPhlAn and
   UniRef90 versions `biobakery_composition.sh` reads off the file names in the
   directories the manifest records. Everything else is in Deliverables. A
@@ -592,12 +619,9 @@ plus a fourth, Methods. The navigation bar reads:
   taxa and genome tables and the interactive report, and one bar, "Samples with
   a virus", out of the samples EsViritu read, with the database release under
   it. The Marker-MAGu tab mirrors the MetaPhlAn one: the same three BIOM
-  formats of its own feature table, and one "Mapped reads" bar — the reads it
-  aligned to a marker gene of an SGB it reported, out of the reads KneadData
-  retained. That share is much the smaller of the two, since these are marker
-  gene reads rather than MetaPhlAn's estimate of every read an organism
-  contributed, and the two bars are not comparable. Neither tool has a link of
-  its own in the navigation bar; their files are sections of Deliverables.
+  formats of its own feature table, and the same "Marker gene reads" bar.
+  Neither tool has a link of its own in the navigation bar; their files are
+  sections of Deliverables.
 - **The QC Report is MultiQC**, over KneadData's FastQC reports and its
   read count table as a section of its own, and mOTUs' logs and Nonpareil's
   curves on a run with either. It is the only report the run adds;
@@ -668,6 +692,8 @@ given rather than from what the pipeline usually does:
 - **Marker-MAGu** likewise on a run with `run_markermagu` on: its version, the
   database release and Zenodo DOI, minimap2 and the unique-alignment thresholds,
   the detection stringency this run chose, and how abundance was normalised.
+  Nothing in the text is scaled up from a marker gene to a genome, for either
+  tool: what the sidebar reports is what aligned.
 
 Citations are written `[@id]` against
 [`config/references.json`](../../config/references.json), and a tool named a

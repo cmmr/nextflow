@@ -19,6 +19,7 @@ process METAPHLAN {
 
     output:
     tuple val(meta), path("${meta.id}.metaphlan_profile.txt"), emit: profile
+    path "${meta.id}.marker-counts.tsv"                      , emit: counts
 
     script:
     def input = [reads].flatten().join(',')
@@ -49,6 +50,31 @@ process METAPHLAN {
         ${params.metaphlan_args ?: ''} \\
         -o ${meta.id}.metaphlan_profile.txt
 
+    if [ ! -s ${meta.id}.bowtie2out.txt ]; then
+        echo "MetaPhlAn wrote no bowtie2 output for ${meta.id}" >&2
+        exit 1
+    fi
+
+    # The reads bowtie2 actually placed on a marker gene, which is one line
+    # each: secondary alignments are left out, so a read is counted once. The
+    # reads it read them from are the "#nreads" trailer, and the mean read
+    # length after that is left alone.
+    {
+        printf 'sample\\treads\\tmarker_reads\\n'
+
+        awk -v sample=${meta.id} '
+            BEGIN { FS = OFS = "\\t" }
+
+            \$1 == "#nreads" { reads = \$2; next }
+
+            /^#/ { next }
+
+            { aligned++ }
+
+            END { print sample, reads + 0, aligned + 0 }
+        ' ${meta.id}.bowtie2out.txt
+    } > ${meta.id}.marker-counts.tsv
+
     rm -f ${meta.id}.bowtie2out.txt
     """
 
@@ -71,6 +97,11 @@ process METAPHLAN {
         printf 'k__Bacteria|p__Bacillota|c__Clostridia|o__Eubacteriales|f__Lachnospiraceae|g__Blautia|s__Blautia_obeum\\t2|1239|186801|186802|186803|572511|40520\\t75.0\\t12.5\\t1500\\n'
         printf 'k__Bacteria|p__Bacillota|c__Clostridia|o__Eubacteriales|f__Lachnospiraceae|g__Blautia|s__Blautia_obeum|t__SGB4810\\t2|1239|186801|186802|186803|572511|40520|\\t75.0\\t12.5\\t1500\\n'
     } > ${meta.id}.metaphlan_profile.txt
+
+    {
+        printf 'sample\\treads\\tmarker_reads\\n'
+        printf '${meta.id}\\t2000\\t120\\n'
+    } > ${meta.id}.marker-counts.tsv
     """
 }
 
@@ -88,8 +119,10 @@ process METAPHLAN_MERGE {
 
     input:
     path profiles, stageAs: 'profiles/*'
+    path counts  , stageAs: 'counts/*'
 
     output:
+    path 'read-counts.tsv'     , emit: read_counts
     path 'metaphlan-counts.tsv', emit: counts
     path 'metaphlan-relab.tsv' , emit: relab
     path 'species-counts.tsv'  , emit: species_counts
@@ -99,6 +132,13 @@ process METAPHLAN_MERGE {
 
     script:
     """
+    # One row per sample: the reads MetaPhlAn read, and the reads bowtie2 placed
+    # on one of its marker genes
+    {
+        head -q -n 1 counts/*.marker-counts.tsv | head -n 1
+        tail -q -n +2 counts/*.marker-counts.tsv | LC_ALL=C sort
+    } > read-counts.tsv
+
     # merge_metaphlan_tables.py names each column after its file, so each
     # profile is linked in under its sample name
     mkdir named

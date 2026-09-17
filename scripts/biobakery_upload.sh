@@ -156,13 +156,15 @@ dashboard_formats "" \
     "Taxa|BIOM (json)|metaphlan/taxa-counts.json.biom" \
     "Taxa|BIOM (hdf5)|metaphlan/taxa-counts.hdf5.biom" || true
 
-#    Each tool's mapped reads out of the reads KneadData retained, with the
-#    database it mapped against named under the bar
+#    Each tool's marker gene reads out of the reads KneadData retained, with the
+#    database it mapped against named under the bar. These are the reads that
+#    actually aligned, not either tool's estimate of what the organisms behind
+#    them contributed, so both bars read low and read the same way.
 if [[ -n "${STATS[metaphlan_mapped]:-}" ]]; then
     dashboard_stat_group
-    dashboard_stat_share_of "Mapped reads" "${STATS[metaphlan_mapped]}" \
+    dashboard_stat_share_of "Marker gene reads" "${STATS[metaphlan_mapped]}" \
         "${STATS[retained_total]:-${STATS[metaphlan_total]:-}}" "${STATS[metaphlan_database]:-}" \
-        "MetaPhlAn's estimate of the reads that came from the organisms it identified. Only reads matching its clade-specific marker genes are aligned; each identified clade's marker coverage is then scaled up by its genome size to estimate all the reads it contributed. The rest, including organisms with no markers in the database, is unclassified."
+        "Reads bowtie2 placed on one of MetaPhlAn's clade-specific marker genes, out of the reads KneadData retained. Expect a low share: the markers are a small part of each genome, so most reads from an organism MetaPhlAn identified confidently will not touch one. This is what was recognised rather than what was inferred from it - the abundances in the tables scale each clade's marker coverage up by its genome size, and metaphlan-counts.tsv reports many times this number."
 fi
 
 dashboard_tab humann "HUMAnN"
@@ -217,9 +219,9 @@ dashboard_formats "" \
 
 if [[ -n "${STATS[markermagu_mapped]:-}" ]]; then
     dashboard_stat_group
-    dashboard_stat_share_of "Mapped reads" "${STATS[markermagu_mapped]}" \
+    dashboard_stat_share_of "Marker gene reads" "${STATS[markermagu_mapped]}" \
         "${STATS[retained_total]:-${STATS[markermagu_total]:-}}" "${STATS[markermagu_database]:-}" \
-        "Reads aligned to a marker gene of one of the species-level genome bins Marker-MAGu reported, out of the reads KneadData retained. These are marker gene reads, not an estimate of every read those organisms contributed the way MetaPhlAn's are, so this share is a much smaller one and is not comparable with MetaPhlAn's above."
+        "Reads minimap2 placed on a marker gene of one of the species-level genome bins Marker-MAGu reported, out of the reads KneadData retained. Read the same way as the MetaPhlAn bar: what was recognised, not what was inferred from it. A read on the markers of a bin that missed the detection threshold is not counted here, and a phage carries proportionally far more marker gene than a bacterium does, so its share runs higher."
 fi
 
 dashboard_tab_end

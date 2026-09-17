@@ -21,9 +21,10 @@
 # a sample lacks is NA.
 #
 # The sidebar's numbers go to the "statistics" of the state file: KneadData's
-# read counts after each step, the share of reads MetaPhlAn mapped to a known
-# clade, the share HUMAnN aligned, and the share Marker-MAGu aligned to a
-# marker gene.
+# read counts after each step, the share of reads MetaPhlAn and Marker-MAGu each
+# placed on a marker gene, and the share HUMAnN aligned. Both marker shares are
+# reads that actually aligned, not either tool's estimate of what the organisms
+# behind them contributed.
 #
 # Usage:     biobakery_composition.sh [results_dir]
 #            defaults to ./results, the outdir set in the biobakery params file
@@ -33,6 +34,7 @@
 #            <results_dir>/humann/alignment-summary.tsv,
 #            <results_dir>/nonpareil/nonpareil-curves.tsv,
 #            <results_dir>/motus/profiles/ and
+#            <results_dir>/metaphlan/read-counts.tsv and
 #            <results_dir>/markermagu/virus-{profile,read-counts}.tsv, each
 #            optional; and the HUMAnN database directories the manifest in
 #            ./run_state.json records
@@ -49,6 +51,7 @@ RESULTS_DIR="${RESULTS_DIR%/}"
 
 readonly PROFILE_DIR="$RESULTS_DIR/metaphlan/profiles"
 readonly PROFILE_SUFFIX=".metaphlan_profile.txt"
+readonly METAPHLAN_READS="$RESULTS_DIR/metaphlan/read-counts.tsv"
 readonly READ_COUNTS="$RESULTS_DIR/kneaddata/read-counts.tsv"
 readonly HUMANN_SUMMARY="$RESULTS_DIR/humann/alignment-summary.tsv"
 readonly NONPAREIL_SUMMARY="$RESULTS_DIR/nonpareil/nonpareil-curves.tsv"
@@ -79,7 +82,7 @@ trap 'rm -rf "$WORK"' EXIT
 # sample <TAB> profile, in sample order
 PROFILE_SET="$WORK/profiles.tsv"
 
-# sample <TAB> reads MetaPhlAn processed <TAB> reads it mapped to a known clade
+# sample <TAB> reads MetaPhlAn processed
 DEPTHS="$WORK/depths.tsv"
 
 # sample <TAB> Nd <TAB> coverage % <TAB> redundancy % <TAB> model fit <TAB>
@@ -114,12 +117,11 @@ profile_depths() {
 
         FNR == 1 { name = sample[FILENAME] }
 
-        /^#[0-9]+ reads processed/                  { reads[name] = substr($1, 2) + 0 }
-        /^#estimated_reads_mapped_to_known_clades:/ { mapped[name] = substr($0, index($0, ":") + 1) + 0 }
+        /^#[0-9]+ reads processed/ { reads[name] = substr($1, 2) + 0 }
 
         END {
             for (i = 1; i <= n; i++)
-                printf "%s\t%d\t%d\n", order[i], reads[order[i]], mapped[order[i]]
+                printf "%s\t%d\n", order[i], reads[order[i]]
         }
     ' "$PROFILE_SET" "${profiles[@]}"
 }
@@ -505,12 +507,19 @@ read_count_stats() {
     ' "$READ_COUNTS"
 }
 
-# The reads MetaPhlAn processed over the run, and how many it mapped
+# The reads MetaPhlAn read over the run, and how many of them bowtie2 placed on
+# one of its marker genes. That is the count METAPHLAN took off the bowtie2
+# output, not the profile's estimated_reads_mapped_to_known_clades, which scales
+# each clade's marker coverage up by its genome length and so reports many times
+# the reads that were actually recognised.
 metaphlan_mapping() {
     LC_ALL=C awk -F'\t' '
+        FNR == 1 { next }
+
         { total += $2; mapped += $3 }
+
         END { if (total > 0) printf "metaphlan_total\t%d\nmetaphlan_mapped\t%d\n", total, mapped }
-    ' "$DEPTHS"
+    ' "$METAPHLAN_READS"
 }
 
 # The same for HUMAnN, off its alignment summary: a sample is aligned as far as
@@ -539,9 +548,9 @@ humann_mapping() {
 }
 
 # The same for Marker-MAGu: the reads it read, and the reads it aligned to a
-# marker gene of a species-level genome bin it went on to report. Unlike
-# MetaPhlAn's, these are marker gene reads rather than an estimate of every read
-# the organisms contributed, so the share is a much smaller one.
+# marker gene of a species-level genome bin it went on to report. A read on the
+# markers of a bin that missed the detection threshold is not counted, which is
+# the one way this differs from MetaPhlAn's count above.
 markermagu_mapping() {
     LC_ALL=C awk -F'\t' '
         NR == FNR { if (FNR > 1) total += $2; next }
@@ -628,6 +637,9 @@ write_run_statistics() {
         if [[ -s "$DEPTHS" ]]; then
             printf 'samples\t%s\n' "$(wc -l < "$DEPTHS")"
             printf 'metaphlan_database\t%s\n' "$DATABASE"
+        fi
+
+        if [[ -s "$METAPHLAN_READS" ]]; then
             metaphlan_mapping
         fi
 

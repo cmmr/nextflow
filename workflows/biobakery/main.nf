@@ -83,7 +83,10 @@ workflow {
     ch_reads = KNEADDATA.out.reads
 
     METAPHLAN(ch_reads, database('metaphlan_db'))
-    METAPHLAN_MERGE(METAPHLAN.out.profile.map { meta, profile -> profile }.collect())
+    METAPHLAN_MERGE(
+        METAPHLAN.out.profile.map { meta, profile -> profile }.collect(),
+        METAPHLAN.out.counts.collect()
+    )
 
     ch_profiles = METAPHLAN.out.profile
 

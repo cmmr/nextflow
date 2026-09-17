@@ -48,7 +48,7 @@
 # Called by: wrike_job.sh, as the POST_PROCESS_CMDS entry of the taxprofiler pipelines
 # Requires:  aws, zip, curl and jq (via the Wrike helpers)
 # Reads:     templates/dashboard.html, templates/overview.html,
-#            templates/files.html and templates/taxprofiler/outputs.conf, via
+#            templates/deliverables.html and templates/taxprofiler/outputs.conf, via
 #            the dashboard helpers; templates/taxprofiler/prune.conf;
 #            ./composition_data.json, and the run's statistics and manifest out
 #            of ./run_state.json
@@ -100,7 +100,7 @@ SUBTITLE="Shotgun metagenomic taxonomic profiling"
 MULTIQC_REPORT="$RESULTS_DIR/multiqc/multiqc_report.html"
 readonly MULTIQC_REPORT_HREF="multiqc/multiqc_report.html"
 
-# What the landing page's "All output files" view lists, in the order it lists it
+# What the landing page's file index lists, in the order it lists it
 readonly OUTPUT_CATALOG="$NEXTFLOW_DIR/templates/taxprofiler/outputs.conf"
 
 # What is deleted from the results before any of it is published
@@ -205,10 +205,8 @@ fi
 # 6. Build the pages that frame all of it, from what the run produced.
 dashboard_reset "$RESULTS_DIR" "$OUTPUT_CATALOG"
 
-#    The navigation bar, after the Overview every run opens on
-dashboard_view krona   "Taxonomy Explorer" "$KRONA_CHART"
-dashboard_view quality "Technical Report"  "$MULTIQC_REPORT_HREF"
-dashboard_index_view   "File Explorer"
+#    The navigation bar's one link beyond the ones every pipeline's carries
+dashboard_view krona "Taxonomy Explorer" "$KRONA_CHART"
 
 #    How the run was set up. The pipeline version comes off the manifest
 #    wrike_job.sh recorded, so the page and the record cannot disagree; what was
@@ -249,7 +247,7 @@ if [[ "$TOTAL_READS" =~ ^[0-9]+$ ]] && (( TOTAL_READS > 0 )); then
     #    reports. What each step in between took sits behind the "details" link
     #    on the second of them, out of the way of a reader who only wants the
     #    two, and each of those labels leads to that step's own accounting in the
-    #    Technical Report.
+    #    QC Report.
     dashboard_stat_group "READ TOTALS" "${STATS[platform]:-}"
     dashboard_stat_bar "Total reads" "$(human_count "$TOTAL_READS")" 100
 

@@ -129,9 +129,7 @@ this pipeline's output is declared in a handful of lines of that script and one
 text file:
 
 ```bash
-dashboard_view report  "Analysis Report" "summary_report/summary_report.html"
-dashboard_view quality "Technical Report" "multiqc/multiqc_report.html"
-dashboard_index_view   "File Explorer"
+dashboard_view       report "Analysis Report" "summary_report/summary_report.html"
 dashboard_stat_group "READ TOTALS"    "$SEQUENCED"
 dashboard_tab        asvs "DADA2"
 dashboard_formats    "" "Plain text|feature_table/feature-table.tsv" \

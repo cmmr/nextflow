@@ -18,8 +18,8 @@
 # The sidebar carries KneadData's read totals and a Feature Table tab each for
 # MetaPhlAn and HUMAnN; a tool the run did not enable leaves its tab off.
 #
-# The navigation bar reads Overview, Deliverables (the file index), Methods, QC
-# Report (MultiQC) and File Explorer (the results folder's listing).
+# The navigation bar adds Methods to the links every pipeline's carries, between
+# Deliverables and QC Report.
 #
 # Usage:     biobakery_upload.sh [results_dir]
 #            defaults to ./results, the outdir set in the biobakery params file
@@ -102,10 +102,7 @@ fi
 # 4. What the pages offer, from what the run produced
 dashboard_reset "$RESULTS_DIR" "$OUTPUT_CATALOG"
 
-dashboard_index_view   "Deliverables"
 dashboard_methods_view "$METHODS_DATA_FILE" "Methods"
-dashboard_view quality "QC Report" "$MULTIQC_REPORT_HREF"
-dashboard_listing_view "File Explorer"
 
 PIPELINE=""
 
@@ -154,9 +151,9 @@ fi
 dashboard_tab metaphlan "MetaPhlAn"
 
 dashboard_formats "" \
-    "Taxa|BIOM (tsv)|metaphlan/metaphlan-sgb-reads.tsv" \
-    "Taxa|BIOM (json)|metaphlan/metaphlan-sgb-reads.json.biom" \
-    "Taxa|BIOM (hdf5)|metaphlan/metaphlan-sgb-reads.hdf5.biom" || true
+    "Taxa|BIOM (tsv)|metaphlan/taxa-counts.tsv" \
+    "Taxa|BIOM (json)|metaphlan/taxa-counts.json.biom" \
+    "Taxa|BIOM (hdf5)|metaphlan/taxa-counts.hdf5.biom" || true
 
 #    Each tool's mapped reads out of the reads KneadData retained, with the
 #    database it mapped against named under the bar

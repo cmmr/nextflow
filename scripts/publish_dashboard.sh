@@ -8,27 +8,30 @@
 # the same three pages, all built from templates/redesign/code.html, and a fourth
 # for a pipeline that declares methods data:
 #
-#   index.html     the navigation bar, and a frame the rest of it loads into
-#   overview.html  the run itself - what it was, what it found, what to take
-#   files.html     the annotated index of everything it published
-#   methods.html   a paragraph for a manuscript saying how the results were made,
-#                  and the references it cites
+#   index.html         the navigation bar, and a frame the rest of it loads into
+#   overview.html      the run itself - what it was, what it found, what to take
+#   deliverables.html  the annotated index of its final outputs
+#   methods.html       a paragraph for a manuscript saying how the results were
+#                      made, and the references it cites
 #
 # The bar is the only chrome that survives navigation. Each of its links names a
-# whole page: the ones above, the pipeline's own reports as they were written,
-# and the results folder's listing.
+# whole page, and every pipeline's bar reads the same:
+#
+#   Overview       overview.html
+#   Deliverables   deliverables.html
+#   ...            the links the upload script declared, in that order
+#   QC Report      multiqc/multiqc_report.html, when the run wrote one
+#   File Explorer  directory_listing.html, the results folder's listing
 #
 # An upload script declares what its pipeline produced and then publishes:
 #
 #   dashboard_reset      <results_dir> <catalog>
-#   dashboard_view       <id> <label> <path>      once per report the bar offers
-#   dashboard_index_view [label]                  where the file index sits in it
-#   dashboard_methods_view <data> [label]         where the Methods page sits in
-#                                                 it, rendered from the data a
+#   dashboard_view       <id> <label> <path>      once per link the pipeline
+#                                                 adds to the bar
+#   dashboard_methods_view <data> [label]         the Methods page's link,
+#                                                 rendered from the data a
 #                                                 methods script wrote; nothing
 #                                                 when that file is missing
-#   dashboard_listing_view [label]                where the results folder's own
-#                                                 listing sits in it
 #   dashboard_tab        <id> <label>             opens a tab of the Feature
 #                                                 Table card; the buttons,
 #                                                 formats, folders and stat
@@ -93,8 +96,7 @@
 #
 # Each of those skips a file the run did not produce, so the pages describe the
 # run rather than the pipeline. Overview is always the first link and the one a
-# reader lands on; the file index is appended to the bar when the pipeline did
-# not say where it goes.
+# reader lands on.
 #
 # "Download everything" is the one archive the run published to Globus - the
 # reads it was given and this whole dashboard in a single zip - and a run that
@@ -130,8 +132,8 @@
 # Icons are Material Symbols names, from the font the design system loads:
 # biotech, database, filter_alt, science, folder_zip, data_object and so on.
 #
-# Defines: dashboard_reset, dashboard_view, dashboard_index_view,
-#          dashboard_methods_view, dashboard_listing_view, dashboard_tab, dashboard_tab_end, dashboard_button,
+# Defines: dashboard_reset, dashboard_view,
+#          dashboard_methods_view, dashboard_tab, dashboard_tab_end, dashboard_button,
 #          dashboard_formats, dashboard_folder, dashboard_bundle,
 #          dashboard_stat_group, dashboard_stat_row, dashboard_stat_tiles,
 #          dashboard_stat_chips, dashboard_stat_bar, dashboard_stat_detail,
@@ -166,7 +168,12 @@ readonly DASHBOARD_TAB_OFF="font-label-caps text-label-caps font-bold text-on-su
 
 # The pages this script writes into the results folder. Named here because the
 # upload sends them last, after everything they frame.
-readonly DASHBOARD_PAGES=(overview.html files.html methods.html index.html)
+readonly DASHBOARD_PAGES=(overview.html deliverables.html methods.html index.html)
+
+# The MultiQC report every pipeline publishes, and the results folder's listing
+# index_directories.sh writes after the pages
+readonly DASHBOARD_QC_REPORT="multiqc/multiqc_report.html"
+readonly DASHBOARD_LISTING="directory_listing.html"
 
 DASHBOARD_RESULTS_DIR=""
 DASHBOARD_CATALOG=""
@@ -254,8 +261,9 @@ dashboard_file_icon() {
     esac
 }
 
-# One link in the navigation bar, if the run produced the page behind it. The id
-# is the fragment the bar remembers the open view as.
+# One link a pipeline adds to the navigation bar, between Deliverables and QC
+# Report, if the run produced the page behind it. The id is the fragment the bar
+# remembers the open view as.
 dashboard_view() {
     local id="$1" label="$2" path="$3"
 
@@ -264,13 +272,7 @@ dashboard_view() {
     DASHBOARD_VIEWS+=("$id|$label|$path")
 }
 
-# Where the file index sits among those links. It is a page this script writes
-# rather than one the run produced, so it is declared rather than found.
-dashboard_index_view() {
-    DASHBOARD_VIEWS+=("files|${1:-File Explorer}|files.html")
-}
-
-# Where the Methods page sits among those links, for a run whose methods script
+# The Methods page's link among those, for a run whose methods script
 # wrote its data: a JSON object of paragraphs citing [@id] and the references
 # those ids name, as biobakery_methods.sh writes it
 dashboard_methods_view() {
@@ -292,13 +294,6 @@ dashboard_drop_view() {
     done
 
     DASHBOARD_VIEWS=(${kept[@]+"${kept[@]}"})
-}
-
-# Where the results folder's own listing sits among those links.
-# index_directories.sh writes it after the pages, so it is declared rather than
-# found.
-dashboard_listing_view() {
-    DASHBOARD_VIEWS+=("listing|${1:-File Explorer}|directory_listing.html")
 }
 
 # How many samples the run covered, as the pill beside the statistics heading -
@@ -919,18 +914,22 @@ dashboard_slug() {
     printf '%s' "${slug#-}"
 }
 
-# The navigation bar: Overview, then the views in the order they were declared,
-# with the file index appended when the pipeline did not place it.
+# The navigation bar: Overview and Deliverables, the views the pipeline declared
+# in that order, then QC Report when the run wrote one, and File Explorer
 dashboard_nav() {
     local entry id label path
-    local views=(${DASHBOARD_VIEWS[@]+"${DASHBOARD_VIEWS[@]}"})
+    local views=("deliverables|Deliverables|deliverables.html")
+
+    views+=(${DASHBOARD_VIEWS[@]+"${DASHBOARD_VIEWS[@]}"})
+
+    if [[ -f "$DASHBOARD_RESULTS_DIR/$DASHBOARD_QC_REPORT" ]]; then
+        views+=("quality|QC Report|$DASHBOARD_QC_REPORT")
+    fi
+
+    views+=("listing|File Explorer|$DASHBOARD_LISTING")
 
     printf '<a class="%s" data-view="overview" href="overview.html" target="view">Overview</a>' \
         "$DASHBOARD_NAV_ON"
-
-    if [[ " ${views[*]} " != *"files|"* ]]; then
-        views+=("files|File Explorer|files.html")
-    fi
 
     for entry in ${views[@]+"${views[@]}"}; do
         id=${entry%%|*}
@@ -1450,8 +1449,8 @@ render_methods() {
         FOOTER_NOTE "$(dashboard_footer_note "$run_date" "$pipeline" "$run_id")"
 }
 
-# Everything the run published, annotated
-render_files() {
+# The run's final outputs, annotated
+render_deliverables() {
     local run_id="$1" task_name="$2" pipeline="$3" run_date="$4"
 
     local GROUP_NAV SECTIONS
@@ -1464,7 +1463,7 @@ render_files() {
         dashboard_index
     fi
 
-    render_template "$NEXTFLOW_DIR/templates/files.html" \
+    render_template "$NEXTFLOW_DIR/templates/deliverables.html" \
         TASK_NAME   "$(escape_html "$task_name")" \
         GROUP_NAV   "$GROUP_NAV" \
         SECTIONS    "$SECTIONS" \
@@ -1490,14 +1489,14 @@ render_dashboard() {
 
     local name page
 
-    for name in overview files methods shell; do
+    for name in overview deliverables methods shell; do
         case "$name" in
-            overview) page=$(render_overview "$run_id" "$task_name" "$subtitle" \
-                                 "$pipeline" "$run_date" "$sample_count" "$plot_data") ;;
-            files)    page=$(render_files "$run_id" "$task_name" "$pipeline" "$run_date") ;;
-            methods)  [[ -n "$DASHBOARD_METHODS" ]] || continue
-                      page=$(render_methods "$run_id" "$task_name" "$pipeline" "$run_date") ;;
-            shell)    page=$(render_shell "$run_id" "$task_name" "$expires") ;;
+            overview)     page=$(render_overview "$run_id" "$task_name" "$subtitle" \
+                                     "$pipeline" "$run_date" "$sample_count" "$plot_data") ;;
+            deliverables) page=$(render_deliverables "$run_id" "$task_name" "$pipeline" "$run_date") ;;
+            methods)      [[ -n "$DASHBOARD_METHODS" ]] || continue
+                          page=$(render_methods "$run_id" "$task_name" "$pipeline" "$run_date") ;;
+            shell)        page=$(render_shell "$run_id" "$task_name" "$expires") ;;
         esac
 
         #    The Methods page is left out, and its link with it, rather than

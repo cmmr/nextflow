@@ -74,12 +74,13 @@ process METAPHLAN {
     """
 }
 
-// The per-sample profiles as one table of relative abundances and one of
-// estimated read counts, sample by column, and the relative abundances again
-// restricted to species rows and UNCLASSIFIED. The SGB read counts are written
-// as classic tabular, JSON (BIOM 1.0) and HDF5 (BIOM 2.1) tables carrying the
-// SGB phylogeny MetaPhlAn ships, pruned to those SGBs and also written on its
-// own, by bin/metaphlan_sgb_biom.py.
+// The per-sample profiles as one table of estimated read counts and one of
+// relative abundances, sample by column, with every rank and UNCLASSIFIED
+// (metaphlan-*), and both again restricted to species rows and UNCLASSIFIED
+// (species-*). The SGB read counts are written as classic tabular, JSON
+// (BIOM 1.0) and HDF5 (BIOM 2.1) tables carrying the SGB phylogeny MetaPhlAn
+// ships, pruned to those SGBs and also written on its own (taxa-*), by
+// bin/metaphlan_sgb_biom.py.
 process METAPHLAN_MERGE {
     container 'quay.io/biocontainers/metaphlan:4.1.1--pyhdfd78af_0'
 
@@ -89,11 +90,12 @@ process METAPHLAN_MERGE {
     path profiles, stageAs: 'profiles/*'
 
     output:
-    path 'metaphlan-relab.tsv'        , emit: merged
-    path 'metaphlan-species-relab.tsv', emit: species
-    path 'metaphlan-reads.tsv'        , emit: reads
-    path 'metaphlan-sgb-reads.*'      , emit: sgb_reads
-    path 'metaphlan-tree.newick'      , emit: tree, optional: true
+    path 'metaphlan-counts.tsv', emit: counts
+    path 'metaphlan-relab.tsv' , emit: relab
+    path 'species-counts.tsv'  , emit: species_counts
+    path 'species-relab.tsv'   , emit: species_relab
+    path 'taxa-counts.*'       , emit: taxa
+    path 'taxa-tree.newick'    , emit: tree, optional: true
 
     script:
     """
@@ -138,11 +140,13 @@ process METAPHLAN_MERGE {
                 print ""
             }
         }
-    ' named/*.txt > metaphlan-reads.tsv
+    ' named/*.txt > metaphlan-counts.tsv
 
-    awk -F'\\t' 'NR <= 2 || \$1 == "UNCLASSIFIED" || (\$1 ~ /\\|s__/ && \$1 !~ /\\|t__/)' metaphlan-relab.tsv \\
-        > metaphlan-species-relab.tsv
+    for unit in counts relab; do
+        awk -F'\\t' 'NR <= 2 || \$1 == "UNCLASSIFIED" || (\$1 ~ /\\|s__/ && \$1 !~ /\\|t__/)' metaphlan-\$unit.tsv \\
+            > species-\$unit.tsv
+    done
 
-    metaphlan_sgb_biom.py metaphlan-reads.tsv metaphlan-sgb-reads metaphlan-tree.newick
+    metaphlan_sgb_biom.py metaphlan-counts.tsv taxa-counts taxa-tree.newick
     """
 }

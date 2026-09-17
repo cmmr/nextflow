@@ -57,7 +57,7 @@
 # Called by: wrike_job.sh, as the POST_PROCESS_CMDS entry of the ampliseq pipeline
 # Requires:  aws, zip, curl and jq (via the Wrike helpers)
 # Reads:     templates/dashboard.html, templates/overview.html,
-#            templates/files.html and templates/ampliseq/outputs.conf, via the
+#            templates/deliverables.html and templates/ampliseq/outputs.conf, via the
 #            dashboard helpers; templates/ampliseq/prune.conf; ./composition_data.json,
 #            and the run's statistics and manifest out of ./run_state.json
 # Runs:      ampliseq_composition.sh, prune_results.sh and index_directories.sh,
@@ -105,7 +105,7 @@ SUMMARY_REPORT="$RESULTS_DIR/summary_report/summary_report.html"
 # Where that report is read from, relative to the pages that link into it
 readonly SUMMARY_REPORT_HREF="summary_report/summary_report.html"
 
-# What the landing page's "All output files" view lists, in the order it lists it
+# What the landing page's file index lists, in the order it lists it
 readonly OUTPUT_CATALOG="$NEXTFLOW_DIR/templates/ampliseq/outputs.conf"
 
 # What is deleted from the results before any of it is published
@@ -174,10 +174,8 @@ fi
 # 5. Build the pages that frame all of it, from what the run produced.
 dashboard_reset "$RESULTS_DIR" "$OUTPUT_CATALOG"
 
-#    The navigation bar, after the Overview every run opens on
-dashboard_view report  "Analysis Report" "summary_report/summary_report.html"
-dashboard_view quality "Technical Report" "multiqc/multiqc_report.html"
-dashboard_index_view   "File Explorer"
+#    The navigation bar's one link beyond the ones every pipeline's carries
+dashboard_view report "Analysis Report" "summary_report/summary_report.html"
 
 #    How the run was set up. Every value comes off the manifest wrike_job.sh
 #    recorded, so the page and the record cannot disagree; anything it does not

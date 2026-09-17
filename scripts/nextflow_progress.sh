@@ -183,24 +183,21 @@ render_rows() {
             return out
         }
 
-        # "NFC…SEQ:FASTQC (McAllister_P3)" -> "FASTQC (McAllister_P3)". The
-        # leading ellipsis is the one nextflow printed; it stays wherever the cut
-        # reached far enough in to leave the workflow path unrecognisable.
-        function pretty(name,   base, tag) {
+        # "NFC…SEQ:FASTQC (McAllister_P3)" -> "FASTQC", without the tag of the
+        # task nextflow printed last. The leading ellipsis is the one nextflow
+        # printed; it stays wherever the cut reached far enough in to leave the
+        # workflow path unrecognisable.
+        function pretty(name,   base) {
             sub(/^.*…/, "…", name)
 
-            tag  = ""
             base = name
-            if (match(name, / \([^()]*\)$/)) {
-                tag  = substr(name, RSTART)
-                base = substr(name, 1, RSTART - 1)
-            }
+            if (match(name, / \([^()]*\)$/)) base = substr(name, 1, RSTART - 1)
 
             # A stray bracket means the cut landed inside the tag of a task, so
             # what looks like a workflow path is part of that tag.
             if (base !~ /[()]/ && base ~ /:/) sub(/^.*:/, "", base)
 
-            return base tag
+            return base
         }
 
         # "[f5/de7a5f] NFC…SEQ:FASTQC (McAllister_P3) | 6 of 6 ✔" once a process

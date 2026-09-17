@@ -244,26 +244,34 @@ reads an index by name, so one directory can hold several releases. The module
 uses the index named like the directory when there is one, the only index
 otherwise, and refuses a directory holding several with none named like it.
 
-`METAPHLAN_MERGE` joins them with `merge_metaphlan_tables.py` into
-`metaphlan/metaphlan-relab.tsv`, every clade at every rank with one column per
-sample, and `metaphlan-species-relab.tsv`, the species rows and the
-`UNCLASSIFIED` row alone — so each sample's column accounts for every read, and
-this is the table that says how much of a sample went unclassified. The merge
-keeps only relative abundance.
+`METAPHLAN_MERGE` publishes the profile at three levels of detail under
+`metaphlan/`:
+
+| Files | Rows | `UNCLASSIFIED` | Tree |
+|---|---|---|---|
+| `metaphlan-counts.tsv`, `metaphlan-relab.tsv` | every clade at every rank, kingdom to SGB | yes | no |
+| `species-counts.tsv`, `species-relab.tsv` | species | yes | no |
+| `taxa-counts.tsv`, `.json.biom`, `.hdf5.biom` | SGBs on the phylogeny | no | in the `.biom` files |
+| `taxa-tree.newick` | the phylogeny, pruned to those SGBs | — | — |
+
+`merge_metaphlan_tables.py` joins the profiles into `metaphlan-relab.tsv`, one
+column per sample, and keeps only relative abundance. The species tables are
+the species rows and the `UNCLASSIFIED` row alone — so each sample's column
+accounts for every read, and these are the tables that say how much of a sample
+went unclassified.
 
 **The read counts are merged by `METAPHLAN_MERGE` itself.** An awk pass over the
 same profiles takes `estimated_number_of_reads_from_the_clade` — the clade's
-marker coverage multiplied by its genome length — into
-`metaphlan/metaphlan-reads.tsv`, in the same layout as the relative abundance
-tables: whole numbers, and 0 where a sample did not report a clade. These are
-what taxprofiler publishes as `count_tables/metaphlan-reads.tsv`.
+marker coverage multiplied by its genome length — into `metaphlan-counts.tsv`,
+in the same layout as the relative abundance tables: whole numbers, and 0 where
+a sample did not report a clade. These are what taxprofiler publishes as
+`count_tables/metaphlan-reads.tsv`.
 
 Its SGB rows are the feature table, written by
 [`bin/metaphlan_sgb_biom.py`](../../workflows/biobakery/bin/metaphlan_sgb_biom.py)
 with the biom-format and DendroPy libraries the MetaPhlAn container ships:
-`metaphlan-sgb-reads.tsv` in classic tabular BIOM form, and the same table as
-`metaphlan-sgb-reads.json.biom` (BIOM 1.0) and `metaphlan-sgb-reads.hdf5.biom`
-(BIOM 2.1). One row per SGB, keyed by the bare SGB number, with its lineage from
+`taxa-counts.tsv` in classic tabular BIOM form, and the same table as
+`taxa-counts.json.biom` (BIOM 1.0) and `taxa-counts.hdf5.biom` (BIOM 2.1). One row per SGB, keyed by the bare SGB number, with its lineage from
 kingdom to `t__SGB…` as the taxonomy. A `t__SGB…_group` row is that SGB. These
 are the tables to rarefy or hand to a count-based differential abundance method.
 
@@ -281,16 +289,16 @@ profiles and needs no parameter for it. It is pruned to the SGBs in the table,
 keeping branch lengths — checked against `ape::keep.tip` — and goes into the
 BIOM 2.1 file at `observation/group-metadata/phylogeny` and into the BIOM 1.0
 file as the top-level `phylogeny` string rbiom reads, and is published on its own
-as `metaphlan/metaphlan-tree.newick`. rbiom would prune the full tree itself on
+as `metaphlan/taxa-tree.newick`. rbiom would prune the full tree itself on
 reading, but QIIME 2 and phyloseq would not, and the standalone file wants to be
 this run's tree.
 
 Every row of a table carrying a tree has to be a tip on it, so **SGBs the
 phylogeny lacks are left out of the BIOM tables** — the eukaryotic `t__EUK…`
 bins, which it does not include — and listed in the task's log.
-`metaphlan-reads.tsv` keeps them. A database MetaPhlAn ships no tree for, or a
-run with fewer than two SGBs on it, gets its tables without a tree and without
-`metaphlan-tree.newick`.
+`metaphlan-counts.tsv` and `species-counts.tsv` keep them. A database MetaPhlAn
+ships no tree for, or a run with fewer than two SGBs on it, gets its tables
+without a tree and without `taxa-tree.newick`.
 
 
 ## HUMAnN
@@ -363,7 +371,7 @@ plus a fourth, Methods. The navigation bar reads:
 | Link | Page |
 | --- | --- |
 | Overview | `overview.html` |
-| Deliverables | `files.html`, the annotated file index |
+| Deliverables | `deliverables.html`, the annotated file index |
 | Methods | `methods.html` — see [The Methods page](#the-methods-page) |
 | QC Report | `multiqc/multiqc_report.html` |
 | File Explorer | `directory_listing.html`, the results folder's own listing |

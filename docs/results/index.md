@@ -19,7 +19,7 @@ methods data — and uploads them last, once everything they link to is in place
 |---|---|---|
 | [`dashboard.html`](../../templates/dashboard.html) | `index.html` | the navigation bar, and the frame the rest load into |
 | [`overview.html`](../../templates/overview.html) | `overview.html` | the run itself: what it was, what it found, what to take away |
-| [`files.html`](../../templates/files.html) | `files.html` | the annotated index of everything the run published |
+| [`deliverables.html`](../../templates/deliverables.html) | `deliverables.html` | the annotated index of the run's final outputs, linking to the File Explorer for everything else |
 | [`methods.html`](../../templates/methods.html) | `methods.html` | a methods paragraph for a manuscript, and its references; biobakery only, see [The Methods page](../pipelines/biobakery.md#the-methods-page) |
 
 All of them are laid out to the [Alkek design
@@ -29,27 +29,28 @@ because they are served from S3 alongside the objects they point at.
 ## The navigation bar
 
 The CMMR wordmark, one link per view of the run, and the deletion date at the
-far end. Overview is always first and is the view a reader lands on; the rest
-are what the pipeline declared, and the file index sits where the pipeline put
-it.
+far end. Every pipeline's bar starts with Overview and Deliverables and ends
+with QC Report and File Explorer, all four named and placed by
+`publish_dashboard.sh`. A pipeline's upload script adds its own links between
+Deliverables and QC Report with `dashboard_view`, in the order it declares
+them. Overview is the view a reader lands on.
 
-| Link | ampliseq | taxprofiler | biobakery |
-|---|---|---|---|
-| `#overview` | `overview.html` | `overview.html` | `overview.html` |
-| `#report` | `summary_report/summary_report.html` | — | — |
-| `#krona` | — | `krona/kraken2_<db>.html` — see [why that one](../pipelines/taxprofiler.md) | — |
-| `#files` | — | — | `files.html`, as "Deliverables" |
-| `#methods` | — | — | `methods.html` |
-| `#quality` | `multiqc/multiqc_report.html` | `multiqc/multiqc_report.html` | `multiqc/multiqc_report.html`, as "QC Report" |
-| `#files` | `files.html` | `files.html` | — |
-| `#listing` | — | — | `directory_listing.html`, as "File Explorer" |
+| Link | Label | ampliseq | taxprofiler | biobakery |
+|---|---|---|---|---|
+| `#overview` | Overview | `overview.html` | `overview.html` | `overview.html` |
+| `#deliverables` | Deliverables | `deliverables.html` | `deliverables.html` | `deliverables.html` |
+| `#report` | Analysis Report | `summary_report/summary_report.html` | — | — |
+| `#krona` | Taxonomy Explorer | — | `krona/kraken2_<db>.html` — see [why that one](../pipelines/taxprofiler.md) | — |
+| `#methods` | Methods | — | — | `methods.html` |
+| `#quality` | QC Report | `multiqc/multiqc_report.html` | `multiqc/multiqc_report.html` | `multiqc/multiqc_report.html` |
+| `#listing` | File Explorer | `directory_listing.html` | `directory_listing.html` | `directory_listing.html` |
 
-A link is named what its pipeline calls it; ampliseq and taxprofiler call the
-MultiQC report "Technical Report" and the file index "File Explorer". A folder
-listing opened from anywhere keeps `#listing` marked, where the bar has one.
+QC Report is left off a run that wrote no MultiQC report, and a pipeline's own
+link is left off a run that did not write its page. A folder listing opened from
+anywhere keeps `#listing` marked.
 
 The open view is remembered in the URL fragment, so `#quality` is a link
-straight to the Technical Report with the bar still around it. Each link also
+straight to the QC Report with the bar still around it. Each link also
 carries `target="view"`, so the bar works with scripting off — the script only
 keeps the fragment and the underline in step with the frame.
 
@@ -139,7 +140,7 @@ them, out of the way of a reader who wants only the two. On a shotgun run that i
 each of fastp's tests in the order fastp applies them — quality, N content,
 length, complexity — then host depletion, each written as what was *still in
 hand* after it rather than as what it took. Every one of those labels links into
-that step's own per-sample accounting in the Technical Report.
+that step's own per-sample accounting in the QC Report.
 
 A share is written whole. On a shotgun run there is one exception, for the step
 that needs it: where rounding whole would read 100% for a step that did drop
@@ -170,9 +171,9 @@ run carries none, and is named by its instrument alone.
 and the uid. That last is there so a reader asking us about these results has
 something to quote; nothing else on the page needs it.
 
-## What is on the File Explorer
+## What is on Deliverables
 
-A grouped, annotated catalogue of everything the run published, with a menu of
+A grouped, annotated catalogue of the run's final outputs, with a menu of
 the groups beside it. See [The file index](#the-file-index) below.
 
 ## The expiration notice
@@ -211,7 +212,7 @@ itself worth stating.
 
 `summary_report.html` links to a good deal of what a run produces, but not to
 all of it, and not with any account of what a reader would want each file for.
-The File Explorer is that account.
+Deliverables is that account; File Explorer lists everything else.
 
 It is built from the pipeline's **output catalogue** —
 [`templates/ampliseq/outputs.conf`](../../templates/ampliseq/outputs.conf) and
@@ -289,7 +290,7 @@ off a disk, the same pages find `../../raw-sequences/` sitting there and turn
 the names back into links.
 
 That switch is one line of script in
-[`files.html`](../../templates/files.html) and
+[`deliverables.html`](../../templates/deliverables.html) and
 [`listing.html`](../../templates/listing.html): held is how the rows are
 *written*, and a page read from `file:` or from localhost adds a `local` class
 that lifts it. So the published copy is right with or without scripting, and one

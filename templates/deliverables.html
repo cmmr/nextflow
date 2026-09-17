@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <!--
-  files.html - The File Explorer view of a published run, read inside dashboard.html.
+  deliverables.html - The Deliverables view of a published run, read inside dashboard.html.
 
-  Rendered by publish_dashboard.sh into the results folder as files.html and
-  loaded into the landing page's frame. It is the pipeline's output catalog -
-  templates/<pipeline>/outputs.conf - as a grouped, annotated index of
-  everything the run published, with a menu of the groups beside it. A group
+  Rendered by publish_dashboard.sh into the results folder as deliverables.html
+  and loaded into the landing page's frame. It is the pipeline's output catalog -
+  templates/<pipeline>/outputs.conf - as a grouped, annotated index of the
+  run's final outputs, with a menu of the groups beside it. A group
   may open with paragraphs saying how its files were made, and each catalog
   entry is one tbody, so files that share a description share a block.
 
@@ -32,7 +32,7 @@
 <head>
 <meta charset="utf-8">
 <meta content="width=device-width, initial-scale=1.0" name="viewport">
-<title>__TASK_NAME__ - All output files</title>
+<title>__TASK_NAME__ - Deliverables</title>
 __COMMON_HEAD__
 <style>
 /* The design system's values, for the rows the renderer emits as classes */
@@ -173,8 +173,8 @@ html.local .groups tr.held .held-note { display: none; }
 <main class="flex-1 flex flex-col overflow-y-auto bg-surface relative">
 <div class="p-margin-page space-y-6 max-w-7xl mx-auto w-full">
 <div>
-<h1 class="font-headline-xl text-headline-xl text-primary">All output files</h1>
-<p class="text-on-surface-variant mt-1">Everything this run published, grouped by what it is for.</p>
+<h1 class="font-headline-xl text-headline-xl text-primary">Deliverables</h1>
+<p class="text-on-surface-variant mt-1">The final outputs of this run most likely to be useful for downstream analysis, grouped and described. Every file this run published, supporting files included, is in the <a class="font-medium text-primary underline hover:no-underline" href="directory_listing.html">File Explorer</a>.</p>
 </div>
 <div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-padding-card shadow-sm flex flex-col lg:flex-row gap-gutter-grid items-start">
 <nav class="menu w-full lg:w-56 shrink-0 lg:sticky lg:top-0 flex flex-row flex-wrap lg:flex-col gap-1">__GROUP_NAV__</nav>

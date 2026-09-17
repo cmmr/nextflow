@@ -14,12 +14,13 @@
   "Download everything" button beneath it. The bar survives navigation - the
   run's name, its views and its deletion date are the one piece of chrome that
   does not reload - and each view is a whole page rather than a panel:
-  overview.html for the run itself, the pipeline's own reports as they were
-  written, files.html for the index.
+  overview.html for the run itself, deliverables.html for the index, the
+  pipeline's own reports as they were written, and directory_listing.html for
+  the results folder.
 
   The links carry target="view", so they load into that frame with or without
   scripting; the script remembers which one the bar was asked for in the
-  fragment, so #quality is a link straight to the Technical Report with the bar
+  fragment, so #quality is a link straight to the QC Report with the bar
   still around it. A view costs one history entry - the fragment - and the frame
   is sent to its page by replacing the address it is on, so the browser's back
   button walks the views the bar shows rather than the loads behind them.
@@ -169,10 +170,8 @@ __COMMON_HEAD__
 
   // The view a page belongs to: the view it is, or the one whose folder holds
   // it. The report's own plots and the listings under the file index are pages
-  // of a view rather than views of their own, so the longest match wins and a
-  // page under no view's folder - a listing in the results tree - leaves the
-  // bar naming whichever view led there. Every folder listing belongs to a view
-  // that is the top listing, where the bar has one.
+  // of a view rather than views of their own, so the longest match wins. Every
+  // folder listing belongs to File Explorer, the top listing.
   var LISTING = "directory_listing.html";
 
   function viewFor(href) {

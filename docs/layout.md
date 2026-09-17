@@ -87,7 +87,7 @@ templates/            Web pages published to S3 alongside a run's results.
   dashboard.html      Landing page template: the navigation bar and its frame.
                       Pipeline-agnostic, as are the five below.
   overview.html       The view it opens on: the run, its plots and its sidebar.
-  files.html          The annotated index of everything the run published.
+  deliverables.html   The annotated index of the run's final outputs.
   methods.html        A methods paragraph for a manuscript, and its references.
   progress.html       Live progress page template: the task dial and the
                       per-process bars.

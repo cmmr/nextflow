@@ -140,7 +140,7 @@ Currently defined:
   "Host Removal" answer rather than a separate pipeline. See
   [the taxprofiler pipeline](taxprofiler.md).
 - **BIOBAKERY** — KneadData, MetaPhlAn 4.1.1 and HUMAnN 3.9 over shotgun reads,
-  with mOTUs and nonpareil for diversity,
+  with mOTUs and nonpareil for diversity and EsViritu for viruses,
   as a workflow in this repository, with HUMAnN and any add-on module switched on
   per pipeline version. Reads the same host answer as TAXPROFILER. See
   [the biobakery pipeline](biobakery.md).

@@ -61,6 +61,25 @@
       "cite": ["ruscheweyh2022"]
     },
     {
+      "path": "esviritu/v3.2.4",
+      "name": "EsViritu virus pathogen",
+      "release": "v3.2.4",
+      "description": "19,925 human, animal and plant virus genome assemblies in 63 families: virus_pathogen_database.fna, its minimap2 index (.mmi) and virus_pathogen_database.all_metadata.tsv, the taxonomy EsViritu names each by. EsViritu 1.0.0 and later read v3.1.0 or later.",
+      "used_by": [
+        "biobakery: esviritu_db"
+      ],
+      "setup": "scripts/fetch_taxprofiler_db.sh esviritu",
+      "manifest": "esviritu/v3.2.4.manifest.json",
+      "sources": [
+        {
+          "url": "https://zenodo.org/records/17716199/files/esviritu_db_v3.2.4.tar.gz",
+          "md5": "24d85c1ec3cbffff12e921d2f39c91b2"
+        }
+      ],
+      "doi": "10.5281/zenodo.17716199",
+      "cite": ["tisza2023"]
+    },
+    {
       "path": "humann/v201901b",
       "name": "HUMAnN 3 databases",
       "release": "v201901b",

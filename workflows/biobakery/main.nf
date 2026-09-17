@@ -1,8 +1,8 @@
 // bioBakery shotgun metagenomics: KneadData, then MetaPhlAn, then HUMAnN, with
-// mOTUs and Nonpareil beside them for diversity.
+// mOTUs and Nonpareil beside them for diversity and EsViritu for viruses.
 //
-// KneadData and MetaPhlAn run on every sample. HUMAnN, mOTUs, Nonpareil and any
-// add-on module run behind a run_<tool> parameter of their own. Modules are in modules/ and
+// KneadData and MetaPhlAn run on every sample. HUMAnN, mOTUs, Nonpareil, EsViritu
+// and any add-on module run behind a run_<tool> parameter of their own. Modules are in modules/ and
 // read two channels: ch_reads, KneadData's cleaned reads as [meta, reads], and
 // ch_profiles, MetaPhlAn's profile per sample as [meta, profile]. An add-on
 // publishes under <outdir>/<tool>/.
@@ -17,6 +17,7 @@ include { METAPHLAN; METAPHLAN_MERGE }                            from '../../mo
 include { HUMANN_PREPARE_PROFILE; HUMANN_PROFILE; HUMANN_TABLES } from '../../modules/humann.nf'
 include { MOTUS; MOTUS_MERGE }                                    from '../../modules/motus.nf'
 include { NONPAREIL; NONPAREIL_CURVES }                           from '../../modules/nonpareil.nf'
+include { ESVIRITU; ESVIRITU_SUMMARY }                            from '../../modules/esviritu.nf'
 include { MULTIQC }                                               from '../../modules/multiqc.nf'
 
 // A database parameter as a path, failing the run before any task starts when
@@ -99,6 +100,11 @@ workflow {
         NONPAREIL_CURVES(NONPAREIL.out.npo.map { meta, npo -> npo }.collect())
 
         ch_multiqc = ch_multiqc.mix(NONPAREIL_CURVES.out.json)
+    }
+
+    if (params.run_esviritu) {
+        ESVIRITU(ch_reads, database('esviritu_db'))
+        ESVIRITU_SUMMARY(ESVIRITU.out.results.map { meta, results -> results }.collect())
     }
 
     if (params.run_humann) {

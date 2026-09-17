@@ -21,6 +21,7 @@ Those manifests are the provenance of one copy on one disk.
 | `metaphlan/mpa_vJun23_CHOCOPhlAnSGB_202403` | MetaPhlAn 4 markers and SGB phylogeny | taxprofiler, biobakery | `scripts/fetch_taxprofiler_db.sh metaphlan` |
 | `motus/db_mOTU_v3.1.0` | mOTUs 3.1.0 | taxprofiler, biobakery | `scripts/fetch_taxprofiler_db.sh motus` |
 | `humann/v201901b` | ChocoPhlAn v201901_v31, UniRef90 v201901b, utility mapping | taxprofiler, biobakery | `scripts/fetch_taxprofiler_db.sh humann` |
+| `esviritu/v3.2.4` | EsViritu virus pathogen database v3.2.4 | biobakery | `scripts/fetch_taxprofiler_db.sh esviritu` |
 | `hostremoval/phix` | PhiX (GCF_000819615.1) | taxprofiler, biobakery | `scripts/build_host_reference.sh phix GCF_000819615.1` |
 | `hostremoval/chm13v2phix` | T2T-CHM13v2.0 (GCF_009914755.1) + PhiX | taxprofiler, biobakery | `scripts/build_host_reference.sh chm13v2phix GCF_009914755.1 GCF_000819615.1` |
 | `hostremoval/grcm39phix` | GRCm39 (GCF_000001635.27) + PhiX | taxprofiler, biobakery | `scripts/build_host_reference.sh grcm39phix GCF_000001635.27 GCF_000819615.1` |

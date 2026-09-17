@@ -11,10 +11,9 @@
 # Nothing before the reads arrived is described.
 #
 # Versions are the BioContainers images the modules pin, which the text names in
-# full: KneadData, MetaPhlAn, HUMAnN, mOTUs, Nonpareil and MultiQC by the version
-# in the tag, and
-# the tools inside those images - Trimmomatic, Bowtie2, DIAMOND and the rest - by
-# the image that carries them.
+# full: KneadData, MetaPhlAn, HUMAnN, mOTUs, Nonpareil, EsViritu and MultiQC by
+# the version in the tag, and the tools inside those images - Trimmomatic,
+# Bowtie2, DIAMOND, minimap2 and the rest - by the image that carries them.
 #
 # KneadData's steps are described as each sample's log recorded them, not as its
 # defaults read: the Trimmomatic steps it ran, with the minimum length it set
@@ -359,8 +358,11 @@ METAPHLAN_ARGS=$(state_get manifest.params.metaphlan_args)
 RUN_HUMANN=$(state_get manifest.params.run_humann)
 RUN_MOTUS=$(state_get manifest.params.run_motus)
 RUN_NONPAREIL=$(state_get manifest.params.run_nonpareil)
+RUN_ESVIRITU=$(state_get manifest.params.run_esviritu)
 HUMANN_CHOCOPHLAN=$(state_get manifest.params.humann_chocophlan)
 HUMANN_UNIREF=$(state_get manifest.params.humann_uniref)
+ESVIRITU_DB=$(state_get manifest.params.esviritu_db)
+ESVIRITU_ARGS=$(state_get manifest.params.esviritu_args)
 LAYOUT=$(state_get statistics.layout)
 
 SAMPLESHEET=$(state_get manifest.params.input)
@@ -389,6 +391,7 @@ TOOLS=(kneaddata metaphlan)
 [[ "$RUN_HUMANN" == true ]]    && TOOLS+=(humann)
 [[ "$RUN_MOTUS" == true ]]     && TOOLS+=(motus)
 [[ "$RUN_NONPAREIL" == true ]] && TOOLS+=(nonpareil)
+[[ "$RUN_ESVIRITU" == true ]]  && TOOLS+=(esviritu)
 TOOLS+=(multiqc)
 
 IMAGES=()
@@ -553,7 +556,27 @@ if (( ${#DIVERSITY[@]} > 0 )); then
     TEXT+=" run with default settings to quantify community diversity."
 fi
 
-# 7. The paragraph and the references it cites
+# 7. EsViritu
+if [[ "$RUN_ESVIRITU" == true ]]; then
+    ESVIRITU_READS="the quality-controlled reads"
+    [[ "$LAYOUT" == *paired* ]] && ESVIRITU_READS="the quality-controlled read pairs, without unpaired reads,"
+
+    cite tisza2023
+    TEXT+=" Human, animal and plant viruses were detected in $ESVIRITU_READS with"
+    TEXT+=" $(named EsViritu "$(tool_version esviritu)")$CITATION"
+
+    database_phrase "$ESVIRITU_DB"
+    TEXT+=" and $PHRASE$CITATION"
+
+    cite li2018
+    TEXT+=", aligning reads with minimap2$CITATION and keeping alignments of at least 100 nucleotides"
+    TEXT+=" that covered at least 90% of the read at 80% identity or more$(extra_options "$ESVIRITU_ARGS")."
+    TEXT+=" Reference genomes sharing reads were dereplicated, and each detected virus was quantified"
+    TEXT+=" as reads per kilobase of genome per million reads and assigned to species and subspecies"
+    TEXT+=" at 90% and 95% nucleotide identity to the reference."
+fi
+
+# 8. The paragraph and the references it cites
 if ! jq -n --arg text "$TEXT" --slurpfile refs "$REFERENCES" '
         [$text | scan("\\[@[^\\]]*\\]") | scan("@([A-Za-z0-9_]+)") | .[0]] | unique as $ids
         | ($ids - ($refs[0].references | keys)) as $missing

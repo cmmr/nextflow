@@ -16,7 +16,8 @@
 # The Overview's composition chart is MetaPhlAn's, and its diversity chart is
 # Nonpareil's and mOTUs', on a run that enabled either.
 # The sidebar carries KneadData's read totals and a Feature Table tab each for
-# MetaPhlAn and HUMAnN; a tool the run did not enable leaves its tab off.
+# MetaPhlAn, HUMAnN and EsViritu; a tool the run did not enable leaves its tab
+# off.
 #
 # The navigation bar adds Methods to the links every pipeline's carries, between
 # Deliverables and QC Report.
@@ -176,6 +177,33 @@ if [[ -n "${STATS[humann_mapped]:-}" ]]; then
     dashboard_stat_share_of "Mapped reads" "${STATS[humann_mapped]}" \
         "${STATS[retained_total]:-${STATS[humann_total]:-}}" "${STATS[humann_database]:-}" \
         "Reads HUMAnN aligned to a gene family: first as DNA to the ChocoPhlAn pangenomes of the species MetaPhlAn found, then, for reads left over, as translated protein against UniRef90. Reads that matched neither are unmapped. A sample HUMAnN could not finish is counted as unmapped."
+fi
+
+#    EsViritu's taxonomic profile, genomes and report, and the samples it found
+#    a virus in out of the samples it read
+dashboard_tab esviritu "EsViritu"
+
+dashboard_formats "" \
+    "Taxa|TSV|esviritu/virus-taxa.tsv" \
+    "Genomes|TSV|esviritu/virus-assemblies.tsv" \
+    "Report|HTML|esviritu/virus-report.html" || true
+
+ESVIRITU_READ_COUNTS="$RESULTS_DIR/esviritu/read-counts.tsv"
+ESVIRITU_TAXA="$RESULTS_DIR/esviritu/virus-taxa.tsv"
+
+if [[ -r "$ESVIRITU_READ_COUNTS" ]]; then
+    ESVIRITU_SAMPLES=$(tail -n +2 "$ESVIRITU_READ_COUNTS" | cut -f1 | LC_ALL=C sort -u | wc -l)
+    ESVIRITU_DETECTED=0
+    ESVIRITU_DB=$(state_get "$RUN_MANIFEST_KEY.params.esviritu_db")
+
+    if [[ -r "$ESVIRITU_TAXA" ]]; then
+        ESVIRITU_DETECTED=$(tail -n +2 "$ESVIRITU_TAXA" | cut -f1 | LC_ALL=C sort -u | wc -l)
+    fi
+
+    dashboard_stat_group
+    dashboard_stat_share_of "Samples with a virus" "$ESVIRITU_DETECTED" "$ESVIRITU_SAMPLES" \
+        "${ESVIRITU_DB:+EsViritu database ${ESVIRITU_DB##*/}}" \
+        "Samples in which EsViritu aligned reads to at least one of the human, animal and plant virus genomes in its database, keeping only reads that align over at least 100 bases and 90% of their length at 80% identity or better. A sample absent from the taxa table had no such read."
 fi
 
 dashboard_tab_end

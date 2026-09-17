@@ -175,6 +175,18 @@
       "pages": "e104",
       "doi": "10.7717/peerj-cs.104"
     },
+    "li2018": {
+      "type": "article",
+      "author": ["Li, H"],
+      "title": "Minimap2: pairwise alignment for nucleotide sequences",
+      "journal": "Bioinformatics",
+      "journal_abbrev": "Bioinformatics",
+      "year": 2018,
+      "volume": "34",
+      "number": "18",
+      "pages": "3094–3100",
+      "doi": "10.1093/bioinformatics/bty191"
+    },
     "mcdonald2012": {
       "type": "article",
       "author": ["McDonald, D", "Clemente, JC", "Kuczynski, J", "Rideout, JR", "Stombaugh, J", "Wendel, D"],
@@ -293,6 +305,19 @@
       "number": "6",
       "pages": "926–932",
       "doi": "10.1093/bioinformatics/btu739"
+    },
+    "tisza2023": {
+      "type": "article",
+      "author": ["Tisza, M", "Javornik Cregeen, S", "Avadhanula, V", "Zhang, P", "Ayvaz, T", "Feliz, K"],
+      "et_al": true,
+      "title": "Wastewater sequencing reveals community and variant dynamics of the collective human virome",
+      "journal": "Nature Communications",
+      "journal_abbrev": "Nat Commun",
+      "year": 2023,
+      "volume": "14",
+      "number": "1",
+      "pages": "6878",
+      "doi": "10.1038/s41467-023-42064-1"
     },
     "wood2019": {
       "type": "article",

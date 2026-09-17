@@ -24,14 +24,16 @@
 # pin is the newest release compatible with the tool versions nf-core/taxprofiler
 # 2.0.1 uses - notably MetaPhlAn, which is pinned there at 4.1.1 and cannot read
 # the database its own mpa_latest marker now points at, and mOTUs, which is
-# pinned there at 3.1.0 and rejects the v4 catalogues outright.
+# pinned there at 3.1.0 and rejects the v4 catalogues outright. EsViritu, which
+# only the biobakery workflow runs, is pinned to the newest release its 1.3.3
+# reads.
 #
 # Writes into db/<tool>/:
 #
 #   <release>/                the database, as the pipeline reads it
 #   <release>.manifest.json   source URLs, checksums, sizes, and when it was fetched
 #
-# Usage:     fetch_taxprofiler_db.sh <kraken2|metaphlan|motus|humann>
+# Usage:     fetch_taxprofiler_db.sh <kraken2|metaphlan|motus|humann|esviritu>
 #
 #            Submit it rather than running it on the login node; the downloads
 #            are large and slow:
@@ -116,9 +118,17 @@ readonly HUMANN_CHOCOPHLAN_DIR="chocophlan"
 readonly HUMANN_UNIREF_DIR="uniref90"
 readonly HUMANN_MAPPING_DIR="utility_mapping"
 
+# EsViritu. The database is versioned apart from the tool: EsViritu 1.0.0 and
+# later read v3.1.0 or later. The archive unpacks to a directory named for the
+# release, holding the virus genomes, their minimap2 index and the metadata
+# table EsViritu takes taxonomy from.
+readonly ESVIRITU_RELEASE="v3.2.4"
+readonly ESVIRITU_URL="https://zenodo.org/records/17716199/files/esviritu_db_$ESVIRITU_RELEASE.tar.gz"
+readonly ESVIRITU_MD5="24d85c1ec3cbffff12e921d2f39c91b2"
+
 
 if [[ $# -ne 1 ]]; then
-    fail "Usage: $0 <kraken2|metaphlan|motus|humann>"
+    fail "Usage: $0 <kraken2|metaphlan|motus|humann|esviritu>"
 fi
 
 TOOL="$1"
@@ -530,10 +540,56 @@ fetch_humann() {
     log "  manifest:        $manifest"
 }
 
+fetch_esviritu() {
+    local out_dir="$NEXTFLOW_DIR/db/esviritu/$ESVIRITU_RELEASE"
+    local manifest="$NEXTFLOW_DIR/db/esviritu/$ESVIRITU_RELEASE.manifest.json"
+
+    [[ -e "$out_dir" ]] && fail "$out_dir already exists; remove it to re-fetch."
+
+    mkdir -p "$NEXTFLOW_DIR/db/esviritu"
+    require_free_space "$NEXTFLOW_DIR/db/esviritu" 2
+
+    local archive="$WORK_DIR/${ESVIRITU_URL##*/}"
+
+    download_verified "$ESVIRITU_URL" "$archive" "$ESVIRITU_MD5"
+    record_source "$ESVIRITU_URL" "$ESVIRITU_MD5" "$(stat -c%s "$archive")"
+
+    log "Extracting ${ESVIRITU_URL##*/}..."
+    if ! tar -xzf "$archive" -C "$NEXTFLOW_DIR/db/esviritu"; then
+        rm -rf "$out_dir"
+        fail "Could not extract ${ESVIRITU_URL##*/}."
+    fi
+
+    rm -f "$archive"
+
+    [[ -d "$out_dir" ]] \
+        || fail "The archive did not unpack to a '$ESVIRITU_RELEASE' directory."
+
+    # Every file EsViritu opens: the genomes, the index it maps short reads
+    # against, and the metadata it names each genome by
+    local required
+    for required in virus_pathogen_database.fna virus_pathogen_database.mmi \
+                    virus_pathogen_database.all_metadata.tsv; do
+        [[ -s "$out_dir/$required" ]] \
+            || fail "The EsViritu database is missing $required; the download is incomplete."
+    done
+
+    local genomes
+    genomes=$(grep -c '^>' "$out_dir/virus_pathogen_database.fna")
+
+    write_manifest "$ESVIRITU_RELEASE" "$out_dir" "$manifest" \
+        "The EsViritu virus pathogen database $ESVIRITU_RELEASE ($genomes sequences), which EsViritu 1.0.0 and later read. The md5 is the one the EsViritu README and the Zenodo record list."
+
+    log "Fetched EsViritu $ESVIRITU_RELEASE:"
+    log "  db_path:  $out_dir ($genomes sequences)"
+    log "  manifest: $manifest"
+}
+
 case "$TOOL" in
     kraken2)   fetch_kraken2 ;;
     metaphlan) fetch_metaphlan ;;
     motus)     fetch_motus ;;
     humann)    fetch_humann ;;
-    *)         fail "Unknown database '$TOOL'. Use kraken2, metaphlan, motus or humann." ;;
+    esviritu)  fetch_esviritu ;;
+    *)         fail "Unknown database '$TOOL'. Use kraken2, metaphlan, motus, humann or esviritu." ;;
 esac

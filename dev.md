@@ -4,6 +4,7 @@
 In a `git bash` shell:
 ```bash
 git ls-files "*.sh" | xargs git update-index --chmod=+x
+git ls-files "*.py" | xargs git update-index --chmod=+x
 git update-index --chmod=+x run
 ```
 

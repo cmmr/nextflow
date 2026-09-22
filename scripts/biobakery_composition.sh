@@ -33,9 +33,9 @@
 # Reads:     <results_dir>/metaphlan/profiles/, <results_dir>/kneaddata/read-counts.tsv,
 #            <results_dir>/humann/alignment-summary.tsv,
 #            <results_dir>/nonpareil/nonpareil-curves.tsv,
-#            <results_dir>/motus/profiles/ and
+#            <results_dir>/motus/profiles/,
 #            <results_dir>/metaphlan/read-counts.tsv and
-#            <results_dir>/markermagu/virus-{profile,read-counts}.tsv, each
+#            <results_dir>/markermagu/markermagu-{profile,input}.tsv, each
 #            optional; and the HUMAnN database directories the manifest in
 #            ./run_state.json records
 # Outputs:   ./composition_data.json, <results_dir>/alpha_diversity.tsv, and the
@@ -57,9 +57,8 @@ readonly HUMANN_SUMMARY="$RESULTS_DIR/humann/alignment-summary.tsv"
 readonly NONPAREIL_SUMMARY="$RESULTS_DIR/nonpareil/nonpareil-curves.tsv"
 readonly MOTUS_DIR="$RESULTS_DIR/motus/profiles"
 readonly MOTUS_SUFFIX=".motus_profile.txt"
-readonly MARKERMAGU_PROFILE="$RESULTS_DIR/markermagu/virus-profile.tsv"
-readonly MARKERMAGU_READS="$RESULTS_DIR/markermagu/virus-read-counts.tsv"
-readonly MARKERMAGU_COUNTS="$RESULTS_DIR/markermagu/virus-counts.tsv"
+readonly MARKERMAGU_PROFILE="$RESULTS_DIR/markermagu/markermagu-profile.tsv"
+readonly MARKERMAGU_READS="$RESULTS_DIR/markermagu/markermagu-input.tsv"
 readonly ALPHA_TABLE="$RESULTS_DIR/alpha_diversity.tsv"
 
 readonly PLOT_DATA="composition_data.json"
@@ -548,16 +547,17 @@ humann_mapping() {
 }
 
 # The same for Marker-MAGu: the reads it read, and the reads it aligned to a
-# marker gene of a species-level genome bin it went on to report. A read on the
-# markers of a bin that missed the detection threshold is not counted, which is
-# the one way this differs from MetaPhlAn's count above.
+# marker gene of a virus it went on to report. Its other rows are left out, as
+# they are from its published tables. A read on the markers of a bin that missed
+# the detection threshold is not counted either, which is the one way this
+# differs from MetaPhlAn's count above.
 markermagu_mapping() {
     LC_ALL=C awk -F'\t' '
         NR == FNR { if (FNR > 1) total += $2; next }
 
         FNR == 1 { next }
 
-        { mapped += $5 }
+        $1 ~ /^k__Viruses(\||$)/ { mapped += $5 }
 
         END {
             if (total > 0)
@@ -566,17 +566,17 @@ markermagu_mapping() {
     ' "$MARKERMAGU_READS" "$MARKERMAGU_PROFILE"
 }
 
-# The Marker-MAGu database this run read, as its tables name it on their first
-# line, e.g. "Marker-MAGu_markerDB_v1.1"
+# The Marker-MAGu database this run read, by the release directory the
+# manifest records, e.g. "Marker-MAGu_markerDB_v1.1"
 markermagu_database() {
     local database
 
-    database=$(head -n 1 "$MARKERMAGU_COUNTS")
-    database=${database#\#}
+    database=$(state_get manifest.params.markermagu_db)
+    database=${database%/}
 
     [[ -n "$database" ]] || return 0
 
-    printf 'markermagu_database\t%s\n' "$database"
+    printf 'markermagu_database\tMarker-MAGu_markerDB_%s\n' "${database##*/}"
 }
 
 # The HUMAnN databases this run was given, as wrike_job.sh recorded them in the
@@ -650,10 +650,7 @@ write_run_statistics() {
 
         if [[ -s "$MARKERMAGU_READS" && -s "$MARKERMAGU_PROFILE" ]]; then
             markermagu_mapping
-
-            if [[ -s "$MARKERMAGU_COUNTS" ]]; then
-                markermagu_database
-            fi
+            markermagu_database
         fi
     } | state_set_tsv "$STATS_KEY"
 }

@@ -1,9 +1,9 @@
 
 # Shotgun metagenomics with the bioBakery tools: KneadData trims reads and
 # depletes the host, MetaPhlAn profiles the taxonomy, and HUMAnN the functions.
-# mOTUs and Nonpareil measure each sample's diversity for the Overview,
-# EsViritu detects human, animal and plant viruses, and Marker-MAGu profiles
-# phages alongside bacteria and archaea.
+# mOTUs and Nonpareil measure each sample's diversity for the Overview, and
+# Marker-MAGu profiles phages alongside bacteria and archaea. EsViritu, which
+# detects human, animal and plant viruses, is off.
 # Which host is depleted is the request form's hostremoval_reference answer;
 # PhiX alone when the form never asked.
 PIPELINE_NAME="biobakery_01"
@@ -26,7 +26,7 @@ params_set outdir "results"
 params_set run_humann     true
 params_set run_motus      true
 params_set run_nonpareil  true
-params_set run_esviritu   true
+params_set run_esviritu   false
 params_set run_markermagu true
 
 # "None", "PhiX", "Human + PhiX" or "Mouse + PhiX": the first word names the
@@ -65,7 +65,11 @@ params_set motus_db "$NEXTFLOW_DB_DIR/motus/db_mOTU_v3.1.0/db_mOTU"
 
 params_set nonpareil_mode "kmer"
 
-params_set esviritu_db "$NEXTFLOW_DB_DIR/esviritu/v3.2.4"
+# Named only when EsViritu runs, so the manifest does not record a database the
+# run never read. A rerun brings its own from the parameters it recorded.
+if [[ "$(params_get run_esviritu)" == true ]]; then
+    params_set esviritu_db "$NEXTFLOW_DB_DIR/esviritu/v3.2.4"
+fi
 
 params_set markermagu_db "$NEXTFLOW_DB_DIR/markermagu/v1.1"
 params_set markermagu_detection "default"

@@ -1,13 +1,12 @@
-// Marker-MAGu 0.4.0 trans-kingdom marker gene profiling: bacteria, archaea and
-// microeukaryotes from MetaPhlAn 4's markers, and phages from the Trove of Gut
-// Virus Genomes, in one profile.
+// Marker-MAGu 0.4.0 marker gene profiling of the virome: phages from the Trove
+// of Gut Virus Genomes, profiled in one pass with the bacteria, archaea and
+// microeukaryotes of MetaPhlAn 4's vOct22 markers.
 //
-// Its database is MetaPhlAn 4's vOct22 markers with marker genes of tens of
-// thousands of human gut phages added, and its thresholds are tuned so that a
-// phage is called with about the specificity a bacterium is. Published to
-// <outdir>/markermagu/, as the tables MetaPhlAn's profile is published as so
-// that the two can be read side by side, with every name carrying a virus-
-// prefix so that no two files of a run share a name.
+// Only the viral rows are published as tables; its other calls are a small,
+// older subset of what MetaPhlAn reports, and stay in markermagu-profile.tsv.
+// Published to <outdir>/markermagu/: the viral feature table as virome-counts
+// and virome-relab, and the long form and input read counts over everything,
+// named markermagu-.
 
 // One sample: every cleaned file at once. Marker-MAGu pools the reads it is
 // given and takes no account of pairing, so mates and orphans all go in.
@@ -105,8 +104,8 @@ process MARKERMAGU_MERGE {
     path stats   , stageAs: 'stats/*'
 
     output:
-    path 'virus-profile.tsv'    , emit: profile
-    path 'virus-read-counts.tsv', emit: read_counts
+    path 'markermagu-profile.tsv', emit: profile
+    path 'markermagu-input.tsv'  , emit: read_counts
 
     script:
     """
@@ -122,7 +121,7 @@ process MARKERMAGU_MERGE {
                 | awk -v sample="\${name%.seq_stats.tsv}" \\
                       'BEGIN { FS = OFS = "\\t" } { print sample, \$4, \$5 }'
         done | LC_ALL=C sort
-    } > virus-read-counts.tsv
+    } > markermagu-input.tsv
 
     # Marker-MAGu's own combiner, which writes <directory>.combined_profile.tsv
     # into the working directory
@@ -138,7 +137,7 @@ process MARKERMAGU_MERGE {
     {
         head -n 1 profiles.combined_profile.tsv
         tail -n +2 profiles.combined_profile.tsv | LC_ALL=C sort -t \$'\\t' -k8,8 -k1,1
-    } > virus-profile.tsv
+    } > markermagu-profile.tsv
 
     rm -f profiles.combined_profile.tsv
     """
@@ -152,20 +151,20 @@ process MARKERMAGU_MERGE {
             name=\${file##*/}
             printf '%s\\t3000\\t450000\\n' "\${name%.seq_stats.tsv}"
         done
-    } > virus-read-counts.tsv
+    } > markermagu-input.tsv
 
     {
         head -q -n 1 profiles/*.detected_species.tsv | head -n 1
         tail -q -n +2 profiles/*.detected_species.tsv
-    } > virus-profile.tsv
+    } > markermagu-profile.tsv
     """
 }
 
-// The long table as the three levels of detail METAPHLAN_MERGE publishes: every
-// clade from kingdom to SGB as reads and as percentages, the species rows of
-// those two, and the SGB rows as a feature table in three BIOM formats. Run in
-// the biom-format container, which is where biom-format, h5py and numpy are;
-// the Marker-MAGu image has none of them.
+// The viral SGB rows of the long table as a feature table in three BIOM
+// formats, as METAPHLAN_MERGE writes MetaPhlAn's, and the classic table again as
+// percentages of each sample's viral reads. Run in the biom-format container,
+// which is where biom-format, h5py and numpy are; the Marker-MAGu image has
+// none of them.
 process MARKERMAGU_TABLES {
     container 'quay.io/biocontainers/biom-format:2.1.17'
 
@@ -174,17 +173,13 @@ process MARKERMAGU_TABLES {
     input:
     path profile
     path read_counts
-    path db
 
     output:
-    path 'virus-counts.tsv'        , emit: counts
-    path 'virus-relab.tsv'         , emit: relab
-    path 'virus-species-counts.tsv', emit: species_counts
-    path 'virus-species-relab.tsv' , emit: species_relab
-    path 'virus-taxa-counts.*'     , emit: taxa
+    path 'virome-counts.*' , emit: counts
+    path 'virome-relab.tsv', emit: relab
 
     script:
     """
-    markermagu_tables.py ${profile} ${read_counts} Marker-MAGu_markerDB_${db}
+    markermagu_tables.py ${profile} ${read_counts}
     """
 }

@@ -208,20 +208,20 @@ if [[ -r "$ESVIRITU_READ_COUNTS" ]]; then
         "Samples in which EsViritu aligned reads to at least one of the human, animal and plant virus genomes in its database, keeping only reads that align over at least 100 bases and 90% of their length at 80% identity or better. A sample absent from the taxa table had no such read."
 fi
 
-#    Marker-MAGu's SGB read counts in the same three BIOM formats, and the
-#    reads it aligned to a marker gene
+#    Marker-MAGu's viral SGB read counts in the same three BIOM formats, and
+#    the reads it aligned to a viral marker gene
 dashboard_tab markermagu "Marker-MAGu"
 
 dashboard_formats "" \
-    "Taxa|BIOM (tsv)|markermagu/virus-taxa-counts.tsv" \
-    "Taxa|BIOM (json)|markermagu/virus-taxa-counts.json.biom" \
-    "Taxa|BIOM (hdf5)|markermagu/virus-taxa-counts.hdf5.biom" || true
+    "Virome|BIOM (tsv)|markermagu/virome-counts.tsv" \
+    "Virome|BIOM (json)|markermagu/virome-counts.json.biom" \
+    "Virome|BIOM (hdf5)|markermagu/virome-counts.hdf5.biom" || true
 
 if [[ -n "${STATS[markermagu_mapped]:-}" ]]; then
     dashboard_stat_group
     dashboard_stat_share_of "Marker gene reads" "${STATS[markermagu_mapped]}" \
         "${STATS[retained_total]:-${STATS[markermagu_total]:-}}" "${STATS[markermagu_database]:-}" \
-        "Reads minimap2 placed on a marker gene of one of the species-level genome bins Marker-MAGu reported, out of the reads KneadData retained. Read the same way as the MetaPhlAn bar: what was recognised, not what was inferred from it. A read on the markers of a bin that missed the detection threshold is not counted here, and a phage carries proportionally far more marker gene than a bacterium does, so its share runs higher."
+        "Reads minimap2 placed on a marker gene of one of the viruses Marker-MAGu reported, out of the reads KneadData retained. Read the same way as the MetaPhlAn bar: what was recognised, not what was inferred from it. Reads on the markers of its bacterial calls, which are left to MetaPhlAn, are not counted here, and nor are reads on the markers of a virus that missed the detection threshold."
 fi
 
 dashboard_tab_end

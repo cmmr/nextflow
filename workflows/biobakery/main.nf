@@ -114,20 +114,14 @@ workflow {
     }
 
     if (params.run_markermagu) {
-        def markermagu_db = database('markermagu_db')
-
-        MARKERMAGU(ch_reads, markermagu_db)
+        MARKERMAGU(ch_reads, database('markermagu_db'))
 
         MARKERMAGU_MERGE(
             MARKERMAGU.out.profile.map { meta, profile -> profile }.collect(),
             MARKERMAGU.out.stats.collect()
         )
 
-        MARKERMAGU_TABLES(
-            MARKERMAGU_MERGE.out.profile,
-            MARKERMAGU_MERGE.out.read_counts,
-            markermagu_db
-        )
+        MARKERMAGU_TABLES(MARKERMAGU_MERGE.out.profile, MARKERMAGU_MERGE.out.read_counts)
     }
 
     if (params.run_humann) {

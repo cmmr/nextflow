@@ -600,11 +600,12 @@ if [[ "$RUN_MARKERMAGU" == true ]]; then
     fi
 
     cite tisza2025
-    TEXT+=" Bacteria, archaea, microeukaryotes and bacteriophages were profiled together in the"
-    TEXT+=" quality-controlled reads with $(named Marker-MAGu "$(tool_version marker-magu)")$CITATION"
+    TEXT+=" Bacteriophages and other viruses were profiled in the quality-controlled reads with"
+    TEXT+=" $(named Marker-MAGu "$(tool_version marker-magu)")$CITATION"
 
     database_phrase "$MARKERMAGU_DB"
-    TEXT+=" and $PHRASE$CITATION."
+    TEXT+=" and $PHRASE$CITATION, which holds viral marker genes alongside those of bacteria,"
+    TEXT+=" archaea and microeukaryotes."
 
     cite_new li2018
     TEXT+=" Reads were aligned to its marker genes with minimap2$CITATION, and only reads aligning"
@@ -612,7 +613,10 @@ if [[ "$RUN_MARKERMAGU" == true ]]; then
     TEXT+=" counted$(extra_options "$MARKERMAGU_ARGS")."
     TEXT+=" A species-level genome bin was reported when $MARKERMAGU_DETECTED and at least ten"
     TEXT+=" reads aligned to it in total, and its abundance was taken as reads per kilobase of"
-    TEXT+=" marker gene per million reads, normalised so that each sample sums to one."
+    TEXT+=" marker gene per million reads. Only viral detections were reported, as read"
+    TEXT+=" counts per species-level genome bin and as relative abundances renormalised over"
+    TEXT+=" the viral bins of each sample; bacterial, archaeal and eukaryotic taxa were taken"
+    TEXT+=" from the MetaPhlAn profiles."
 fi
 
 # 9. The paragraph and the references it cites

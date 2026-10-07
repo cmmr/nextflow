@@ -216,9 +216,19 @@ Example webhook payload when that task is DELETED from the Dashboards folder:
 Gatekeeper for adding webhook payloads on to the SQS Queue. 
 Webhook sender must know our pre-shared key `$WRIKE_WEBHOOK_SECRET`.
 
+Every event is signed: `X-Hook-Signature` is the lowercase hex HMAC-SHA256 of
+the raw body, and anything without a valid one is refused. A request carrying
+`X-Hook-Secret` is Wrike's handshake, sent when the webhook is registered.
+It is answered with `X-Hook-Secret: HMAC-SHA256(secret, challenge)` and never
+queued, and only when it is signed like an event and its challenge is 1-100
+ASCII letters and digits. **Do not loosen that challenge check:** the reply is a
+signature over whatever the caller sent, so a JSON challenge would come back as
+a valid `X-Hook-Signature` for a forged event.
+
 ```python
 import json
 import os
+import re
 import boto3
 import hmac
 import hashlib
@@ -227,6 +237,20 @@ import base64
 sqs = boto3.client('sqs', region_name='us-east-1')
 AWS_SQS_QUEUE_URL = os.environ.get('AWS_SQS_QUEUE_URL', '')
 WRIKE_WEBHOOK_SECRET = os.environ.get('WRIKE_WEBHOOK_SECRET', '')
+
+# Wrike's handshake challenge. Anything wider lets a caller have an arbitrary
+# body signed, since the handshake reply is HMAC(secret, challenge).
+HOOK_SECRET_PATTERN = re.compile(r'[A-Za-z0-9]{1,100}')
+
+def sign(data):
+    return hmac.new(
+        WRIKE_WEBHOOK_SECRET.encode('utf-8'),
+        data,
+        hashlib.sha256
+    ).hexdigest()
+
+def signature_matches(body_bytes, received_signature):
+    return hmac.compare_digest(sign(body_bytes), received_signature.lower())
 
 def lambda_handler(event, context):
     headers = event.get('headers', {}) or {}
@@ -240,39 +264,6 @@ def lambda_handler(event, context):
         return {
             'statusCode': 500,
             'body': json.dumps({'error': 'Environment variables missing'})
-        }
-
-    # Prepare default response headers
-    response_headers = {'Content-Type': 'application/json'}
-
-    # 1. Secure Wrike Handshake Verification
-    if 'x-hook-secret' in lower_headers:
-        challenge = lower_headers['x-hook-secret']
-        response_secret = hmac.new(
-            WRIKE_WEBHOOK_SECRET.encode('utf-8'),
-            challenge.encode('utf-8'),
-            hashlib.sha256
-        ).hexdigest()
-        
-        # Attach the calculated secret to our response headers
-        response_headers['X-Hook-Secret'] = response_secret
-        
-        # If there is NO signature, this is purely an initial setup handshake.
-        # We can safely exit here.
-        if 'x-hook-signature' not in lower_headers:
-            return {
-                'statusCode': 200,
-                'headers': response_headers,
-                'body': json.dumps({'status': 'handshake_success'})
-            }
-
-    # 2. Verify Signature on actual webhook events
-    received_signature = lower_headers.get('x-hook-signature')
-    
-    if not received_signature:
-        return {
-            'statusCode': 401,
-            'body': json.dumps({'error': 'Missing signature header'})
         }
 
     # Handle API Gateway base64 encoding
@@ -289,13 +280,43 @@ def lambda_handler(event, context):
         print(f"CRASH DURING DECODING: {str(e)}")
         raise e
 
-    calculated_signature = hmac.new(
-        WRIKE_WEBHOOK_SECRET.encode('utf-8'),
-        actual_body_bytes,
-        hashlib.sha256
-    ).hexdigest()
-    
-    if not hmac.compare_digest(calculated_signature, received_signature.lower()):
+    received_signature = lower_headers.get('x-hook-signature')
+
+    # 1. Secure Wrike Handshake Verification. Answered here and never queued:
+    #    the handshake body is not an event.
+    if 'x-hook-secret' in lower_headers:
+        challenge = lower_headers['x-hook-secret']
+
+        if not HOOK_SECRET_PATTERN.fullmatch(challenge):
+            return {
+                'statusCode': 400,
+                'body': json.dumps({'error': 'Invalid X-Hook-Secret'})
+            }
+
+        if received_signature is None or \
+                not signature_matches(actual_body_bytes, received_signature):
+            return {
+                'statusCode': 403,
+                'body': json.dumps({'error': 'Invalid signature'})
+            }
+
+        return {
+            'statusCode': 200,
+            'headers': {
+                'Content-Type': 'application/json',
+                'X-Hook-Secret': sign(challenge.encode('utf-8'))
+            },
+            'body': json.dumps({'status': 'handshake_success'})
+        }
+
+    # 2. Verify Signature on actual webhook events
+    if not received_signature:
+        return {
+            'statusCode': 401,
+            'body': json.dumps({'error': 'Missing signature header'})
+        }
+
+    if not signature_matches(actual_body_bytes, received_signature):
         return {
             'statusCode': 403,
             'body': json.dumps({'error': 'Invalid signature'})
@@ -320,10 +341,9 @@ def lambda_handler(event, context):
             'body': json.dumps({'error': 'Failed to enqueue message'})
         }
     
-    # 4. Return success WITH the handshake headers attached if they were generated
     return {
         'statusCode': 200,
-        'headers': response_headers,
+        'headers': {'Content-Type': 'application/json'},
         'body': json.dumps({'status': 'message_queued'})
     }
 ```

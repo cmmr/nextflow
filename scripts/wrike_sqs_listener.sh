@@ -89,9 +89,17 @@ while true; do
         continue
     fi
 
-    # 5. Route on eventType. Handlers run in the background, so their exit
-    #    status is not checked here; they log their own outcome.
-    EVENT_TYPE=$(echo "$MESSAGE_BODY" | jq -r '.[0].eventType // empty')
+    # 5. Route on eventType. A message without one - not a JSON array of
+    #    events, or not JSON at all - is dropped; as with the receipt handle,
+    #    jq is allowed to fail here. Handlers run in the background, so their
+    #    exit status is not checked here; they log their own outcome.
+    EVENT_TYPE=$(echo "$MESSAGE_BODY" | jq -r '.[0].eventType // empty' 2>/dev/null) \
+        || EVENT_TYPE=""
+
+    if [[ -z $EVENT_TYPE ]]; then
+        log "Ignoring message with no eventType."
+        continue
+    fi
 
     case "$EVENT_TYPE" in
         TaskCreated)

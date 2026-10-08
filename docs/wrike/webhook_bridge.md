@@ -216,14 +216,19 @@ Example webhook payload when that task is DELETED from the Dashboards folder:
 Gatekeeper for adding webhook payloads on to the SQS Queue. 
 Webhook sender must know our pre-shared key `$WRIKE_WEBHOOK_SECRET`.
 
-Every event is signed: `X-Hook-Signature` is the lowercase hex HMAC-SHA256 of
-the raw body, and anything without a valid one is refused. A request carrying
-`X-Hook-Secret` is Wrike's handshake, sent when the webhook is registered.
-It is answered with `X-Hook-Secret: HMAC-SHA256(secret, challenge)` and never
-queued, and only when it is signed like an event and its challenge is 1-100
-ASCII letters and digits. **Do not loosen that challenge check:** the reply is a
-signature over whatever the caller sent, so a JSON challenge would come back as
-a valid `X-Hook-Signature` for a forged event.
+Every request is signed: `X-Hook-Signature` is the lowercase hex HMAC-SHA256 of
+the raw body, and anything without a valid one is refused. Wrike also sends an
+`X-Hook-Secret` challenge, on ordinary events as well as on the handshake it
+makes when the webhook is registered, and each reply carries
+`X-Hook-Secret: HMAC-SHA256(secret, challenge)`. A challenge that is not 1-100
+ASCII letters and digits is refused. **Do not loosen that challenge check:** the
+reply is a signature over whatever the caller sent, so a JSON challenge would
+come back as a valid `X-Hook-Signature` for a forged event.
+
+The handshake is recognized by its body,
+`{"requestType": "WebHook secret verification"}`, and is answered but not
+queued. Everything else that passes is queued. **Do not treat `X-Hook-Secret` as
+marking the handshake:** events carry it too, and would be answered and dropped.
 
 ```python
 import json
@@ -238,8 +243,8 @@ sqs = boto3.client('sqs', region_name='us-east-1')
 AWS_SQS_QUEUE_URL = os.environ.get('AWS_SQS_QUEUE_URL', '')
 WRIKE_WEBHOOK_SECRET = os.environ.get('WRIKE_WEBHOOK_SECRET', '')
 
-# Wrike's handshake challenge. Anything wider lets a caller have an arbitrary
-# body signed, since the handshake reply is HMAC(secret, challenge).
+# Wrike's X-Hook-Secret challenge. Anything wider lets a caller have an
+# arbitrary body signed, since the reply is HMAC(secret, challenge).
 HOOK_SECRET_PATTERN = re.compile(r'[A-Za-z0-9]{1,100}')
 
 def sign(data):
@@ -251,6 +256,15 @@ def sign(data):
 
 def signature_matches(body_bytes, received_signature):
     return hmac.compare_digest(sign(body_bytes), received_signature.lower())
+
+# The handshake is told apart from an event by its body, not its headers
+def is_handshake(string_body):
+    try:
+        body = json.loads(string_body)
+    except ValueError:
+        return False
+    return isinstance(body, dict) and \
+        body.get('requestType') == 'WebHook secret verification'
 
 def lambda_handler(event, context):
     headers = event.get('headers', {}) or {}
@@ -281,35 +295,17 @@ def lambda_handler(event, context):
         raise e
 
     received_signature = lower_headers.get('x-hook-signature')
+    challenge = lower_headers.get('x-hook-secret')
 
-    # 1. Secure Wrike Handshake Verification. Answered here and never queued:
-    #    the handshake body is not an event.
-    if 'x-hook-secret' in lower_headers:
-        challenge = lower_headers['x-hook-secret']
-
-        if not HOOK_SECRET_PATTERN.fullmatch(challenge):
-            return {
-                'statusCode': 400,
-                'body': json.dumps({'error': 'Invalid X-Hook-Secret'})
-            }
-
-        if received_signature is None or \
-                not signature_matches(actual_body_bytes, received_signature):
-            return {
-                'statusCode': 403,
-                'body': json.dumps({'error': 'Invalid signature'})
-            }
-
+    # 1. Refuse a malformed X-Hook-Secret before anything is computed from it
+    if challenge is not None and not HOOK_SECRET_PATTERN.fullmatch(challenge):
         return {
-            'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json',
-                'X-Hook-Secret': sign(challenge.encode('utf-8'))
-            },
-            'body': json.dumps({'status': 'handshake_success'})
+            'statusCode': 400,
+            'body': json.dumps({'error': 'Invalid X-Hook-Secret'})
         }
 
-    # 2. Verify Signature on actual webhook events
+    # 2. Verify the signature, which every request carries: events and the
+    #    handshake alike
     if not received_signature:
         return {
             'statusCode': 401,
@@ -322,7 +318,22 @@ def lambda_handler(event, context):
             'body': json.dumps({'error': 'Invalid signature'})
         }
 
-    # 3. Webhook Event Processing
+    # 3. Answer X-Hook-Secret, which Wrike sends with events as well as with
+    #    the handshake
+    response_headers = {'Content-Type': 'application/json'}
+
+    if challenge is not None:
+        response_headers['X-Hook-Secret'] = sign(challenge.encode('utf-8'))
+
+    # 4. The handshake is answered and not queued: its body is not an event
+    if is_handshake(string_body):
+        return {
+            'statusCode': 200,
+            'headers': response_headers,
+            'body': json.dumps({'status': 'handshake_success'})
+        }
+
+    # 5. Webhook Event Processing
     try:
         sqs_kwargs = {
             'QueueUrl': AWS_SQS_QUEUE_URL,
@@ -343,7 +354,7 @@ def lambda_handler(event, context):
     
     return {
         'statusCode': 200,
-        'headers': {'Content-Type': 'application/json'},
+        'headers': response_headers,
         'body': json.dumps({'status': 'message_queued'})
     }
 ```

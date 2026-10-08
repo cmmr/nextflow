@@ -253,10 +253,13 @@ argument:
 
 `transform = "percent"` takes every share against the sample's whole read total
 *before* either of those runs, so dropping a taxon never redistributes its reads
-over the ones that are drawn. The eleven drawn are rbiom's own `taxa = 11,
-other = TRUE` rather than a top-N computed here, reordered by share of the whole
-sample so the legend descends in the numbers it prints. A rank no ASV reached is
-not offered in the rank select at all.
+over the ones that are drawn. The eleven drawn are the taxa with the highest
+mean share of the whole sample, in that order, so the legend descends in the
+numbers it prints. Everything else that was reached is summed into `Other`.
+rbiom's own `taxa = 11` is not used: it ranks by share of what each sample
+kept, which is 0/0 for a sample with nothing classified at that rank — a blank
+with one read, say — and it then stops the whole script. A rank no ASV reached
+is not offered in the rank select at all.
 
 **No Chao1.** It estimates the species that were missed from the ones seen
 exactly once and twice, and DADA2 has already dropped most of the singletons —

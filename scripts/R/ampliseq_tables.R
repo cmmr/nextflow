@@ -371,22 +371,21 @@ if (length(ranks) > 0) {
         #    asked for one: it has no taxa to rank
         if (length(rbiom::taxa_map(biom, rank = rank, unc = "drop")) == 0) next
 
-        #    And the eleven the chart draws, most abundant first, with
-        #    everything rarer that was reached summed into "Other", in the
-        #    ten-thousandths of a sample the chart is drawn in
-        drawn   <- round(10000 * rbiom::taxa_matrix(
-                                     biom, rank = rank, unc = "drop",
-                                     taxa = TOP_TAXA, other = TRUE,
-                                     transform = "percent"))
+        #    And the eleven the chart draws, by mean share of the whole sample
+        #    and most abundant first, with everything rarer that was reached
+        #    summed into "Other", in the ten-thousandths of a sample the chart
+        #    is drawn in.
+        #
+        #    taxa_matrix(taxa = ) is not used to pick them: it ranks by share of
+        #    what each sample kept, which is 0/0 for a sample with nothing
+        #    classified at this rank, and stops on an empty selection.
+        found   <- rbiom::taxa_matrix(biom, rank = rank, unc = "drop",
+                                      transform = "percent")
+        top     <- head(order(rowMeans(found), decreasing = TRUE), TOP_TAXA)
+        drawn   <- round(10000 * rbind(
+                       found[top, , drop = FALSE],
+                       Other = colSums(found[-top, , drop = FALSE])))
         lineage <- c(rank_lineages(rank), Other = "")
-
-        #    taxa_matrix() ranks a taxon by its share of what it kept; the chart
-        #    stacks and reports shares of the whole sample, and the two orders
-        #    part company when samples differ in how much was classified. The
-        #    drawn rows go back into the order the legend prints, "Other" last.
-        body  <- rownames(drawn)[-nrow(drawn)]
-        body  <- body[order(rowMeans(drawn[body, , drop = FALSE]), decreasing = TRUE)]
-        drawn <- drawn[c(body, "Other"), , drop = FALSE]
 
         levels[[length(levels) + 1]] <- list(
             rank = depth,

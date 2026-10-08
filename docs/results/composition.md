@@ -423,7 +423,10 @@ and how many reached an ASV, the thinnest, middle and deepest sample, and what
 share of the reads the classifier could place at family, at genus and at species.
 Reads in come from `overall_summary.tsv` — cutadapt's own count of what it
 processed, or DADA2's input for a run that skipped primer trimming — and
-everything else from the ASV and relative abundance tables. It also names what
+everything else from the ASV and relative abundance tables. A sample the
+samplesheet names but the feature table does not is listed under a *Samples
+analysed* bar — see [When a sample comes out
+empty](../pipelines/ampliseq.md#when-a-sample-comes-out-empty). It also names what
 the reads were, over the totals counted off them, as *"Illumina, 2 × 250 bp"*:
 the instrument off the manifest, and the chemistry off
 `multiqc/multiqc_data/multiqc_fastqc.txt`, which is where FastQC's own reading of

@@ -64,6 +64,11 @@ params_set filter_ssu            "bac,arc"
 # because Savont rejects the third value, "pseudo"
 params_set sample_inference      "pooled"
 
+# A sample DADA2's quality filter leaves with no reads is dropped rather than
+# failing the run. The Overview's sidebar names any sample missing from the
+# feature table - see ampliseq_composition.sh.
+params_set ignore_failed_filtering true
+
 # Phylogenetic placement in place of the de novo MAFFT/FastTree phylogeny. EPA-NG
 # grafts the ASVs onto the GTDB bacterial 16S tree build_pplace_reference.sh
 # fetched, and ampliseq_prune_tree.sh cuts that back to this run's own ASVs.

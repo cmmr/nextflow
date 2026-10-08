@@ -165,6 +165,23 @@ and the Overview's plots, come from the `composition_data.json` and the
 [`ampliseq_composition.sh`](../results/composition.md) works out of the ASV and
 abundance tables.
 
+## When a sample comes out empty
+
+By default ampliseq stops the whole run when any sample has no reads left
+after DADA2's quality filter, which is what a near-empty blank does.
+[`AMPLISEQ_01.sh`](../../pipelines/AMPLISEQ_01.sh) sets
+`ignore_failed_filtering`, so such a sample is dropped and the rest of the run
+carries on.
+
+[`ampliseq_composition.sh`](../../scripts/ampliseq_composition.sh) compares
+`ampliseq_samplesheet.tsv` against `alpha_diversity.tsv`, one row per sample in
+the feature table, and records whatever is missing as `samples_dropped` in the
+run's statistics. That catches every way a sample can disappear, not just this
+one: DADA2's filter, a sample whose reads all went to chimeras or to the rRNA
+and length filters, or one emptied by `exclude_taxa`. The Overview's sidebar
+then shows a **Samples analysed** bar, *"451 of 452"*, with the dropped samples
+named under it. A run that lost nothing does not show the bar.
+
 ## Dressing the summary report
 
 ampliseq renders its own report from an R Markdown template, and exposes the

@@ -67,6 +67,12 @@ readonly OVERALL_SUMMARY="$RESULTS_DIR/overall_summary.tsv"
 # FastQC wrote are pruned from the results; this table is not.
 readonly FASTQC_TABLE="$RESULTS_DIR/multiqc/multiqc_data/multiqc_fastqc.txt"
 
+# Every sample the run was given, as ampliseq_samplesheet.sh named it
+readonly SAMPLESHEET="ampliseq_samplesheet.tsv"
+
+# One row per sample in the feature table, written by the R script
+readonly ALPHA_TABLE="$RESULTS_DIR/alpha_diversity.tsv"
+
 # What the Overview's two plots are drawn from, in the run directory rather than
 # in the results: it is that page's own data, and every number in it comes from
 # a table that is published
@@ -230,17 +236,34 @@ read_chemistry() {
     printf '%s' "$chemistry"
 }
 
+# The samplesheet's samples that have no reads in the feature table,
+# space-separated in samplesheet order. Prints nothing when every sample has
+# some. The second column of the alpha diversity table is the sample's reads.
+dropped_samples() {
+    [[ -s "$ALPHA_TABLE" && -r "$SAMPLESHEET" ]] || return 0
+
+    LC_ALL=C awk -F'\t' '
+        FNR == 1         { next }
+        FILENAME == kept { if ($2 > 0) have[$1] = 1; next }
+        !($1 in have)    { printf "%s%s", (n++ ? " " : ""), $1 }
+        END              { if (n) printf "\n" }
+    ' kept="$ALPHA_TABLE" "$ALPHA_TABLE" "$SAMPLESHEET"
+}
+
 # Everything the sidebar reports: what the R script counted off the feature
-# table, the chemistry FastQC read off the raw files, and the read totals counted
-# off the summary beside them.
+# table, the chemistry FastQC read off the raw files, the samples the table is
+# missing, and the read totals counted off the summary beside them.
 write_run_statistics() {
-    local CHEMISTRY
+    local CHEMISTRY DROPPED
 
     {
         cat "$TABLE_STATS"
 
         CHEMISTRY=$(read_chemistry) && printf 'read_chemistry	%s
 ' "$CHEMISTRY"
+
+        DROPPED=$(dropped_samples)
+        [[ -n "$DROPPED" ]] && printf 'samples_dropped\t%s\n' "$DROPPED"
 
         if [[ -r "$OVERALL_SUMMARY" ]]; then
             printf 'reads_total\t%s\n' "$(total_input_reads)"
@@ -323,6 +346,12 @@ if [[ -s "$TABLE_STATS" ]]; then
         warn "The run statistics could not be counted; the dashboard will show fewer numbers."
         state_unset "$STATS_KEY" || true
     fi
+fi
+
+DROPPED=$(dropped_samples)
+
+if [[ -n "$DROPPED" ]]; then
+    warn "Samples missing from the feature table: $DROPPED"
 fi
 
 log "Wrote $PLOT_DATA and the feature table under $RESULTS_DIR."

@@ -274,18 +274,20 @@ read_stage_reading() {
 
 declare -A STATS=()
 
-#    The two readings here that are not numbers, both worked out by
+#    The readings here that are not numbers, all worked out by
 #    ampliseq_composition.sh: which stages the read totals break down into and
 #    in which order, taken off the summary's own header since the two sequencing
-#    paths do not run their steps in the same order, and the chemistry FastQC
-#    read off the raw files.
+#    paths do not run their steps in the same order, the chemistry FastQC read
+#    off the raw files, and the samples missing from the feature table.
 READ_STAGES=""
 CHEMISTRY=""
+DROPPED_SAMPLES=""
 
 while IFS=$'\t' read -r STAT_KEY STAT_VALUE; do
     case "$STAT_KEY" in
-        read_stages)    READ_STAGES="$STAT_VALUE" ;;
-        read_chemistry) CHEMISTRY="$STAT_VALUE" ;;
+        read_stages)     READ_STAGES="$STAT_VALUE" ;;
+        read_chemistry)  CHEMISTRY="$STAT_VALUE" ;;
+        samples_dropped) DROPPED_SAMPLES="$STAT_VALUE" ;;
         *)
             if [[ "$STAT_VALUE" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
                 STATS["$STAT_KEY"]="$STAT_VALUE"
@@ -344,6 +346,28 @@ if [[ -n "${STATS[reads_retained]:-}" ]]; then
     done
 
     dashboard_stat_bar "Retained reads" "$RETAINED_READING" "$RETAINED_PCT" growth reads
+
+    #    Samples the run's filters left with no reads, named under a bar of the
+    #    ones that remain. Rounded down, so a run that lost any is never full.
+    if [[ -n "$DROPPED_SAMPLES" ]]; then
+        read -ra DROPPED <<< "$DROPPED_SAMPLES"
+
+        GIVEN_SAMPLES=$(state_get samples.count)
+
+        if [[ ! "$GIVEN_SAMPLES" =~ ^[0-9]+$ ]] || (( GIVEN_SAMPLES < ${#DROPPED[@]} )); then
+            GIVEN_SAMPLES=$(( ${STATS[samples]:-0} + ${#DROPPED[@]} ))
+        fi
+
+        KEPT_SAMPLES=$(( GIVEN_SAMPLES - ${#DROPPED[@]} ))
+        KEPT_PCT=$(( KEPT_SAMPLES * 100 / GIVEN_SAMPLES ))
+
+        DROPPED_LIST=$(printf '%s, ' "${DROPPED[@]}")
+
+        dashboard_stat_group "SAMPLES"
+        dashboard_stat_bar "Samples analysed" "$KEPT_SAMPLES of $GIVEN_SAMPLES" \
+            "$KEPT_PCT" growth "" "Dropped: ${DROPPED_LIST%, }" \
+            "Samples with no reads left after the run's filters"
+    fi
 
     dashboard_stat_group "READS PER SAMPLE"
     dashboard_stat_chips "$(human_count "${STATS[reads_min]:-0}")|Min" \

@@ -24,7 +24,8 @@
 # read counts after each step, the share of reads MetaPhlAn and Marker-MAGu each
 # placed on a marker gene, and the share HUMAnN aligned. Both marker shares are
 # reads that actually aligned, not either tool's estimate of what the organisms
-# behind them contributed.
+# behind them contributed. Beside them, the samples the run left out: those with
+# no MetaPhlAn profile, and those HUMAnN or Nonpareil could not finish.
 #
 # Usage:     biobakery_composition.sh [results_dir]
 #            defaults to ./results, the outdir set in the biobakery params file
@@ -36,8 +37,8 @@
 #            <results_dir>/motus/profiles/,
 #            <results_dir>/metaphlan/read-counts.tsv and
 #            <results_dir>/markermagu/markermagu-{profile,input}.tsv, each
-#            optional; and the HUMAnN database directories the manifest in
-#            ./run_state.json records
+#            optional; the HUMAnN database directories the manifest in
+#            ./run_state.json records; and ./biobakery_samplesheet.csv
 # Outputs:   ./composition_data.json, <results_dir>/alpha_diversity.tsv, and the
 #            "statistics" of ./run_state.json
 # Env:       the log/warn/fail helpers and the run state helpers, sourced from .env
@@ -60,6 +61,9 @@ readonly MOTUS_SUFFIX=".motus_profile.txt"
 readonly MARKERMAGU_PROFILE="$RESULTS_DIR/markermagu/markermagu-profile.tsv"
 readonly MARKERMAGU_READS="$RESULTS_DIR/markermagu/markermagu-input.tsv"
 readonly ALPHA_TABLE="$RESULTS_DIR/alpha_diversity.tsv"
+
+# Every sample the run was given, as biobakery_samplesheet.sh wrote them
+readonly SAMPLESHEET="biobakery_samplesheet.csv"
 
 readonly PLOT_DATA="composition_data.json"
 readonly STATS_KEY="statistics"
@@ -621,6 +625,49 @@ humann_databases() {
     printf '\n'
 }
 
+# The samples the run was given, one per line in samplesheet order. A sample
+# sequenced in more than one run has a row for each.
+given_samples() {
+    LC_ALL=C awk -F',' 'NR > 1 && !seen[$1]++ { print $1 }' "$SAMPLESHEET"
+}
+
+# Of the samples on stdin, those that are not the first column of any row of a
+# table after its header lines, space-separated. Prints nothing when none are
+# missing.
+not_in_table() {
+    local table="$1" header="$2"
+
+    LC_ALL=C awk -F'\t' -v header="$header" '
+        NR == FNR     { if (FNR > header) have[$1] = 1; next }
+        !($1 in have) { printf "%s%s", (n++ ? " " : ""), $1 }
+        END           { if (n) printf "\n" }
+    ' "$table" -
+}
+
+# The samples missing from the run's outputs, as statistics: those with no
+# MetaPhlAn profile, which are in none of its tables, and of the rest, those
+# HUMAnN or Nonpareil could not finish
+sample_gaps() {
+    local dropped humann nonpareil
+
+    [[ -s "$PROFILE_SET" && -r "$SAMPLESHEET" ]] || return 0
+
+    dropped=$(given_samples | not_in_table "$PROFILE_SET" 0)
+    [[ -n "$dropped" ]] && printf 'samples_dropped\t%s\n' "$dropped"
+
+    if [[ -s "$HUMANN_SUMMARY" ]]; then
+        humann=$(cut -f1 "$PROFILE_SET" | not_in_table "$HUMANN_SUMMARY" 1)
+        [[ -n "$humann" ]] && printf 'humann_missing\t%s\n' "$humann"
+    fi
+
+    if [[ -s "$NONPAREIL_SUMMARY" ]]; then
+        nonpareil=$(cut -f1 "$PROFILE_SET" | not_in_table "$NONPAREIL_SUMMARY" 1)
+        [[ -n "$nonpareil" ]] && printf 'nonpareil_missing\t%s\n' "$nonpareil"
+    fi
+
+    return 0
+}
+
 write_run_statistics() {
     local platform
 
@@ -638,6 +685,8 @@ write_run_statistics() {
             printf 'samples\t%s\n' "$(wc -l < "$DEPTHS")"
             printf 'metaphlan_database\t%s\n' "$DATABASE"
         fi
+
+        sample_gaps
 
         if [[ -s "$METAPHLAN_READS" ]]; then
             metaphlan_mapping
@@ -674,6 +723,10 @@ if ! write_run_statistics; then
     warn "The run statistics could not be counted; the dashboard will show fewer numbers."
     state_unset "$STATS_KEY" || true
 fi
+
+while IFS=$'\t' read -r GAP SAMPLES; do
+    warn "$GAP: $SAMPLES"
+done < <(sample_gaps)
 
 [[ -s "$DEPTHS" ]] || exit 0
 

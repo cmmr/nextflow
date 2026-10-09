@@ -278,6 +278,34 @@ well, and a run with no host logs nothing after `trimmed`. For that run
 `final` lines in KneadData's own format, which is what keeps the retained reads
 from reading as the trimmed ones.
 
+### Samples left with no reads
+
+A failed library or an empty blank used to stop the whole run. KneadData exits
+with an error on an empty input and on a sample Trimmomatic leaves empty, and
+mOTUs and Marker-MAGu refuse a sample with no reads. `KNEADDATA` now catches all
+three ways a sample can end up empty:
+
+- an empty input, before KneadData starts
+- KneadData's own `Trimmomatic created empty output files` error
+- final files that are all empty, which is what host depletion leaves when it
+  removes every read, since KneadData does not fail on that
+
+Each exits 10, and [`conf/base.config`](../../workflows/biobakery/conf/base.config)
+ignores exit 10 instead of retrying, since more memory cannot help. The sample
+leaves every channel after KneadData, so it is in none of the run's tables, and
+its KneadData log is not published.
+
+[`biobakery_composition.sh`](../../scripts/biobakery_composition.sh) compares
+`biobakery_samplesheet.csv` against the MetaPhlAn profiles and records any
+sample without one as `samples_dropped`. Of the samples that do have one, it
+also records those missing from HUMAnN's `alignment-summary.tsv` as
+`humann_missing`, and those missing from Nonpareil's `nonpareil-curves.tsv` as
+`nonpareil_missing`. Both of those tools already leave out a sample they cannot
+finish. The Overview's sidebar shows a **SAMPLES** block when any of the three
+is set: a *Samples analysed* bar, *"2 of 3"*, naming the dropped samples under
+it, then a row naming the samples each tool is missing. A run that lost nothing
+does not show the block.
+
 
 ## MetaPhlAn
 
@@ -615,7 +643,9 @@ plus a fourth, Methods. The navigation bar reads:
   the smallest, median and largest sample. Each is the reads remaining after
   that step. Tandem Repeats Finder has no bar of its own, since KneadData logs no
   count for it: what it removed shows in "After host depletion", or in
-  "Retained reads" for a run with no host.
+  "Retained reads" for a run with no host. A run that left any sample out
+  shows a SAMPLES block between those and the per-sample counts — see
+  [Samples left with no reads](#samples-left-with-no-reads).
 - **The Feature Table card** has a MetaPhlAn tab (the SGB read counts as
   plain text, JSON and HDF5 BIOM) and a HUMAnN tab (the pathway, gene family and
   EC tables in reads per kilobase, as plain text). Under the downloads, each has
@@ -812,6 +842,8 @@ catalogue, split into chunks, while it aligns.
 - **KneadData, MetaPhlAn, mOTUs, EsViritu and Marker-MAGu retry twice**, with
   more memory and time each time, then let running tasks finish and stop. All
   five read the requester's reads or a database over the shared filesystem.
+  The exception is a sample KneadData leaves with no reads, which is dropped
+  without a retry — see [Samples left with no reads](#samples-left-with-no-reads).
   `MARKERMAGU_TABLES` is a small task beside them: two cpus and 8 GB, over
   tables of a few hundred rows.
 - **HUMAnN** keeps taxprofiler's policy: a sample is retried once with twice the

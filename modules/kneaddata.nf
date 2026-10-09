@@ -1,6 +1,9 @@
 // KneadData 0.12.4: Trimmomatic trimming, tandem repeat removal and bowtie2
 // depletion against one host index, with FastQC before and after, and every
 // sample's read counts as one table. Published to <outdir>/kneaddata/.
+//
+// A sample with no reads to start with, or none left after trimming or host
+// depletion, exits 10, which conf/base.config drops from the run.
 
 process KNEADDATA {
     tag "${meta.id}"
@@ -27,15 +30,23 @@ process KNEADDATA {
     def database = db ? "--reference-db ${db}" : ''
     def heap     = task.memory ? "--max-memory ${(task.memory.toMega() * 3 / 4) as long}m" : ''
     """
+    no_reads() {
+        echo "${id} has no reads \$1; dropping it from the run" >&2
+        exit 10
+    }
+
     # A sample's runs, in samplesheet order, as one file per mate
     gzip -cdf ${fastq_1} > ${id}_R1.fastq
     ${meta.single_end ? '' : "gzip -cdf ${fastq_2} > ${id}_R2.fastq"}
+
+    [ -s ${id}_R1.fastq ] || no_reads "to trim"
 
     # KneadData applies --max-memory only when it runs Trimmomatic's jar itself.
     # Found on PATH, it runs the bioconda wrapper, which caps the heap at 1 GB.
     mkdir trimmomatic
     ln -s "\$(find -L /usr/local/share -name 'trimmomatic*.jar' | head -n 1)" trimmomatic/
 
+    status=0
     kneaddata ${input} \\
         --output out \\
         --output-prefix ${id} \\
@@ -47,9 +58,20 @@ process KNEADDATA {
         --run-fastqc-start \\
         --run-fastqc-end \\
         --remove-intermediate-output \\
-        ${params.kneaddata_args ?: ''}
+        ${params.kneaddata_args ?: ''} \\
+        2> kneaddata.err || status=\$?
 
-    rm -f ${id}_R1.fastq ${id}_R2.fastq
+    cat kneaddata.err >&2
+
+    if [ \$status -ne 0 ]; then
+        if grep -q 'Trimmomatic created empty output files' kneaddata.err; then
+            no_reads "left after trimming"
+        fi
+
+        exit \$status
+    fi
+
+    rm -f ${id}_R1.fastq ${id}_R2.fastq kneaddata.err
 
     # The files the log lists as final. Their names depend on whether a host
     # was depleted, and intermediates are left beside them either way.
@@ -58,6 +80,21 @@ process KNEADDATA {
     awk '/Final output files? created/ { final = 1; next }
          final && /^\\// { print; next }
          { final = 0 }' out/${id}.log > final.txt
+
+    # Host depletion can remove every read without KneadData failing
+    if [ -s final.txt ]; then
+        nonempty=0
+
+        while read -r path; do
+            if [ -s "out/\${path##*/}" ]; then
+                nonempty=\$((nonempty + 1))
+            fi
+        done < final.txt
+
+        if [ \$nonempty -eq 0 ]; then
+            no_reads "left after host depletion"
+        fi
+    fi
 
     while read -r path; do
         gzip -1 -c "out/\${path##*/}" > "clean/\${path##*/}.gz"
@@ -91,6 +128,11 @@ process KNEADDATA {
 
     stub:
     """
+    if [ -z "\$(gzip -cdf ${fastq_1} | head -c 1)" ]; then
+        echo "${meta.id} has no reads to trim; dropping it from the run" >&2
+        exit 10
+    fi
+
     mkdir clean fastqc
 
     for mate in 1 2; do

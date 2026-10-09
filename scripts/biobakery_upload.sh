@@ -141,6 +141,41 @@ if [[ "$TOTAL_READS" =~ ^[0-9]+$ ]] && (( TOTAL_READS > 0 )); then
 
     dashboard_stat_share "Retained reads" "${STATS[retained_total]:-}" "$TOTAL_READS" growth reads
 
+    #    Samples the run left out: under a bar of the ones that remain, those
+    #    KneadData left with no reads, and under that, those HUMAnN or
+    #    Nonpareil could not finish. Rounded down, so a run that lost any is
+    #    never full.
+    if [[ -n "${STATS[samples_dropped]:-}${STATS[humann_missing]:-}${STATS[nonpareil_missing]:-}" ]]; then
+        dashboard_stat_group "SAMPLES"
+
+        if [[ -n "${STATS[samples_dropped]:-}" ]]; then
+            read -ra DROPPED <<< "${STATS[samples_dropped]}"
+
+            GIVEN_SAMPLES=$(state_get samples.count)
+
+            if [[ ! "$GIVEN_SAMPLES" =~ ^[0-9]+$ ]] || (( GIVEN_SAMPLES < ${#DROPPED[@]} )); then
+                GIVEN_SAMPLES=$(( ${STATS[samples]:-0} + ${#DROPPED[@]} ))
+            fi
+
+            KEPT_SAMPLES=$(( GIVEN_SAMPLES - ${#DROPPED[@]} ))
+            KEPT_PCT=$(( KEPT_SAMPLES * 100 / GIVEN_SAMPLES ))
+
+            DROPPED_LIST=$(printf '%s, ' "${DROPPED[@]}")
+
+            dashboard_stat_bar "Samples analysed" "$KEPT_SAMPLES of $GIVEN_SAMPLES" \
+                "$KEPT_PCT" growth "" "Dropped: ${DROPPED_LIST%, }" \
+                "Samples with no reads left after trimming and host depletion, and so in none of the run's tables"
+        fi
+
+        for GAP in "No HUMAnN profile|humann_missing" "No Nonpareil estimate|nonpareil_missing"; do
+            GAP_SAMPLES=${STATS[${GAP##*|}]:-}
+
+            [[ -n "$GAP_SAMPLES" ]] || continue
+
+            dashboard_stat_row "${GAP%%|*}" "${GAP_SAMPLES// /, }"
+        done
+    fi
+
     dashboard_stat_group "READS PER SAMPLE"
     dashboard_stat_chips "$(human_count "${STATS[reads_min]:-0}")|Min" \
                          "$(human_count "${STATS[reads_median]:-0}")|Median" \

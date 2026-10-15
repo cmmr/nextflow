@@ -129,7 +129,8 @@ workflows/biobakery/
   nextflow.config      parameter defaults, profiles, execution reports
   conf/base.config     per-process resources and retries
   bin/                 helper scripts Nextflow puts on each task's PATH
-                         metaphlan_sgb_biom.py, markermagu_tables.py
+                         kneaddata_identifiers.py, metaphlan_sgb_biom.py,
+                         markermagu_tables.py
 modules/
   kneaddata.nf         KNEADDATA, KNEADDATA_COUNTS
   metaphlan.nf         METAPHLAN, METAPHLAN_MERGE
@@ -255,6 +256,16 @@ Trimmomatic on `PATH`, it runs the bioconda wrapper instead, which ignores that
 setting and caps the heap at 1 GB — enough for a small sample, and an
 `OutOfMemoryError` on a sample of a million pairs at 16 threads, however much
 memory the task was given. The heap is three quarters of the task's memory.
+
+**Read identifiers are rewritten as the reads are decompressed.** KneadData
+wants every identifier to be one word ending in `/1` or `/2`. Otherwise it
+writes the whole sample out again to rewrite them, and keeps that copy beside
+the input until it finishes.
+[`bin/kneaddata_identifiers.py`](../../workflows/biobakery/bin/kneaddata_identifiers.py)
+makes the same rewrite on the way in. It keeps the first word, adds `#0/1` or
+`#0/2` when the word does not already end that way, and clears the `+` line.
+KneadData then finds nothing to change. The reads come out byte for byte as
+KneadData would name them, one copy smaller on disk.
 
 **The cleaned reads are the files KneadData's log lists as final.** Which files
 those are depends on the run — `<sample>_paired_1.fastq` and its orphans when a
@@ -829,7 +840,8 @@ The samplesheet is the CSV `biobakery_samplesheet.sh` writes:
 [`conf/base.config`](../../workflows/biobakery/conf/base.config) sets a
 reservation and a retry policy per process;
 [`config/biobakery/slurm.config`](../../config/biobakery/slurm.config) resizes the
-ones that depend on the node — KneadData at 16 cpus and 32 GB, MetaPhlAn at 16
+ones that depend on the node — KneadData at 16 cpus, 32 GB and 24 hours on every
+attempt, MetaPhlAn at 16
 cpus and 48 GB, mOTUs at 16 cpus and 32 GB and Nonpareil at 8 cpus and 64 GB, the
 same as taxprofiler's `METAPHLAN_METAPHLAN`, `MOTUS_PROFILE` and
 `NONPAREIL_NONPAREIL`, EsViritu at 16 cpus and 16 GB, and Marker-MAGu at 16 cpus
@@ -842,8 +854,9 @@ catalogue, split into chunks, while it aligns.
 - **KneadData, MetaPhlAn, mOTUs, EsViritu and Marker-MAGu retry twice**, with
   more memory and time each time, then let running tasks finish and stop. All
   five read the requester's reads or a database over the shared filesystem.
-  The exception is a sample KneadData leaves with no reads, which is dropped
-  without a retry — see [Samples left with no reads](#samples-left-with-no-reads).
+  The exceptions are a sample KneadData leaves with no reads, which is dropped
+  without a retry — see [Samples left with no reads](#samples-left-with-no-reads)
+  — and one without the disk for KneadData, which stops the run without a retry.
   `MARKERMAGU_TABLES` is a small task beside them: two cpus and 8 GB, over
   tables of a few hundred rows.
 - **HUMAnN** keeps taxprofiler's policy: a sample is retried once with twice the
@@ -852,9 +865,28 @@ catalogue, split into chunks, while it aligns.
   and its summary is ignored when it fails.
 - **MultiQC** is ignored when it fails.
 
-KneadData decompresses a sample's reads onto the node's scratch before it starts
-and compresses what it keeps afterwards, so a deep sample needs several times its
-compressed size free under `/tmp`.
+**KneadData runs in its work directory on the shared filesystem**, not in the
+node's `/tmp` like everything else. It works on uncompressed reads and keeps each
+step's output until it finishes. The input, the trimmed reads, the reads TRF
+leaves, bowtie2's alignments and its clean reads are all on disk at once: about
+five times the sample's uncompressed size, or twenty times its gzipped size. A
+node's `/tmp` is its root filesystem, with about 410 GB free. That fits a sample
+of about 20 GB gzipped, or half that when a second KneadData task shares the
+node, as two can at 16 cpus each. Deep samples run 50–90 GB gzipped and need
+1–2 TB. `KNEADDATA` removes its uncompressed reads once it has gzipped the final
+ones.
+
+**`KNEADDATA` checks the disk before it starts.** It estimates the sample's
+uncompressed size from the first 64 MB of each file, which comes within a
+fraction of a percent, and exits 11 unless five and a half times that is free
+where it runs. The message gives the space needed and the space free, and the
+run stops without a retry, since retries add memory and time but not disk.
+Without the check, such a sample runs for up to an hour before it fails with
+`No space left on device`. The check sees only the space free when the task
+starts, not what other tasks starting beside it will take.
+
+On Slurm every KneadData attempt has 24 hours, the most `resourceLimits` allows,
+since a deep sample can take it past the 12 hours a first attempt gets elsewhere.
 
 `wrike_job.sh`'s 48-hour limit covers the whole workflow, HUMAnN included.
 

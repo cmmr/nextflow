@@ -48,6 +48,8 @@ scripts/
   taxprofiler_upload.sh       POST_PROCESS_CMDS for the taxprofiler pipelines.
   biobakery_samplesheet.sh    PRE_PROCESS_CMDS for the biobakery pipelines; runs
                            taxprofiler_samplesheet.sh and keeps its CSV.
+  biobakery_disk_check.sh     Refuses a run the disk cannot hold, before anything
+                           is staged. Run by the above.
   biobakery_composition.sh    Works out what the Overview plots from MetaPhlAn's
                            profiles. Run by biobakery_upload.sh.
   biobakery_methods.sh        Writes the Methods page's paragraph and references

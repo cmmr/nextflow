@@ -107,7 +107,7 @@ EsViritu off:
 
 | Step | What | Progress page row |
 | --- | --- | --- |
-| pre-process | [`biobakery_samplesheet.sh`](../../scripts/biobakery_samplesheet.sh) | `samplesheet` |
+| pre-process | [`biobakery_samplesheet.sh`](../../scripts/biobakery_samplesheet.sh), which runs [`biobakery_disk_check.sh`](../../scripts/biobakery_disk_check.sh) first | `samplesheet` |
 | nextflow | `workflows/biobakery` | `biobakery` |
 | post-process | [`biobakery_upload.sh`](../../scripts/biobakery_upload.sh) | `upload` |
 
@@ -238,6 +238,35 @@ needs is deleted.
 requester told why: KneadData, MetaPhlAn and HUMAnN are all short-read tools. The
 workflow checks again for anyone running it by hand, and skips such rows with a
 warning.
+
+**A run the disk cannot hold is refused before anything is staged.**
+[`biobakery_disk_check.sh`](../../scripts/biobakery_disk_check.sh) runs first. It
+reads the file list from the lab samplesheet and estimates each file's
+uncompressed size from how far its first 16 MB decompress. That estimate comes
+within a fraction of a percent. A `.bz2` file it cannot decompress is taken at
+4 to 1. It then adds up what the run will write:
+
+| Where | What | Estimate |
+| --- | --- | --- |
+| the run directory | reads that are not already gzipped, recompressed into `raw-sequences/` | a third of their uncompressed size |
+| | KneadData's working space, for every sample at once | 5.5 times each sample's uncompressed reads |
+| | the cleaned reads KneadData leaves for the steps after it | the size of the gzipped reads |
+| `GLOBUS_DIR` | the download, which holds every staged read again | the size of the gzipped reads |
+
+HUMAnN needs less room per read than KneadData, on reads KneadData has already
+cleaned. A sample's HUMAnN also never runs alongside its own KneadData, so the
+same room covers it. When the run directory and `GLOBUS_DIR` are on one
+filesystem, the two are added together.
+
+A run short of space on either filesystem fails with what it needs and what is
+free. The requester is told that nothing has been staged, and that the run can
+be resubmitted once space is freed. Every run logs the estimate in its job
+output, so a run that passes the check shows its margin as well.
+
+The check assumes the worst case: every sample's KneadData at its peak at once.
+It sees only the space free when the run starts, not what other runs starting
+beside it will take. A workflow run by hand skips it, since it is part of the
+pre-processing `wrike_job.sh` runs.
 
 
 ## KneadData
@@ -854,9 +883,8 @@ catalogue, split into chunks, while it aligns.
 - **KneadData, MetaPhlAn, mOTUs, EsViritu and Marker-MAGu retry twice**, with
   more memory and time each time, then let running tasks finish and stop. All
   five read the requester's reads or a database over the shared filesystem.
-  The exceptions are a sample KneadData leaves with no reads, which is dropped
-  without a retry — see [Samples left with no reads](#samples-left-with-no-reads)
-  — and one without the disk for KneadData, which stops the run without a retry.
+  The exception is a sample KneadData leaves with no reads, which is dropped
+  without a retry — see [Samples left with no reads](#samples-left-with-no-reads).
   `MARKERMAGU_TABLES` is a small task beside them: two cpus and 8 GB, over
   tables of a few hundred rows.
 - **HUMAnN** keeps taxprofiler's policy: a sample is retried once with twice the
@@ -865,25 +893,23 @@ catalogue, split into chunks, while it aligns.
   and its summary is ignored when it fails.
 - **MultiQC** is ignored when it fails.
 
-**KneadData runs in its work directory on the shared filesystem**, not in the
-node's `/tmp` like everything else. It works on uncompressed reads and keeps each
-step's output until it finishes. The input, the trimmed reads, the reads TRF
-leaves, bowtie2's alignments and its clean reads are all on disk at once: about
-five times the sample's uncompressed size, or twenty times its gzipped size. A
-node's `/tmp` is its root filesystem, with about 410 GB free. That fits a sample
-of about 20 GB gzipped, or half that when a second KneadData task shares the
-node, as two can at 16 cpus each. Deep samples run 50–90 GB gzipped and need
-1–2 TB. `KNEADDATA` removes its uncompressed reads once it has gzipped the final
-ones.
+**KneadData and HUMAnN run in their work directories on the shared filesystem**,
+not in the node's `/tmp` like everything else. Both work on uncompressed reads
+and keep each step's output until they finish:
 
-**`KNEADDATA` checks the disk before it starts.** It estimates the sample's
-uncompressed size from the first 64 MB of each file, which comes within a
-fraction of a percent, and exits 11 unless five and a half times that is free
-where it runs. The message gives the space needed and the space free, and the
-run stops without a retry, since retries add memory and time but not disk.
-Without the check, such a sample runs for up to an hour before it fails with
-`No space left on device`. The check sees only the space free when the task
-starts, not what other tasks starting beside it will take.
+| | On disk at once | Measured peak |
+| --- | --- | --- |
+| KneadData | the input, the trimmed reads, the reads TRF leaves, bowtie2's alignments and its clean reads | 4.9 times the sample's uncompressed size, about twenty times its gzipped size |
+| HUMAnN | its gzipped input, the reads decompressed, bowtie2's alignments of all of them, the reads left for DIAMOND, and its own small pangenome index | under 4 times the cleaned reads' uncompressed size, plus the index |
+
+A node's `/tmp` is its root filesystem, with about 410 GB free. That fits
+KneadData on a sample of about 20 GB gzipped, or half that when a second
+KneadData task shares the node, as two can at 16 cpus each. Deep samples run
+50–90 GB gzipped and need 1–2 TB. A sample too big for `/tmp` fails with
+`No space left on device` on every attempt, since retries add memory and time
+but not disk. `KNEADDATA` removes its uncompressed reads once it has gzipped the
+final ones, and HUMAnN its own with `--remove-temp-output`. The other modules read
+the cleaned reads gzipped, and copy them at most.
 
 On Slurm every KneadData attempt has 24 hours, the most `resourceLimits` allows,
 since a deep sample can take it past the 12 hours a first attempt gets elsewhere.

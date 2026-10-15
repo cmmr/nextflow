@@ -3,8 +3,7 @@
 // sample's read counts as one table. Published to <outdir>/kneaddata/.
 //
 // A sample with no reads to start with, or none left after trimming or host
-// depletion, exits 10, which conf/base.config drops from the run. A sample
-// with too little disk free for it exits 11, which stops the run.
+// depletion, exits 10, which conf/base.config drops from the run.
 
 process KNEADDATA {
     tag "${meta.id}"
@@ -35,31 +34,6 @@ process KNEADDATA {
         echo "${id} has no reads \$1; dropping it from the run" >&2
         exit 10
     }
-
-    # KneadData keeps each step's output until it finishes, so at its peak a
-    # sample's reads are on disk about five times over, uncompressed. Their
-    # uncompressed size is estimated from the first 64 MB of each file, and the
-    # task stops unless five and a half times that is free here.
-    reads_kb=0
-
-    for file in ${fastq_1} ${fastq_2}; do
-        size=\$(stat -L -c %s "\$file")
-        part=\$(( size < 67108864 ? size : 67108864 ))
-        out=\$(head -c \$part "\$file" | { gzip -cdf 2> /dev/null || true; } | wc -c)
-        reads_kb=\$(awk -v kb=\$reads_kb -v size=\$size -v out=\$out -v part=\$part \\
-            'BEGIN { printf "%.0f", kb + (part ? size / 1024 * out / part : 0) }')
-    done
-
-    needed_kb=\$(( reads_kb * 11 / 2 ))
-    free_kb=\$(df -Pk . | awk 'NR == 2 { print \$4 }')
-
-    if [ \$free_kb -lt \$needed_kb ]; then
-        awk -v id="${id}" -v needed=\$needed_kb -v reads=\$reads_kb -v free=\$free_kb -v dir="\$PWD" 'BEGIN {
-            printf "%s needs about %.1f GB free for KneadData, five and a half times its %.1f GB of reads uncompressed, but %s has %.1f GB free\\n",
-                id, needed / 1048576, reads / 1048576, dir, free / 1048576
-        }' >&2
-        exit 11
-    fi
 
     # A sample's runs, in samplesheet order, as one file per mate, with the
     # identifiers KneadData would otherwise copy the whole sample to rewrite

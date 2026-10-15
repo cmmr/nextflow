@@ -22,6 +22,9 @@ git reset --hard @{u}
 source /data/prod/nextflow/.env
 aws sqs purge-queue --queue-url "$AWS_SQS_QUEUE_URL" --region "$AWS_REGION"
 
+loginctl enable-linger $USER
+loginctl show-user $USER --property=Linger
+
 systemctl --user start wrike-sqs-listener
 
 systemctl --user status wrike-sqs-listener

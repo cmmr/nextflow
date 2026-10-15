@@ -109,6 +109,10 @@ mkdir -p ~/.config/systemd/user && ln -sf /data/prod/nextflow/systemd/wrike-expi
 ```
 
 ```bash
+loginctl enable-linger $USER
+```
+
+```bash
 systemctl --user daemon-reload && systemctl --user enable --now wrike-expiration.timer
 ```
 

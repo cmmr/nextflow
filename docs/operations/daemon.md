@@ -210,6 +210,7 @@ file's contents until a `daemon-reload` and a restart have picked them up.
 
 | Symptom | Cause |
 | --- | --- |
+| Task stays at "Submitted", nothing in `squeue` | Daemon not running, so the request waits in SQS until it starts; usually the row below |
 | Daemon gone after logout | Lingering not enabled; `loginctl show-user $USER --property=Linger` |
 | `Failed to connect to bus` | No user manager for this session — same cause, or you are on a different login node |
 | Starts, then `command not found` in the journal | `aws`, `jq`, `sinfo`, `sbatch`, or `scancel` off the unit's `PATH` |

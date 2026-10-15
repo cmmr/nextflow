@@ -990,6 +990,19 @@ DIAMOND blocks that index rather than holding it whole. `HUMANN_TABLES` is
 retried for the same reason the steps above are — it is the one task between
 every sample's profile and the published tables.
 
+**`HUMANN_PROFILE` runs in its work directory on the shared filesystem**, not in
+the node's `/tmp` like every other task. HUMAnN copies the sample's gzipped reads
+into one file and decompresses them into its temporary folder. It then writes
+bowtie2's alignments of every read beside them, about one and a half times their
+size, and the reads left for DIAMOND as FASTA. Measured on its demo databases,
+that comes to just under four times the sample's uncompressed size at once,
+plus the pangenome index it builds for the sample. A node's `/tmp` is its root
+filesystem, with about 410 GB free, and two HUMAnN tasks can share a node at 16
+cpus each. A sample of 25 GB gzipped can fill it, and the deep ones, at 50–90 GB,
+need one to one and a half terabytes. Too little room fails the same way on every attempt, since
+the retry adds memory and time but not disk. HUMAnN's `--remove-temp-output`
+clears its folder when it finishes.
+
 Nothing copies a database. Nextflow stages inputs as absolute symlinks
 (`stageInMode` defaults to `symlink`) and `scratch` copies only declared
 *outputs* back, so every tool reads its database over the shared filesystem and

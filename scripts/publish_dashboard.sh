@@ -1033,7 +1033,7 @@ dashboard_tree_lines() {
 }
 
 # What the archive unpacks into: the folders dashboard_bundle was given and every
-# folder under them, with the archive's own name at the root. Files are left
+# folder under them, inside the one folder named after the archive. Files are left
 # out, so the tree reads as a map of where things are. Nothing for an upload
 # script that named no folders, or when none of them is still there.
 dashboard_bundle_tree() {
@@ -1049,8 +1049,9 @@ dashboard_bundle_tree() {
 
     name=${DASHBOARD_BUNDLE_URL%%\?*}
     name=${name##*/}
+    name=${name%.zip}
 
-    printf '<pre class="tree">%s\n' "$(escape_html "$name")"
+    printf '<pre class="tree">%s/\n' "$(escape_html "$name")"
 
     for (( i = 0; i <= last; i++ )); do
         if (( i == last )); then

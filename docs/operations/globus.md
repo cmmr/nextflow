@@ -106,10 +106,13 @@ dashboard:
 |---|---|
 | `$GLOBUS_DIR/nxf/<uid>/<task title>_<uid>.zip` | the reads the run was given beside the whole `results/` folder, the three pages it is read through included |
 
-It is laid out the way the run directory itself is — `raw-sequences/` beside
-`results/` — so unpacking it gives back what the run was handed and what it
-produced, side by side, and the dashboard inside it browses the reads the same
-way it browses everything else.
+Everything in it is under one folder named after the archive —
+`<task title>_<uid>/` — so unpacking it never scatters `raw-sequences/` and
+`results/` loose into wherever it is unpacked, and the copy still names the run
+it came from. Inside that folder it is laid out the way the run directory itself
+is — `raw-sequences/` beside `results/` — so unpacking it gives back what the
+run was handed and what it produced, side by side, and the dashboard inside it
+browses the reads the same way it browses everything else.
 
 One file rather than the two this used to be. Two downloads let a requester take
 one of them, see nothing else obviously outstanding, and believe their data was
@@ -140,7 +143,10 @@ The reads go in stored (`zip -0`), being already gzipped, and the results
 deflated; `globus_archive` takes each part with the level to give it. The
 dashboard's own three pages go in last, through `globus_archive_add`, because
 they say how big the archive is and that is not known until the rest of it is in
-there.
+there. Both go through `globus_zip`, which zips each path through a link named
+after the archive and pointing at the run directory, made in a temporary
+directory rather than on the collection — that link is what puts every entry
+under the one top-level folder.
 
 [`scripts/globus.sh`](../../scripts/globus.sh) is the whole of the mechanism:
 `globus_run_dir`, `globus_run_url`, `globus_bundle_name`, `globus_archive`,

@@ -276,8 +276,10 @@ script and served from [the Globus collection](../operations/globus.md), and it
 is named after the Wrike task and the uid — `<task title>_<uid>.zip` — so it is
 recognisable in a downloads folder and still traceable back to the run.
 
-It unpacks into `raw-sequences/` beside `results/`, the way the run directory
-itself is laid out. Open the `index.html` in `results/` and the same dashboard
+It unpacks into one folder named after it — `<task title>_<uid>/` — holding
+`raw-sequences/` beside `results/`, the way the run directory itself is laid
+out, so nothing lands loose in the folder it is unpacked in and the copy still
+says which run it is. Open the `index.html` in `results/` and the same dashboard
 comes up — every link is relative, so the navigation bar, the Overview, the file
 index and the folder listings all resolve against the extracted folder.
 

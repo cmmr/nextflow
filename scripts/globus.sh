@@ -14,8 +14,9 @@
 #
 # One archive rather than two, because two invited the reader to take one and
 # believe they had everything. It holds the run directory's own layout -
-# raw-sequences/ beside results/ - so unpacking it gives back what the run was
-# given and what it produced, side by side.
+# raw-sequences/ beside results/ - inside one folder named after the archive,
+# so unpacking it gives back what the run was given and what it produced, side
+# by side, under a name that says which run they came from.
 #
 # Every run publishes under one prefix, $GLOBUS_RUN_PREFIX, which carries a
 # single anonymous read permission granted once by hand. A run is a directory
@@ -30,11 +31,12 @@
 #                                                build that archive
 #   globus_archive_add  <uid> <zip> <path>...    add to one already built
 #   globus_archive_size <uid> <zip>              how big it came out, in bytes
+#   globus_zip          <zip> <level> <path>...  zip paths under the archive's folder
 #   globus_discard_run  <uid>                    delete the directory and all of it
 #
 # Defines: globus_run_dir, globus_run_url, globus_bundle_name, globus_archive,
-#          globus_archive_add, globus_archive_size, globus_discard_run
-# Requires: zip
+#          globus_archive_add, globus_archive_size, globus_zip, globus_discard_run
+# Requires: zip, mktemp
 # Env:     GLOBUS_DIR, GLOBUS_RUN_PREFIX, GLOBUS_URL, and the log/warn and
 #          is_valid_uid/escape_url helpers from utilities.sh
 
@@ -89,6 +91,41 @@ globus_bundle_name() {
     printf '%s%s.zip' "${slug:+${slug}_}" "$uid"
 }
 
+# Zip paths into an archive at the compression level given, each under one
+# folder named after the archive - "WGS-Pool-2164_th724j4o.zip" holds
+# "WGS-Pool-2164_th724j4o/results/..." - so it unpacks into that folder rather
+# than loose into wherever it is unpacked. The paths are read relative to the
+# working directory, through a link to it by that name, made outside the run's
+# directory so the collection never serves it.
+#
+# Prints whatever zip had to say about a failure.
+globus_zip() {
+    local archive="$1" level="$2"
+    local top stage output status
+    shift 2
+
+    [[ "$archive" == /* ]] || archive="$PWD/$archive"
+    top=$(basename "$archive" .zip)
+
+    stage=$(mktemp -d) || return 1
+
+    if ! output=$(ln -s "$PWD" "$stage/$top" 2>&1); then
+        printf '%s' "$output"
+        rmdir "$stage"
+        return 1
+    fi
+
+    set -- "${@#./}"
+    output=$(cd "$stage" && zip -r -q "$level" "$archive" "${@/#/$top/}" 2>&1)
+    status=$?
+
+    rm -f "$stage/$top"
+    rmdir "$stage"
+
+    [[ $status -eq 0 ]] || printf '%s' "$output"
+    return $status
+}
+
 # Build a run's archive straight into the collection, out of the directories
 # named after it. Straight into it rather than beside the results and moved
 # after, because a run's reads are large enough that writing them twice is the
@@ -98,7 +135,8 @@ globus_bundle_name() {
 # zip is told about that part: "-0" stores rather than deflates, which is what
 # to give already-gzipped reads, and the default "-9" is for everything else.
 # They are read relative to the working directory and go in under their own
-# names, so the archive unpacks into the layout the run directory holds.
+# names, inside the one folder globus_zip names after the archive, so it
+# unpacks into that folder holding the layout the run directory holds.
 #
 # zip stores what a symlink points at, so a sample staged as a link is archived
 # as real data.
@@ -125,10 +163,7 @@ globus_archive() {
         [[ "$part" == *'|'* ]] && level=${part#*|}
         part=${part%%|*}
 
-        if ! output=$(zip -r -q "$level" "$dir/$name" "$part" 2>&1); then
-            printf '%s' "$output"
-            return 1
-        fi
+        globus_zip "$dir/$name" "$level" "$part" || return 1
     done
 
     # World-readable, because the collection serves these as the anonymous
@@ -141,15 +176,12 @@ globus_archive() {
 # download is, which is not known until everything else is in it.
 globus_archive_add() {
     local uid="$1" name="$2"
-    local dir output
+    local dir
     shift 2
 
     dir=$(globus_run_dir "$uid") || return 1
 
-    if ! output=$(zip -q -9 "$dir/$name" "$@" 2>&1); then
-        printf '%s' "$output"
-        return 1
-    fi
+    globus_zip "$dir/$name" -9 "$@" || return 1
 
     chmod a+r "$dir/$name" 2>/dev/null || true
 }

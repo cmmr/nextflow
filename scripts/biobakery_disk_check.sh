@@ -9,12 +9,17 @@
 # samplesheet names, and fails before anything is staged unless both
 # filesystems it writes to have that much free, or their sum when they are one:
 #
-#   the run directory  reads recompressed into raw-sequences/, KneadData's
-#                      working space for every sample at once, and the cleaned
-#                      reads KneadData leaves for the steps after it. HUMAnN
-#                      works on those cleaned reads and needs less room per
-#                      read than KneadData, so the same room covers it.
-#   GLOBUS_DIR         the download, which holds every staged read again
+#   the run directory  reads recompressed into raw-sequences/, the reads host
+#                      depletion keeps, KneadData's working space for every
+#                      sample at once, and the cleaned reads KneadData leaves
+#                      for the steps after it. HUMAnN works on those cleaned
+#                      reads and needs less room per read than KneadData, so
+#                      the same room covers it.
+#   GLOBUS_DIR         the download, which holds each read set the request's
+#                      "Delivered Reads" answer names
+#
+# The host-depleted and cleaned reads are each taken at the reads' gzipped
+# size, which is what they come to when little is removed.
 #
 # A file's uncompressed size is estimated from how far its first 16 MB
 # decompress. Files the samplesheet step will refuse are left to it to report.
@@ -24,8 +29,8 @@
 # Called by: biobakery_samplesheet.sh, before it stages anything
 # Requires:  gzip, awk, df and stat from PATH; $NEXTFLOW_DIR/bin/lbzip2 for
 #            .bz2 inputs
-# Env:       NEXTFLOW_DIR, GLOBUS_DIR, and the log/warn/fail helpers, sourced
-#            from .env
+# Env:       NEXTFLOW_DIR, GLOBUS_DIR, the log/warn/fail helpers and
+#            form_answer_includes, sourced from .env
 # Outputs:   an explanation of a failure in ./run_state.json
 
 set -euo pipefail
@@ -44,6 +49,15 @@ GZIP_RATIO=3
 
 # Compressed bytes read from the start of each file to estimate its size
 SAMPLE_BYTES=16777216
+
+# How many read sets the download carries, each about the size of the reads
+DELIVERED_SETS=0
+
+for READ_SET in "Raw" "Host Depleted" "Cleaned"; do
+    if form_answer_includes delivered_reads "$READ_SET"; then
+        DELIVERED_SETS=$((DELIVERED_SETS + 1))
+    fi
+done
 
 LBZIP2="$NEXTFLOW_DIR/bin/lbzip2"
 
@@ -100,14 +114,14 @@ measure() {
 read -r READS_KB RUN_KB DOWNLOAD_KB < <(
     for file in "${FILES[@]}"; do
         measure "$file"
-    done | awk -v factor=$KNEADDATA_FACTOR -v ratio=$GZIP_RATIO '
+    done | awk -v factor=$KNEADDATA_FACTOR -v ratio=$GZIP_RATIO -v sets=$DELIVERED_SETS '
         {
             gz = $1 == "gz" ? $2 : $3 / ratio
 
             reads += $3
-            work += $3 * factor + gz
+            work += $3 * factor + 2 * gz
             if ($1 != "gz") staged += gz
-            download += gz
+            download += gz * sets
         }
         END { printf "%.0f %.0f %.0f\n", reads / 1024, (work + staged) / 1024, download / 1024 }'
 )

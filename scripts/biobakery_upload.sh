@@ -8,10 +8,11 @@
 # The biobakery counterpart of taxprofiler_upload.sh, taking the same steps in
 # the same order: work out what the Overview plots and write the Methods page's
 # text, delete what templates/biobakery/prune.conf names, declare what the
-# dashboard offers, package the staged reads and the results as one zip on the
-# Globus guest collection, copy in the run's record and render the pages, write
-# a listing page into every folder, add those to the zip, and copy the results to
-# s3://$AWS_S3_BUCKET/$S3_RUN_PREFIX/<uid>/ with the pages last.
+# dashboard offers, package the read sets the request asked for and the results
+# as one zip on the Globus guest collection, copy in the run's record and render
+# the pages, write a listing page into every folder, add those to the zip, and
+# copy the results to s3://$AWS_S3_BUCKET/$S3_RUN_PREFIX/<uid>/ with the pages
+# last.
 #
 # The Overview's composition chart is MetaPhlAn's, and its diversity chart is
 # Nonpareil's and mOTUs', on a run that enabled either.
@@ -28,7 +29,8 @@
 # Requires:  aws, zip, curl and jq (via the Wrike helpers)
 # Reads:     templates/biobakery/outputs.conf and templates/biobakery/prune.conf;
 #            ./composition_data.json and ./methods_data.json, and the run's
-#            statistics and manifest out of ./run_state.json
+#            statistics, manifest and "Delivered Reads" answer out of
+#            ./run_state.json
 # Runs:      biobakery_composition.sh, biobakery_methods.sh, prune_results.sh and
 #            index_directories.sh, over the results folder
 # Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, WRIKE_DASHBOARD_URL_CFID,
@@ -45,8 +47,21 @@ source /data/prod/nextflow/.env
 RESULTS_DIR="${1:-results}"
 RESULTS_DIR="${RESULTS_DIR%/}"
 
-# Written by biobakery_samplesheet.sh; the reads go into the download, not S3
-FASTQ_DIR="raw-sequences"
+# The read sets the request's "Delivered Reads" answer asked for, each a folder
+# beside the results that goes into the download and not to S3: the reads as
+# biobakery_samplesheet.sh staged them, and those the workflow published, which
+# it does only when asked
+READ_DIRS=()
+
+if form_answer_includes delivered_reads "Raw" && [[ -d raw-sequences ]]; then
+    READ_DIRS+=(raw-sequences)
+fi
+
+for READ_DIR in host-depleted-sequences cleaned-sequences; do
+    if [[ -d "$READ_DIR" ]]; then
+        READ_DIRS+=("$READ_DIR")
+    fi
+done
 
 STATS_KEY="statistics"
 PLOT_DATA_FILE="composition_data.json"
@@ -83,7 +98,21 @@ fi
 command -v zip > /dev/null \
     || fail "The results could not be packaged for download: zip is not installed."
 
-[[ -d "$FASTQ_DIR" ]] || log "No $FASTQ_DIR directory; the download will hold the results alone."
+if (( ${#READ_DIRS[@]} > 0 )); then
+    log "The download will carry ${READ_DIRS[*]} beside the results."
+else
+    log "No reads were asked for; the download will hold the results alone."
+fi
+
+#    The read folders are links into the work directory and the staged inputs,
+#    and zip leaves out a link whose file is gone without failing
+for READ_DIR in ${READ_DIRS[@]+"${READ_DIRS[@]}"}; do
+    BROKEN=$(find -L "$READ_DIR" -type l | wc -l)
+
+    if (( BROKEN > 0 )); then
+        fail "This run could not be packaged for download: $BROKEN of the files in $READ_DIR/ are missing."
+    fi
+done
 
 # 2. What the Overview plots and the sidebar reports, and the Methods page's text
 if ! "$NEXTFLOW_DIR/scripts/biobakery_composition.sh" "$RESULTS_DIR"; then
@@ -119,7 +148,7 @@ while IFS=$'\t' read -r STAT_KEY STAT_VALUE; do
     STATS["$STAT_KEY"]="$STAT_VALUE"
 done < <(state_get_tsv "$STATS_KEY")
 
-#    Reads as sequenced, what trimming and host depletion each left, and what
+#    Reads as sequenced, what host depletion and trimming each left, and what
 #    was kept. Each step behind "details" links to KneadData's table in the
 #    QC Report.
 TOTAL_READS=${STATS[raw_total]:-}
@@ -134,9 +163,9 @@ if [[ "$TOTAL_READS" =~ ^[0-9]+$ ]] && (( TOTAL_READS > 0 )); then
     dashboard_stat_group "READ TOTALS" "$READS_NOTE"
     dashboard_stat_bar "Total reads" "$(human_count "$TOTAL_READS")" 100
 
-    dashboard_stat_share_detail reads "After trimming" "${STATS[trimmed_total]:-}" \
-        "$TOTAL_READS" "$KNEADDATA_SECTION"
     dashboard_stat_share_detail reads "After host depletion" "${STATS[host_kept]:-}" \
+        "$TOTAL_READS" "$KNEADDATA_SECTION"
+    dashboard_stat_share_detail reads "After trimming" "${STATS[trimmed_total]:-}" \
         "$TOTAL_READS" "$KNEADDATA_SECTION"
 
     dashboard_stat_share "Retained reads" "${STATS[retained_total]:-}" "$TOTAL_READS" growth reads
@@ -287,13 +316,17 @@ if [[ -n "$SAMPLE_COUNT" && ! "$SAMPLE_COUNT" =~ ^[0-9]+$ ]]; then
     SAMPLE_COUNT=""
 fi
 
-# 5. The reads as they went in and the results, as the one download. Built
+# 5. The read sets asked for and the results, as the one download. Built
 #    before the pages, which state its size and address; the reads are stored
 #    as they are, being gzipped already.
 BUNDLE_NAME=$(globus_bundle_name "$RUN_ID" "$TASK_NAME")
-BUNDLE_PARTS=("$RESULTS_DIR|-9")
+BUNDLE_PARTS=()
 
-[[ -d "$FASTQ_DIR" ]] && BUNDLE_PARTS=("$FASTQ_DIR|-0" "${BUNDLE_PARTS[@]}")
+for READ_DIR in ${READ_DIRS[@]+"${READ_DIRS[@]}"}; do
+    BUNDLE_PARTS+=("$READ_DIR|-0")
+done
+
+BUNDLE_PARTS+=("$RESULTS_DIR|-9")
 
 log "Packaging $BUNDLE_NAME for task $TASK_ID..."
 
@@ -316,9 +349,9 @@ if ! RENDER_OUTPUT=$(render_dashboard "$RUN_ID" "$TASK_NAME" "$SUBTITLE" \
     fail "The pages that present these results could not be built:"$'\n'"$RENDER_OUTPUT"
 fi
 
-# 7. A listing page in every folder, and one for the staged reads, once every
+# 7. A listing page in every folder, and one for each read set, once every
 #    file published beside them is in place
-if ! "$NEXTFLOW_DIR/scripts/index_directories.sh" "$RESULTS_DIR" "$FASTQ_DIR"; then
+if ! "$NEXTFLOW_DIR/scripts/index_directories.sh" "$RESULTS_DIR" ${READ_DIRS[@]+"${READ_DIRS[@]}"}; then
     warn "The results folders could not be indexed; their listings will be missing."
 fi
 

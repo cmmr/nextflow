@@ -1,6 +1,7 @@
 
-# Shotgun metagenomics with the bioBakery tools: KneadData trims reads and
-# depletes the host, MetaPhlAn profiles the taxonomy, and HUMAnN the functions.
+# Shotgun metagenomics with the bioBakery tools: bowtie2 depletes the host,
+# KneadData trims the reads and removes tandem repeats, MetaPhlAn profiles the
+# taxonomy, and HUMAnN the functions.
 # mOTUs and Nonpareil measure each sample's diversity for the Overview, and
 # Marker-MAGu profiles phages alongside bacteria and archaea. EsViritu, which
 # detects human, animal and plant viruses, is off.
@@ -51,7 +52,31 @@ else
     params_set kneaddata_db ""
 fi
 
+# bowtie2 end to end over every read, then in local mode, KneadData's own
+# setting, over the pairs left
+params_set host_prefilter_bowtie2_options "--fast"
+params_set host_bowtie2_options           "--very-sensitive-local"
+
 params_set kneaddata_sequencer_source "NexteraPE"
+
+# The read sets the download carries beside the results: any of "Raw", "Host
+# Depleted" and "Cleaned", or none. The workflow publishes the last two;
+# biobakery_upload.sh reads "Raw" itself. A run that depletes no host has no
+# host-depleted reads.
+params_set host_depleted_outdir ""
+params_set cleaned_outdir ""
+
+if form_answer_includes delivered_reads "Host Depleted"; then
+    if [[ -n "$BIOBAKERY_HOST_REFERENCE" ]]; then
+        params_set host_depleted_outdir "host-depleted-sequences"
+    else
+        state_append notes "No host was removed from these reads, so there are no host-depleted reads in the download."
+    fi
+fi
+
+if form_answer_includes delivered_reads "Cleaned"; then
+    params_set cleaned_outdir "cleaned-sequences"
+fi
 
 # The newest MetaPhlAn database HUMAnN 3.9 accepts profiles from
 params_set metaphlan_db "$NEXTFLOW_DB_DIR/metaphlan/mpa_vJun23_CHOCOPhlAnSGB_202403"
@@ -74,9 +99,10 @@ fi
 params_set markermagu_db "$NEXTFLOW_DB_DIR/markermagu/v1.1"
 params_set markermagu_detection "default"
 
-# Changing either would leave the workflow reading a samplesheet nothing wrote,
-# or publishing where biobakery_upload.sh does not look
-PARAMS_LOCKED=(input outdir)
+# Changing the first two would leave the workflow reading a samplesheet nothing
+# wrote, or publishing where biobakery_upload.sh does not look. The read sets
+# delivered are this request's answer, not those of a run it repeats.
+PARAMS_LOCKED=(input outdir host_depleted_outdir cleaned_outdir)
 
 PRE_PROCESS_CMDS=(
     "$NEXTFLOW_DIR/scripts/biobakery_samplesheet.sh"

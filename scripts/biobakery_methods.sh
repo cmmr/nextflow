@@ -16,11 +16,12 @@
 # Trimmomatic, Bowtie2, DIAMOND, minimap2, CoverM and the rest - by the image
 # that carries them.
 #
-# KneadData's steps are described as each sample's log recorded them, not as its
-# defaults read: the Trimmomatic steps it ran, with the minimum length it set
-# from each sample's read length; the Tandem Repeats Finder parameters, and the
-# Bowtie2 options and pair handling. A run whose logs are gone is described by
-# KneadData 0.12.4's defaults instead, without the read length.
+# Host depletion is described by the Bowtie2 options the manifest records for
+# its two passes. KneadData's steps are described as each sample's log recorded
+# them, not as its defaults read: the Trimmomatic steps it ran, with the minimum
+# length it set from each sample's read length, and the Tandem Repeats Finder
+# parameters. A run whose logs are gone is described by KneadData 0.12.4's
+# defaults instead, without the read length.
 #
 # Databases are the paths the run's manifest records, described by their entry in
 # config/databases.json: a release, the genomes a host reference was built from,
@@ -244,7 +245,6 @@ kneaddata_setting() {
 declare -A KNEADDATA_DEFAULTS=(
     [bypass_trim]=False [bypass_trf]=False [trimmomatic_options]=None
     [match]=2 [mismatch]=7 [delta]=7 [pm]=80 [pi]=10 [minscore]=50 [maxperiod]=500
-    [bowtie2_options]="--very-sensitive-local --phred33" [decontaminate_pairs]=strict
 )
 
 # Each sample's Trimmomatic steps as KneadData ran them, one distinct set per
@@ -352,6 +352,8 @@ trimmomatic_clause() {
 # 1. What the run was given
 NEXTFLOW_VERSION=$(state_get manifest.software.nextflow)
 HOST_DB=$(state_get manifest.params.kneaddata_db)
+HOST_PREFILTER_OPTIONS=$(state_get manifest.params.host_prefilter_bowtie2_options)
+HOST_OPTIONS=$(state_get manifest.params.host_bowtie2_options)
 SEQUENCER_SOURCE=$(state_get manifest.params.kneaddata_sequencer_source)
 KNEADDATA_ARGS=$(state_get manifest.params.kneaddata_args)
 METAPHLAN_DB=$(state_get manifest.params.metaphlan_db)
@@ -373,6 +375,8 @@ LAYOUT=$(state_get statistics.layout)
 SAMPLESHEET=$(state_get manifest.params.input)
 
 : "${SEQUENCER_SOURCE:=NexteraPE}"
+: "${HOST_PREFILTER_OPTIONS:=--fast}"
+: "${HOST_OPTIONS:=--very-sensitive-local}"
 
 KNEADDATA_LOGS=()
 
@@ -416,15 +420,40 @@ TEXT="Sequencing reads were processed with a $(named Nextflow "$NEXTFLOW_VERSION
 cite daveigaleprevost2017
 TEXT+=" that ran each tool from a BioContainers image$CITATION"
 (( ${#IMAGES[@]} == 0 )) || TEXT+=" ($(and_list "${IMAGES[@]}"))"
+
+HOST_IMAGE=$(container_image bowtie2_htslib_samtools_pigz)
+
+if [[ -n "$HOST_DB" && -n "$HOST_IMAGE" ]]; then
+    TEXT+=", and Bowtie2 for host depletion from the Seqera Containers image $HOST_IMAGE"
+fi
+
 TEXT+="."
 
-# 3. KneadData, as its logs recorded it, and the quality reports
+# 3. Host depletion, KneadData as its logs recorded it, and the quality reports
 if (( ${#KNEADDATA_LOGS[@]} == 0 )); then
     warn "No KneadData logs in $RESULTS_DIR/kneaddata/logs; the methods describe KneadData's defaults."
 fi
 
+if [[ -n "$HOST_DB" ]]; then
+    host_phrase "$HOST_DB"
+    TEXT+=" Reads aligning to $PHRASE"
+    [[ -n "$ENTRY" ]] && TEXT+=" from NCBI RefSeq"
+    TEXT+="$CITATION"
+
+    cite langmead2012
+    TEXT+=" were removed from each sequencing run with Bowtie2$CITATION"
+    TEXT+=", each read aligned on its own"
+
+    if [[ "$LAYOUT" == *paired* ]]; then
+        TEXT+=" and a pair removed when either mate aligned"
+    fi
+
+    TEXT+=": first end to end ($HOST_PREFILTER_OPTIONS) over every read,"
+    TEXT+=" then with $HOST_OPTIONS over the reads the first pass left."
+fi
+
 if (( ${#SAMPLE_RUNS[@]} > 0 )); then
-    TEXT+=" Where a sample was sequenced in more than one run, the reads of its runs were concatenated."
+    TEXT+=" Where a sample was sequenced in more than one run, the reads of its runs were then concatenated."
 fi
 
 cite beghini2021
@@ -464,28 +493,7 @@ if [[ "$LAYOUT" == *paired* && -n "$TRIMMED$REPEATS" ]]; then
     TEXT+=" was kept as an unpaired read."
 fi
 
-if [[ -n "$HOST_DB" ]]; then
-    PAIRING=$(kneaddata_setting decontaminate_pairs)
-    [[ -z "${KNEADDATA_LOGS[*]}" && "$LAYOUT" == single-end ]] && PAIRING=unpaired
-
-    BOWTIE2_OPTIONS=$(kneaddata_setting bowtie2_options | head -n 1 | sed -E 's/ ?--phred(33|64)//g')
-
-    host_phrase "$HOST_DB"
-    TEXT+=" Reads aligning to $PHRASE"
-    [[ -n "$ENTRY" ]] && TEXT+=" from NCBI RefSeq"
-    TEXT+="$CITATION"
-
-    cite langmead2012
-    TEXT+=" with Bowtie2$CITATION${BOWTIE2_OPTIONS:+ ($BOWTIE2_OPTIONS)} were then removed"
-
-    if grep -qx strict <<< "$PAIRING"; then
-        TEXT+=" together with their mates."
-    elif grep -qx lenient <<< "$PAIRING"; then
-        TEXT+=", a pair only when both mates aligned."
-    else
-        TEXT+="."
-    fi
-else
+if [[ -z "$HOST_DB" ]]; then
     TEXT+=" Host sequences were not removed."
 fi
 

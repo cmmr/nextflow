@@ -44,10 +44,13 @@ Every question is listed in `WRIKE_FORM_ANSWERS` in
 | `picrust` | Ampliseq --picrust | No, Yes |
 | `exclude_taxa` | Ampliseq --exclude_taxa | mitochondria, chloroplast, Francisella |
 | `hostremoval_reference` | Host Removal | None, PhiX, Human + PhiX, Mouse + PhiX |
+| `delivered_reads` | Delivered Reads | any of Raw, Host Depleted, Cleaned, or none |
 
-**Every key but the first three names the nextflow parameter its field is titled
-after**, so a pipeline applies one by asking for its own parameter name — see
-[the form's answers](../pipelines/index.md#the-forms-answers).
+**Every key but the first three and the last names the nextflow parameter its
+field is titled after**, so a pipeline applies one by asking for its own
+parameter name — see [the form's answers](../pipelines/index.md#the-forms-answers).
+`delivered_reads` is biobakery's, and names the read sets its download carries
+— see [Delivered reads](../pipelines/biobakery.md#delivered-reads).
 
 **An optional question the requester leaves at its default is not on the task at
 all.** That is what the form's `Settings: Default` does, and it is why an absent

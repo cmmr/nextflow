@@ -1,9 +1,9 @@
 # biobakery
 
 Shotgun metagenomic profiling with the [bioBakery](https://github.com/biobakery)
-tools, run as a Nextflow workflow that lives in this repository:
-[KneadData](https://github.com/biobakery/kneaddata) cleans the reads and removes
-the host, [MetaPhlAn](https://github.com/biobakery/MetaPhlAn) says what was in
+tools, run as a Nextflow workflow that lives in this repository: Bowtie2
+removes the host, [KneadData](https://github.com/biobakery/kneaddata) cleans
+what is left, [MetaPhlAn](https://github.com/biobakery/MetaPhlAn) says what was in
 each sample, and [HUMAnN](https://github.com/biobakery/humann) says what those
 communities can do. [mOTUs](https://github.com/motu-tool/mOTUs) and
 [Nonpareil](https://github.com/lmrodriguezr/nonpareil) beside them say how
@@ -13,8 +13,9 @@ viruses among the reads, and
 [Marker-MAGu](https://github.com/cmmr/Marker-MAGu) profiles gut phages beside
 the bacteria and archaea in one marker gene pass.
 
-KneadData and MetaPhlAn run on every sample; HUMAnN, mOTUs, Nonpareil, EsViritu
-and Marker-MAGu are modules a run can switch off. The workflow is built so that
+Host depletion runs on every sample a host is chosen for, KneadData and MetaPhlAn
+on every sample; HUMAnN, mOTUs, Nonpareil, EsViritu and Marker-MAGu are modules
+a run can switch off. The workflow is built so that
 more optional modules can be added beside it — see
 [Adding a module](#adding-a-module) — and so that the whole of it can later be
 packaged into one Nix image with the databases mounted from outside; see
@@ -27,6 +28,7 @@ For how a request becomes a run at all, see the [Overview](../index.md).
 
 | Component | Version | Where |
 | --- | --- | --- |
+| Bowtie2, for host depletion | **2.5.4** | `community.wave.seqera.io/library/bowtie2_htslib_samtools_pigz:edeb13799090a2a6`, in `modules/host_depletion.nf` |
 | KneadData | **0.12.4** | `quay.io/biocontainers/kneaddata:0.12.4--pyhdfd78af_0`, in `modules/kneaddata.nf` |
 | MetaPhlAn | **4.1.1** | `quay.io/biocontainers/metaphlan:4.1.1--pyhdfd78af_0`, in `modules/metaphlan.nf` |
 | HUMAnN | **3.9** | `quay.io/biocontainers/humann:3.9--py312hdfd78af_0`, in `modules/humann.nf` |
@@ -43,7 +45,12 @@ For how a request becomes a run at all, see the [Overview](../index.md).
 | Marker-MAGu database | **v1.1** ([doi:10.5281/zenodo.8342581](https://doi.org/10.5281/zenodo.8342581)) | `db/markermagu/v1.1`, biobakery's alone |
 | Host references | PhiX, T2T-CHM13v2.0 + PhiX, GRCm39 + PhiX | `db/hostremoval/…`, shared with taxprofiler |
 
-**Every image is the BioContainers build of the bioconda package.** The
+**Host depletion runs in the Seqera Containers image the host indexes were built
+with.** It carries the same Bowtie2, 2.5.4, as KneadData's image, so the host
+alignments are the ones KneadData would make, and with it pigz and GNU
+coreutils, which the reads are streamed through.
+
+**Every other image is the BioContainers build of the bioconda package.** The
 `biobakery/*` images on Docker Hub are the tools' own, but they have not kept
 up: the newest KneadData there is 0.10.0 (2021) and the newest MetaPhlAn 4.0.2
 (2022). The bioconda recipes track each release, and BioContainers publishes an
@@ -98,8 +105,10 @@ EsViritu on, for EsViritu's.
 
 One pipeline, `BIOBAKERY`, currently `BIOBAKERY_01`. Like taxprofiler it reads the
 form's "Host Removal" answer — `None`, `PhiX`,
-`Human + PhiX` or `Mouse + PhiX`, and `PhiX` when unanswered — and hands KneadData
-the matching bowtie2 index. `None` still trims; it removes nothing.
+`Human + PhiX` or `Mouse + PhiX`, and `PhiX` when unanswered — and hands
+[host depletion](#host-depletion) the matching bowtie2 index. `None` skips host
+depletion; KneadData still trims. Its "Delivered Reads" answer names the read
+sets the download carries — see [Delivered reads](#delivered-reads).
 
 [`BIOBAKERY_01.sh`](../../pipelines/BIOBAKERY_01.sh) runs
 `workflows/biobakery` with HUMAnN, mOTUs, Nonpareil and Marker-MAGu on, and
@@ -132,7 +141,8 @@ workflows/biobakery/
                          kneaddata_identifiers.py, metaphlan_sgb_biom.py,
                          markermagu_tables.py
 modules/
-  kneaddata.nf         KNEADDATA, KNEADDATA_COUNTS
+  host_depletion.nf    HOST_DEPLETION
+  kneaddata.nf         KNEADDATA, KNEADDATA_FASTQC, KNEADDATA_COUNTS
   metaphlan.nf         METAPHLAN, METAPHLAN_MERGE
   humann.nf            HUMANN_PREPARE_PROFILE, HUMANN_PROFILE, HUMANN_TABLES
   motus.nf             MOTUS, MOTUS_MERGE
@@ -181,8 +191,8 @@ A pipeline file sets each with `params_set`, like any other parameter, so it lan
 in the params file and in the manifest a rerun is rebuilt from. A form question
 could switch it just as `hostremoval_reference` chooses a reference.
 
-`metaphlan_db` is always required, and an empty `kneaddata_db` trims without
-depleting a host. A database is checked only when the module that reads it is
+`metaphlan_db` is always required, and an empty `kneaddata_db` skips host
+depletion. A database is checked only when the module that reads it is
 enabled, and an unset or missing one stops the run before any task starts.
 
 ### What the modules share
@@ -249,9 +259,10 @@ within a fraction of a percent. A `.bz2` file it cannot decompress is taken at
 | Where | What | Estimate |
 | --- | --- | --- |
 | the run directory | reads that are not already gzipped, recompressed into `raw-sequences/` | a third of their uncompressed size |
+| | the reads host depletion keeps | the size of the gzipped reads |
 | | KneadData's working space, for every sample at once | 5.5 times each sample's uncompressed reads |
 | | the cleaned reads KneadData leaves for the steps after it | the size of the gzipped reads |
-| `GLOBUS_DIR` | the download, which holds every staged read again | the size of the gzipped reads |
+| `GLOBUS_DIR` | the download, which holds each read set the request's "Delivered Reads" answer names | the size of the gzipped reads, once for each |
 
 HUMAnN needs less room per read than KneadData, on reads KneadData has already
 cleaned. A sample's HUMAnN also never runs alongside its own KneadData, so the
@@ -263,21 +274,79 @@ free. The requester is told that nothing has been staged, and that the run can
 be resubmitted once space is freed. Every run logs the estimate in its job
 output, so a run that passes the check shows its margin as well.
 
-The check assumes the worst case: every sample's KneadData at its peak at once.
+The check assumes the worst case: host depletion removing nothing, and every
+sample's KneadData at its peak at once.
 It sees only the space free when the run starts, not what other runs starting
 beside it will take. A workflow run by hand skips it, since it is part of the
 pre-processing `wrike_job.sh` runs.
 
 
+## Host depletion
+
+One task per sequencing run, ahead of KneadData, when a host is chosen.
+[`modules/host_depletion.nf`](../../modules/host_depletion.nf) aligns every read
+against the host index with Bowtie2 2.5.4, the version in KneadData's own image.
+Each read is aligned on its own, as KneadData's `--decontaminate-pairs strict`
+aligns them, and a pair is removed when either mate aligns. There are two
+passes:
+
+| Pass | Options | Over |
+| --- | --- | --- |
+| 1 | `host_prefilter_bowtie2_options`, `--fast` | every read, end to end |
+| 2 | `host_bowtie2_options`, `--very-sensitive-local` | the pairs pass 1 left |
+
+**The second pass decides what is kept.** `--very-sensitive-local` is what
+KneadData itself runs. A read that aligns end to end also has a local alignment
+at least as good, so in practice the first pass removes only reads the second
+would remove too. What it saves is the second pass's time. A deep sample that
+was 99.9% human spent 13 of KneadData's 17.7 hours in its own host step; with
+the first pass in front, the local alignment sees only what the fast one could
+not place. On a synthetic run of host, non-host, half-host and one-mate-host
+pairs, the two passes kept exactly the pairs one `--very-sensitive-local` pass
+keeps.
+
+**Host depletion comes before trimming**, and so sees each read as it was
+sequenced. Local mode clips adapter and low-quality ends rather than failing
+on them. It also means every read is checked against the host, including the
+ones trimming and Tandem Repeats Finder would discard: a pair with one host
+mate is removed whole, where before KneadData kept the other mate as an orphan
+if trimming or TRF had already dropped the host one.
+
+**The reads are streamed, not unpacked.** Each pass reads the run's gzipped
+files through `paste`, a pair's mates one after the other, into
+`bowtie2 -U - --reorder`, and keeps one flag per pair from the SAM flag column:
+a pass writes a byte and a newline per pair. A third read of the gzipped files
+writes out the pairs both passes left, through pigz.
+
+**The reads kept are the input records unchanged** — header, sequence, `+` line
+and qualities, untrimmed and in input order — named `<sample>_<run>_{1,2}.fq.gz`
+as `raw-sequences/` names them. They are what KneadData reads, and what
+`host-depleted-sequences/` holds when they are delivered.
+
+**Mates out of step stop the task.** A run whose two files hold different numbers
+of reads, or a record that does not start with `@`, fails with the read it
+happened at, rather than pairing the wrong mates.
+
+**Each run's counts go to its sample's KneadData log.**
+`<sample>_<run>.host.tsv` names the index and counts the pairs given, those each
+pass removed, and those kept. `KNEADDATA` sums them over the sample's runs.
+
+
 ## KneadData
 
-One task per sample. A sample's runs are joined in samplesheet order into one
-file per mate, then trimmed with Trimmomatic, cleared of tandem repeats with TRF,
-and aligned against the host with bowtie2. FastQC runs before and after. The
-defaults are KneadData's own: `--sequencer-source NexteraPE`, Trimmomatic's
-`SLIDINGWINDOW:4:20` and a minimum length of half the read length, bowtie2 in
-`--very-sensitive-local`, and `--decontaminate-pairs strict`.
-`kneaddata_args` adds to them.
+One task per sample. A sample's runs, host-depleted or, with no host, as
+sequenced, are joined in samplesheet order into one file per mate, then trimmed
+with Trimmomatic and cleared of tandem repeats with TRF. KneadData is given no
+host database, since host depletion has already run. The defaults are its own:
+`--sequencer-source NexteraPE`, and Trimmomatic's `SLIDINGWINDOW:4:20` and a
+minimum length of half the read length. `kneaddata_args` adds to them.
+
+**FastQC runs outside KneadData.** `KNEADDATA_FASTQC` reports on each sample's
+reads as they were sequenced, its runs joined into `<sample>_R1` and
+`<sample>_R2` as KneadData named its input, alongside host depletion rather than
+after it. `KNEADDATA` runs FastQC over its final files once it has renamed them,
+so the reports keep the names they had. A raw report that fails is retried
+twice and then left out.
 
 **KneadData is pointed at Trimmomatic's jar, not its command.** It passes
 `--max-memory` to Java only when it runs the jar itself. Left to find
@@ -296,27 +365,29 @@ makes the same rewrite on the way in. It keeps the first word, adds `#0/1` or
 KneadData then finds nothing to change. The reads come out byte for byte as
 KneadData would name them, one copy smaller on disk.
 
-**The cleaned reads are the files KneadData's log lists as final.** Which files
-those are depends on the run — `<sample>_paired_1.fastq` and its orphans when a
-host was depleted, `<sample>.repeats.removed.1.fastq` when nothing was, and
-`<sample>.fastq` for single-end reads — and KneadData leaves its contaminant and
-trimmed files beside them whatever `--remove-intermediate-output` says. They are
-gzipped for the modules after it and not published; `save_clean_reads` publishes
-them under `kneaddata/clean/`.
+**The cleaned reads are the files KneadData's log lists as final**, renamed by
+type to what KneadData calls them after a host step: `<sample>_paired_{1,2}.fastq`,
+`<sample>_unmatched_{1,2}.fastq` for the orphans, and `<sample>.fastq` for
+single-end reads, whatever KneadData named them — `<sample>.repeats.removed.1.fastq`
+and the like. KneadData leaves its trimmed files beside them whatever
+`--remove-intermediate-output` says. They are gzipped for the modules after it,
+and published to `cleaned-sequences/` when they are delivered.
 
 **Where reads are lost is `kneaddata/read-counts.tsv`**: one row per sample, one
-column per step and file — `raw pair1`, `trimmed pair1`,
-`decontaminated host pair1`, `final orphan1`, and so on — with `NA` where a
-sample has no such count. It is built from the `READ COUNT` lines of every log
+column per step and file, ordered `raw`, `decontaminated`, `trimmed`, `final` —
+`raw pair1`, `decontaminated host pair1`, `trimmed orphan1`, `final pair2` and so
+on — with `NA` where a sample has no such count. It is built from the `READ COUNT` lines of every log
 rather than by `kneaddata_read_count_table`, which names each sample by its log's
 name up to the first dot and so would merge `P3.stool.T1` and `P3.stool.T2`.
 
-**KneadData logs no count after Tandem Repeats Finder.** Its `decontaminated` and
-`final` counts come from host depletion, so they take in what TRF removed as
-well, and a run with no host logs nothing after `trimmed`. For that run
-`KNEADDATA` counts the final files itself and appends them to the log as
-`final` lines in KneadData's own format, which is what keeps the retained reads
-from reading as the trimmed ones.
+**The counts before KneadData come from host depletion.** KneadData reads the
+host-depleted reads, so what it logs as `raw` is what host depletion kept.
+`KNEADDATA` renames those lines `decontaminated <index>`, in KneadData's own
+wording, and adds `raw` lines with the runs' own counts, summed, and a line
+saying how many pairs each pass removed. KneadData logs no count after Tandem
+Repeats Finder, so `KNEADDATA` counts the final files itself and appends them
+as `final` lines in KneadData's format. A run with no host has `raw`, `trimmed`
+and `final` columns and no `decontaminated` ones.
 
 ### Samples left with no reads
 
@@ -325,10 +396,11 @@ with an error on an empty input and on a sample Trimmomatic leaves empty, and
 mOTUs and Marker-MAGu refuse a sample with no reads. `KNEADDATA` now catches all
 three ways a sample can end up empty:
 
-- an empty input, before KneadData starts
+- an empty input, before KneadData starts, which says whether host depletion
+  left it empty or it was empty to begin with
 - KneadData's own `Trimmomatic created empty output files` error
-- final files that are all empty, which is what host depletion leaves when it
-  removes every read, since KneadData does not fail on that
+- final files that are all empty, which is what Tandem Repeats Finder leaves
+  when it removes every read, since KneadData does not fail on that
 
 Each exits 10, and [`conf/base.config`](../../workflows/biobakery/conf/base.config)
 ignores exit 10 instead of retrying, since more memory cannot help. The sample
@@ -656,6 +728,60 @@ is the counterpart of `metaphlan_sgb_biom.py`.
 finish and stops, as mOTUs and EsViritu do.
 
 
+## Delivered reads
+
+The request form's "Delivered Reads" question names the read sets the download
+carries beside `results/`: any of `Raw`, `Host Depleted` and `Cleaned`, or none.
+
+| Answer | Folder | Holds | Files |
+| --- | --- | --- | --- |
+| `Raw` | `raw-sequences/` | the reads as `biobakery_samplesheet.sh` staged them | `<sample>_<run>_{1,2}.fq.gz` |
+| `Host Depleted` | `host-depleted-sequences/` | the same records with every host pair removed, untrimmed | `<sample>_<run>_{1,2}.fq.gz`, named as in `raw-sequences/` |
+| `Cleaned` | `cleaned-sequences/` | what every profile was made from: host-depleted, trimmed and cleared of repeats, a sample's runs joined | `<sample>_1.fq.gz`, `<sample>_2.fq.gz` and `<sample>_orphans.fq.gz`; `<sample>_1.fq.gz` alone for single-end reads |
+
+**The answer decides what is packaged, not what runs.** Host depletion and
+KneadData make both sets either way. `BIOBAKERY_01.sh` sets
+`host_depleted_outdir` and `cleaned_outdir` to the folder names when they are
+asked for, and the workflow publishes each set there as symlinks into its work
+directory, so publishing copies nothing and `ls -l` shows which task made each
+file. `cleaned-sequences/` links to a `deliver/` folder in KneadData's work
+directory, whose pairs link on to its `clean/` files; only the joined orphans
+are a file of their own. `biobakery_upload.sh` stores each of those folders in
+the archive, and `raw-sequences/` when `Raw` was asked for — zip stores what a
+link points at, as it does for the reads `raw-sequences/` links to. None of
+them goes to S3.
+
+**The links need the work directory until the upload.** Nothing removes
+`work/` before then: `wrike_followup.sh` removes the whole run directory only
+once a run has completed, after the archive is built. A work directory removed
+by hand before the upload leaves the folders full of broken links. zip would
+leave those files out with no more than a warning, so `biobakery_upload.sh`
+checks every read folder for a link whose file is gone before it builds
+anything, and stops the upload if it finds one.
+
+**An unanswered question delivers no reads**: the download holds the results
+alone. Every run before the question existed carried `raw-sequences/`, so the
+form should make the question required if a blank answer is never meant.
+
+**A run with no host has no host-depleted reads.** `Host Depleted` with Host
+Removal `None` adds a note to the reply saying so, and nothing to the download.
+
+**The answer is the request's own, even on a rerun.** Both parameters are in
+`PARAMS_LOCKED`, so a rerun delivers what its own request asked for rather than
+what the run it repeats delivered.
+
+**The cleaned orphans are one file.** KneadData keeps each mate's orphans
+apart; `cleaned-sequences/` joins them into `<sample>_orphans.fq.gz`, two gzip
+members end to end, so that `*_1.fq.gz` collects first mates and nothing else.
+Each read's name still ends in `/1` or `/2`.
+
+**Each folder is a greyed row of Deliverables**, under Sequences, leading to a
+listing of its files, and is listed only when the archive carries it: a `HELD:`
+row is dropped unless `dashboard_bundle` was given its folder.
+`index_directories.sh` writes a listing for each folder it is given after the
+results folder.
+
+
 ## The dashboard
 
 [`biobakery_upload.sh`](../../scripts/biobakery_upload.sh) takes the same steps
@@ -677,13 +803,12 @@ plus a fourth, Methods. The navigation bar reads:
   processed, so a column falls short of the top by that sample's unclassified
   share, as on a taxprofiler run. The diversity chart beside it is Nonpareil's
   and mOTUs'; see [Diversity](#diversity).
-- **Read totals** in the sidebar are KneadData's: total reads, and behind
-  "details" what was left after trimming and after host depletion, each linking
+- **Read totals** in the sidebar are KneadData's table: total reads, and behind
+  "details" what was left after host depletion and after trimming, each linking
   to the KneadData table in the QC Report; then the reads retained, and
   the smallest, median and largest sample. Each is the reads remaining after
   that step. Tandem Repeats Finder has no bar of its own, since KneadData logs no
-  count for it: what it removed shows in "After host depletion", or in
-  "Retained reads" for a run with no host. A run that left any sample out
+  count for it: what it removed shows in "Retained reads". A run that left any sample out
   shows a SAMPLES block between those and the per-sample counts — see
   [Samples left with no reads](#samples-left-with-no-reads).
 - **The Feature Table card** has a MetaPhlAn tab (the SGB read counts as
@@ -710,8 +835,8 @@ plus a fourth, Methods. The navigation bar reads:
   counting the reads on viral markers alone.
   Neither tool has a link of its own in the navigation bar; their files are
   sections of Deliverables.
-- **The QC Report is MultiQC**, over KneadData's FastQC reports and its
-  read count table as a section of its own, and mOTUs' logs and Nonpareil's
+- **The QC Report is MultiQC**, over FastQC's reports on the raw and the
+  cleaned reads and KneadData's read count table as a section of its own, and mOTUs' logs and Nonpareil's
   curves on a run with either. It is the only report the run adds;
   there is no Krona chart. `MULTIQC` ignores its own failure, so a run is never
   lost to it.
@@ -734,7 +859,8 @@ how those reads were produced — with every reference it cites.
 `methods_data.json` before the dashboard is rendered, from what this run was
 given rather than from what the pipeline usually does:
 
-- **Versions** are the BioContainers images the modules pin, named in full.
+- **Versions** are the BioContainers images the modules pin, named in full,
+  and on a run with a host, the Seqera Containers image host depletion ran in.
   KneadData, MetaPhlAn, HUMAnN and MultiQC carry the version in their tag;
   Trimmomatic, Tandem Repeats Finder, Bowtie2, FastQC and DIAMOND are named and
   cited without one, since the image that carried each fixes it. Nextflow's
@@ -745,6 +871,11 @@ given rather than from what the pipeline usually does:
   accessions of the host reference — or a sentence saying no host was removed.
   A dataset DOI in an entry is written beside its release. None of this
   pipeline's databases has one; their papers are cited instead.
+- **Host depletion** comes first, from the manifest's `host_prefilter_bowtie2_options`
+  and `host_bowtie2_options`: reads aligning to the host genomes were removed
+  from each sequencing run with Bowtie2, each read aligned on its own and a
+  pair removed when either mate aligned, end to end (`--fast`) over every read
+  and then with `--very-sensitive-local` over the reads left.
 - **KneadData's steps** are read from each sample's log in `kneaddata/logs/`,
   which is why the script runs before `prune.conf` deletes them. KneadData logs
   every argument it ran with and the Trimmomatic command itself, so the text
@@ -759,14 +890,12 @@ given rather than from what the pipeline usually does:
     TRF reports *any* repeat in it scoring 50 or more — not only reads made up
     mostly of repeats. Each mate is filtered on its own, so a read whose mate
     goes is kept unpaired, as it is after Trimmomatic.
-  - **Bowtie2** `--very-sensitive-local` against the host, every read aligned
-    as a single-end read. In `strict` pair mode, the default, a read that aligns
-    takes its mate with it.
 
   A run whose logs are gone is described by those defaults, without the read
   length.
 - **Samples sequenced in more than one run** — a sample name repeated in the
-  samplesheet — get a sentence saying their runs were concatenated.
+  samplesheet — get a sentence saying their runs were concatenated, after host
+  depletion and before KneadData.
 - **Options** the run added through `kneaddata_args` or `metaphlan_args` are
   written in, and HUMAnN's sentences are left out of a run with `run_humann`
   off.
@@ -845,7 +974,8 @@ plus a run directory mounted where `wrike_job.sh` is started.
 
 The workflow runs anywhere Docker does. The `local` profile caps each task at
 the machine's cores and 16 GB; pass a config lowering `process.resourceLimits`
-further on a smaller machine. `-stub` replaces KneadData, MetaPhlAn, HUMAnN's
+further on a smaller machine. `-stub` replaces host depletion, KneadData and its
+FastQC, MetaPhlAn, HUMAnN's
 two heavy steps, mOTUs, Nonpareil, EsViritu, Marker-MAGu and MultiQC with
 placeholders and runs
 everything between them for real, which checks how the modules are wired
@@ -869,8 +999,9 @@ The samplesheet is the CSV `biobakery_samplesheet.sh` writes:
 [`conf/base.config`](../../workflows/biobakery/conf/base.config) sets a
 reservation and a retry policy per process;
 [`config/biobakery/slurm.config`](../../config/biobakery/slurm.config) resizes the
-ones that depend on the node — KneadData at 16 cpus, 32 GB and 24 hours on every
-attempt, MetaPhlAn at 16
+ones that depend on the node — host depletion at 16 cpus, 16 GB and 24 hours on
+every attempt, KneadData at 16 cpus, 32 GB and 24 hours on every attempt,
+MetaPhlAn at 16
 cpus and 48 GB, mOTUs at 16 cpus and 32 GB and Nonpareil at 8 cpus and 64 GB, the
 same as taxprofiler's `METAPHLAN_METAPHLAN`, `MOTUS_PROFILE` and
 `NONPAREIL_NONPAREIL`, EsViritu at 16 cpus and 16 GB, and Marker-MAGu at 16 cpus
@@ -880,9 +1011,10 @@ handed its memory as `-R` and fills it with its k-mer table, and Marker-MAGu is
 the largest reservation here because minimap2 holds the whole 10.5 GB marker
 catalogue, split into chunks, while it aligns.
 
-- **KneadData, MetaPhlAn, mOTUs, EsViritu and Marker-MAGu retry twice**, with
-  more memory and time each time, then let running tasks finish and stop. All
-  five read the requester's reads or a database over the shared filesystem.
+- **Host depletion, KneadData, MetaPhlAn, mOTUs, EsViritu and Marker-MAGu retry
+  twice**, with more memory and time each time, then let running tasks finish
+  and stop. All six read the requester's reads or a database over the shared
+  filesystem. The raw reads' FastQC is retried twice and then left out.
   The exception is a sample KneadData leaves with no reads, which is dropped
   without a retry — see [Samples left with no reads](#samples-left-with-no-reads).
   `MARKERMAGU_TABLES` is a small task beside them: two cpus and 8 GB, over
@@ -895,24 +1027,28 @@ catalogue, split into chunks, while it aligns.
 
 **KneadData and HUMAnN run in their work directories on the shared filesystem**,
 not in the node's `/tmp` like everything else. Both work on uncompressed reads
-and keep each step's output until they finish:
+and keep each step's output until they finish. Host depletion streams its input,
+and on disk holds only the reads it keeps:
 
 | | On disk at once | Measured peak |
 | --- | --- | --- |
-| KneadData | the input, the trimmed reads, the reads TRF leaves, bowtie2's alignments and its clean reads | 4.9 times the sample's uncompressed size, about twenty times its gzipped size |
+| host depletion | the reads it keeps, gzipped, and a byte or two per pair of flags | at most the run's gzipped size |
+| KneadData | the input, the trimmed reads, the reads TRF leaves and its clean reads, all after host depletion | 4.9 times the sample's uncompressed size, about twenty times its gzipped size, when it removed the host itself; less without bowtie2's alignments, not yet measured |
 | HUMAnN | its gzipped input, the reads decompressed, bowtie2's alignments of all of them, the reads left for DIAMOND, and its own small pangenome index | under 4 times the cleaned reads' uncompressed size, plus the index |
 
 A node's `/tmp` is its root filesystem, with about 410 GB free. That fits
 KneadData on a sample of about 20 GB gzipped, or half that when a second
 KneadData task shares the node, as two can at 16 cpus each. Deep samples run
-50–90 GB gzipped and need 1–2 TB. A sample too big for `/tmp` fails with
+50–90 GB gzipped and need 1–2 TB, counting what host depletion leaves, so a
+sample that is mostly host leaves KneadData little to read. A sample too big for `/tmp` fails with
 `No space left on device` on every attempt, since retries add memory and time
 but not disk. `KNEADDATA` removes its uncompressed reads once it has gzipped the
 final ones, and HUMAnN its own with `--remove-temp-output`. The other modules read
 the cleaned reads gzipped, and copy them at most.
 
-On Slurm every KneadData attempt has 24 hours, the most `resourceLimits` allows,
-since a deep sample can take it past the 12 hours a first attempt gets elsewhere.
+On Slurm every host depletion and KneadData attempt has 24 hours, the most
+`resourceLimits` allows, since a deep sample can take either past the 12 hours a
+first attempt gets elsewhere.
 
 `wrike_job.sh`'s 48-hour limit covers the whole workflow, HUMAnN included.
 
@@ -926,3 +1062,6 @@ matches:
    to the "Nextflow Pipeline" field.
 2. Show the "Host Removal" follow-up question for it as
    well. Unanswered, the pipeline depletes PhiX alone.
+3. Show the "Delivered Reads" multiple-choice question for it, with the options
+   `Raw`, `Host Depleted` and `Cleaned`. Unanswered, the download holds the
+   results alone — see [Delivered reads](#delivered-reads).

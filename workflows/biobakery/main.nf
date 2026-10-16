@@ -1,8 +1,10 @@
-// bioBakery shotgun metagenomics: KneadData, then MetaPhlAn, then HUMAnN, with
-// mOTUs and Nonpareil beside them for diversity, EsViritu for viruses and
-// Marker-MAGu for phages.
+// bioBakery shotgun metagenomics: host depletion, KneadData, then MetaPhlAn,
+// then HUMAnN, with mOTUs and Nonpareil beside them for diversity, EsViritu for
+// viruses and Marker-MAGu for phages.
 //
-// KneadData and MetaPhlAn run on every sample. HUMAnN, mOTUs, Nonpareil,
+// Host depletion runs on each sequencing run when kneaddata_db names a host
+// index, and KneadData on each sample's runs together. KneadData and MetaPhlAn
+// run on every sample. HUMAnN, mOTUs, Nonpareil,
 // EsViritu, Marker-MAGu and any add-on module run behind a run_<tool> parameter
 // of their own. Modules are in modules/ and
 // read two channels: ch_reads, KneadData's cleaned reads as [meta, reads], and
@@ -14,7 +16,8 @@
 
 nextflow.enable.dsl = 2
 
-include { KNEADDATA; KNEADDATA_COUNTS }                           from '../../modules/kneaddata.nf'
+include { HOST_DEPLETION }                                        from '../../modules/host_depletion.nf'
+include { KNEADDATA; KNEADDATA_FASTQC; KNEADDATA_COUNTS }         from '../../modules/kneaddata.nf'
 include { METAPHLAN; METAPHLAN_MERGE }                            from '../../modules/metaphlan.nf'
 include { HUMANN_PREPARE_PROFILE; HUMANN_PROFILE; HUMANN_TABLES } from '../../modules/humann.nf'
 include { MOTUS; MOTUS_MERGE }                                    from '../../modules/motus.nf'
@@ -53,30 +56,69 @@ workflow {
         .unique()
         .subscribe { sample -> log.warn "Skipping ${sample}: its reads are not short reads" }
 
-    // [meta, [fastq_1 of each run], [fastq_2 of each run]], with the second list
-    // empty for single-end samples
+    // [meta, [run_accession of each run], [fastq_1 of each run], [fastq_2 of
+    // each run]], in samplesheet order, with the last list empty for
+    // single-end samples
     ch_raw = ch_rows
         .filter { row -> short_read(row) }
         .map { row ->
             [ row.sample,
+              row.run_accession ?: '',
               file(row.fastq_1, checkIfExists: true),
               row.fastq_2 ? file(row.fastq_2, checkIfExists: true) : null ]
         }
         .groupTuple()
-        .map { sample, fastq_1, fastq_2 ->
+        .map { sample, runs, fastq_1, fastq_2 ->
             def mates = fastq_2.findAll { it != null }
 
             if (mates && mates.size() != fastq_1.size()) {
                 error "Sample ${sample} mixes paired and single-end runs"
             }
 
-            [ [ id: sample, single_end: !mates ], fastq_1, mates ]
+            [ [ id: sample, single_end: !mates ], runs, fastq_1, mates ]
         }
 
-    KNEADDATA(
-        ch_raw,
-        params.kneaddata_db ? file(params.kneaddata_db, checkIfExists: true) : []
-    )
+    KNEADDATA_FASTQC(ch_raw.map { meta, runs, fastq_1, fastq_2 -> [ meta, fastq_1, fastq_2 ] })
+
+    // [meta, [fastq_1 of each run], [fastq_2 of each run], [host depletion
+    // summary of each run]], the reads host-depleted when a host is named
+    ch_kneaddata = ch_raw.map { meta, runs, fastq_1, fastq_2 -> [ meta, fastq_1, fastq_2, [] ] }
+
+    if (params.kneaddata_db) {
+        // One task per run, named for it as raw-sequences/ names it
+        ch_runs = ch_raw.flatMap { meta, runs, fastq_1, fastq_2 ->
+            fastq_1.withIndex().collect { fastq, i ->
+                [ meta + [ run: runs[i] ?: "run_${i + 1}".toString(), index: i, runs: fastq_1.size() ],
+                  fastq,
+                  meta.single_end ? [] : fastq_2[i] ]
+            }
+        }
+
+        HOST_DEPLETION(ch_runs, file(params.kneaddata_db, checkIfExists: true))
+
+        // Each sample's runs back together, in samplesheet order, as soon as
+        // the last of them is done
+        ch_kneaddata = HOST_DEPLETION.out.reads
+            .map { meta, reads, summary ->
+                [ groupKey(meta.id, meta.runs),
+                  meta.index,
+                  [ id: meta.id, single_end: meta.single_end ],
+                  [ reads ].flatten().sort { it.name },
+                  summary ]
+            }
+            .groupTuple()
+            .map { key, index, meta, reads, summary ->
+                def order = (0..<index.size()).toList().sort { index[it] }
+                def runs  = order.collect { reads[it] }
+
+                [ meta[0],
+                  runs.collect { it[0] },
+                  meta[0].single_end ? [] : runs.collect { it[1] },
+                  order.collect { summary[it] } ]
+            }
+    }
+
+    KNEADDATA(ch_kneaddata)
 
     KNEADDATA_COUNTS(KNEADDATA.out.log.collect())
 
@@ -90,7 +132,9 @@ workflow {
 
     ch_profiles = METAPHLAN.out.profile
 
-    ch_multiqc = KNEADDATA.out.fastqc.mix(KNEADDATA_COUNTS.out.multiqc)
+    ch_multiqc = KNEADDATA_FASTQC.out.zip
+        .mix(KNEADDATA.out.fastqc)
+        .mix(KNEADDATA_COUNTS.out.multiqc)
 
     if (params.run_motus) {
         def motus_db = database('motus_db')

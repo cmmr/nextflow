@@ -177,3 +177,12 @@ params_json() {
 form_answer() {
     state_get "$WRIKE_FORM_ANSWERS_KEY.$1"
 }
+
+# True when a form answer, which a multiple-choice question records as its
+# options comma-separated, includes the option given
+form_answer_includes() {
+    local answer
+
+    answer=$(form_answer "$1")
+    [[ ",$answer," == *",$2,"* ]]
+}

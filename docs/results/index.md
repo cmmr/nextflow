@@ -283,6 +283,12 @@ says which run it is. Open the `index.html` in `results/` and the same dashboard
 comes up — every link is relative, so the navigation bar, the Overview, the file
 index and the folder listings all resolve against the extracted folder.
 
+A biobakery run carries the read sets its request asked for in place of
+`raw-sequences/` alone: any of `raw-sequences/`, `host-depleted-sequences/` and
+`cleaned-sequences/`, or none — see
+[Delivered reads](../pipelines/biobakery.md#delivered-reads). Each is held the
+way `raw-sequences/` is below, and listed only when the archive carries it.
+
 **The reads are live in that copy and greyed in the published one.** The file
 index lists `raw-sequences/` either way, and behind it is a listing naming every
 file and its size. On the dashboard the bucket serves, both are greyed and carry

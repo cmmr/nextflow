@@ -25,19 +25,20 @@
 # rather than relying on that, so an unpacked copy of the download zip browses
 # the same way the published run does.
 #
-# The reads a run was given get a listing of their own, written into the results
-# as raw-sequences/directory_listing.html. Those files are not published beside
-# it: they are only in the zip this run publishes to Globus, which holds
-# raw-sequences/ beside results/. So the rows name every file and its size but
+# Each folder of reads the run delivers - the reads it was given, and any it
+# produced - gets a listing of its own, written into the results as, for
+# example, raw-sequences/directory_listing.html. Those files are not published
+# beside it: they are only in the zip this run publishes to Globus, which holds
+# each such folder beside results/. So the rows name every file and its size but
 # their links are held back - grey, and not clickable - and the note above them
 # says where the files actually are. The same page read out of an unpacked copy
 # of that zip has the files two levels above it, which is what its links point
 # at and what listing.html turns them back on for.
 #
-# Usage:     index_directories.sh [results_dir] [staged_reads_dir]
+# Usage:     index_directories.sh [results_dir] [reads_dir]...
 #            results_dir defaults to ./results, the outdir set in the ampliseq
-#            params file; the reads directory is left out by a pipeline that
-#            stages none
+#            params file; reads directories are left out by a pipeline that
+#            delivers none
 # Called by: ampliseq_upload.sh, taxprofiler_upload.sh and biobakery_upload.sh,
 #            once the dashboard's pages and the run's records are in the results
 #            folder, and before the upload
@@ -53,10 +54,9 @@ source /data/prod/nextflow/.env
 RESULTS_DIR="${1:-results}"
 RESULTS_DIR="${RESULTS_DIR%/}"
 
-# The reads the run was given, as they were staged. Listed inside the results
-# rather than copied into them - see the note at the top of this file.
-STAGED_DIR="${2:-}"
-STAGED_DIR="${STAGED_DIR%/}"
+# The folders of reads the run delivers, beside the results. Listed inside the
+# results rather than copied into them - see the note at the top of this file.
+STAGED_DIRS=("${@:2}")
 
 readonly LISTING_NAME="directory_listing.html"
 
@@ -224,22 +224,25 @@ while IFS= read -r DIR; do
     INDEXED=$((INDEXED + 1))
 done < <(find "$RESULTS_DIR" -mindepth 1 -type d)
 
-# The reads the run was given, listed inside the results under their own name.
-# Written after the walk above and before the results folder's own listing, so
-# the walk does not overwrite it and the listing above it names it.
+# Each folder of reads, listed inside the results under its own name. Written
+# after the walk above and before the results folder's own listing, so the walk
+# does not overwrite it and the listing above it names it.
 #
 # The files themselves are two levels above this page in the zip this run
 # publishes and nowhere at all beside the copy it publishes to the bucket, which
 # is what the rows point at and what listing.html holds back until the page is
 # read off disk.
-if [[ -n "$STAGED_DIR" && -d "$STAGED_DIR" ]]; then
-    STAGED_NAME="${STAGED_DIR##*/}"
+STAGED_NOTE='<p class="note">These sequencing files are not published beside'
+STAGED_NOTE+=" these results: take them with the <strong>Download everything</strong>"
+STAGED_NOTE+=" button on the Overview, and the names below become live links in the"
+STAGED_NOTE+=" copy that comes down with it.</p>"
 
-    STAGED_NOTE='<p class="note">These are the sequencing files this analysis was'
-    STAGED_NOTE+=" run on. They are not published beside these results: take them with"
-    STAGED_NOTE+=" the <strong>Download everything</strong> button on the Overview, and"
-    STAGED_NOTE+=" the names below become live links in the copy that comes down with"
-    STAGED_NOTE+=" it.</p>"
+for STAGED_DIR in ${STAGED_DIRS[@]+"${STAGED_DIRS[@]}"}; do
+    STAGED_DIR="${STAGED_DIR%/}"
+
+    [[ -n "$STAGED_DIR" && -d "$STAGED_DIR" ]] || continue
+
+    STAGED_NAME="${STAGED_DIR##*/}"
 
     mkdir -p "$RESULTS_DIR/$STAGED_NAME"
 
@@ -247,8 +250,8 @@ if [[ -n "$STAGED_DIR" && -d "$STAGED_DIR" ]]; then
         "<a href=\"../$LISTING_NAME\">&uarr; Up one folder</a>" "" \
         "$RESULTS_DIR/$STAGED_NAME" "../../$STAGED_NAME/" "$STAGED_NOTE"
 
-    log "Listed the staged reads in $STAGED_DIR."
-fi
+    log "Listed the reads in $STAGED_DIR."
+done
 
 # The results folder itself, which is where every "up one folder" ends - so it
 # is the page that leaves the frame. The landing page reads these listings

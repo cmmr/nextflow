@@ -114,6 +114,10 @@ is — `raw-sequences/` beside `results/` — so unpacking it gives back what th
 run was handed and what it produced, side by side, and the dashboard inside it
 browses the reads the same way it browses everything else.
 
+A biobakery run carries the read sets its request asked for instead: any of
+`raw-sequences/`, `host-depleted-sequences/` and `cleaned-sequences/`, each beside
+`results/`, or none — see [Delivered reads](../pipelines/biobakery.md#delivered-reads).
+
 One file rather than the two this used to be. Two downloads let a requester take
 one of them, see nothing else obviously outstanding, and believe their data was
 safe; there is now nothing to take but the whole thing. The reads are still

@@ -124,10 +124,11 @@
 # absolute address instead is written as one row leading there, which is how the
 # archive served from Globus is listed among the files it holds.
 #
-# A path marked HELD is a folder listed but not published: the reads the run was
-# given, which are only inside that archive. Its row leads to the listing
-# index_directories.sh wrote for them and is greyed, and so is every name in
-# that listing, until the page is read out of an unpacked copy of the download.
+# A path marked HELD is a folder listed but not published: reads, which are only
+# inside that archive, and listed only when it carries them. Its row leads to
+# the listing index_directories.sh wrote for them and is greyed, and so is every
+# name in that listing, until the page is read out of an unpacked copy of the
+# download.
 #
 # Icons are Material Symbols names, from the font the design system loads:
 # biotech, database, filter_alt, science, folder_zip, data_object and so on.
@@ -1124,12 +1125,13 @@ dashboard_add_file() {
 # the archive came out at, which is the only size here not read off a file that
 # is present.
 #
-# A path marked HELD is the folder listed but not published. It is counted where
-# the run staged it - beside the results rather than in them - and its row leads
+# A path marked HELD is the folder listed but not published, and is listed only
+# when the archive dashboard_bundle was given carries it. It is counted where
+# the run left it - beside the results rather than in them - and its row leads
 # to the listing index_directories.sh wrote for it inside them.
 dashboard_entry_files() {
     local path="$1" label="$2"
-    local full match name count size
+    local full match name count size folder bundled
 
     if [[ "$path" == http://* || "$path" == https://* ]]; then
         size=""
@@ -1147,6 +1149,16 @@ dashboard_entry_files() {
         full="${path%/}"
 
         [[ -d "$full" ]] || return 0
+
+        bundled=""
+
+        for folder in ${DASHBOARD_BUNDLE_FOLDERS[@]+"${DASHBOARD_BUNDLE_FOLDERS[@]}"}; do
+            if [[ "${folder%/}" == "$full" ]]; then
+                bundled=1
+            fi
+        done
+
+        [[ -n "$bundled" ]] || return 0
 
         count=$(find -L "$full" -type f ! -name directory_listing.html | wc -l)
         (( count > 0 )) || return 0

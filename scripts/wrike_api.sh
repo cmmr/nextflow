@@ -81,6 +81,7 @@ WRIKE_FORM_ANSWERS=(
     "picrust|Ampliseq --picrust|IEAAIKU5JUANE5VL|No,Yes"
     "exclude_taxa|Ampliseq --exclude_taxa|IEAAIKU5JUANE5VR|mitochondria,chloroplast,Francisella"
     "hostremoval_reference|Host Removal|IEAAIKU5JUANE5WC|None,PhiX,Human + PhiX,Mouse + PhiX"
+    "delivered_reads|Delivered Reads|IEAAIKU5JUANSFFF|Raw,Host Depleted,Cleaned"
 )
 
 # The "Nextflow Pipeline" answer that names no pipeline: it asks for an earlier

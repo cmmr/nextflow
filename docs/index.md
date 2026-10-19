@@ -122,13 +122,20 @@ flowchart TD
 5. **The report.** [`wrike_followup.sh`](../scripts/wrike_followup.sh) is submitted
    with `--dependency=afterany`, so it runs whether the job succeeded, failed, or
    was killed by the scheduler. It reads `.status`, `.notes` and `.message` out
-   of the run's state file and posts the outcome. A successful
+   of the run's state file and posts the outcome. A job Slurm killed has left no
+   `.message`, so for one that reached its time limit, ran out of memory, was
+   cancelled, lost its node or was preempted, it asks Slurm how the job
+   recorded as `.slurm.job_id` ended and writes the explanation itself, with the
+   tasks nextflow still had running. A nextflow killed that way cannot cancel
+   its own tasks, so any Slurm job still queued or running from the run's
+   directory is cancelled, and the message names them. A successful
    run's directory is deleted (results are already in S3); a failed one is kept
    for inspection.
 
 6. **Teardown.** Removing the "Dashboards" tag from a task, or deleting the task,
    fires the same webhook. [`wrike_delete_handler.sh`](../scripts/wrike_delete_handler.sh)
-   cancels any Slurm jobs for that task, purges its S3 prefix, deletes the
+   cancels any Slurm jobs for that task, the tasks nextflow submitted among
+   them, purges its S3 prefix, deletes the
    archive it published to [the Globus collection](operations/globus.md), and
    removes the run directory. Every step is best-effort, because a run may never
    have created the thing being removed.

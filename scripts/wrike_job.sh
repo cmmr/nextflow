@@ -2,7 +2,7 @@
 #SBATCH --job-name=wrike_job
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=8G
-#SBATCH --time=48:00:00
+#SBATCH --time=60:00:00
 #SBATCH --output=/data/prod/nextflow/log/job_%x_%j.out
 #SBATCH --error=/data/prod/nextflow/log/job_%x_%j.out
 #

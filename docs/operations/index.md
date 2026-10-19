@@ -62,3 +62,5 @@ the cpu time is read from `sacct` once every job of the run has finished — so
 it includes the steps after nextflow, HUMAnN among them, which the progress
 page's last clock does not. It is the record an estimate of how far along a
 running job is gets fitted to; keep the rows whose `outcome` is `Completed`.
+The others are `Failed`, or, for a job Slurm ended, `Timeout`, `OutOfMemory`,
+`Cancelled`, `NodeFail` or `Preempted`.

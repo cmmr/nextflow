@@ -1004,12 +1004,12 @@ every attempt, KneadData at 16 cpus, 32 GB and 24 hours on every attempt,
 MetaPhlAn at 16
 cpus and 48 GB, mOTUs at 16 cpus and 32 GB and Nonpareil at 8 cpus and 64 GB, the
 same as taxprofiler's `METAPHLAN_METAPHLAN`, `MOTUS_PROFILE` and
-`NONPAREIL_NONPAREIL`, EsViritu at 16 cpus and 16 GB, and Marker-MAGu at 16 cpus
-and 96 GB — and caps everything
+`NONPAREIL_NONPAREIL`, EsViritu at 16 cpus and 16 GB, Marker-MAGu at 16 cpus
+and 96 GB, and HUMAnN at a whole node, 32 cpus and 900 GB — and caps everything
 at the node's size. Nonpareil is
-handed its memory as `-R` and fills it with its k-mer table, and Marker-MAGu is
-the largest reservation here because minimap2 holds the whole 10.5 GB marker
-catalogue, split into chunks, while it aligns.
+handed its memory as `-R` and fills it with its k-mer table, and Marker-MAGu's
+96 GB is for minimap2, which holds the whole 10.5 GB marker catalogue, split into
+chunks, while it aligns.
 
 - **Host depletion, KneadData, MetaPhlAn, mOTUs, EsViritu and Marker-MAGu retry
   twice**, with more memory and time each time, then let running tasks finish
@@ -1019,8 +1019,8 @@ catalogue, split into chunks, while it aligns.
   without a retry — see [Samples left with no reads](#samples-left-with-no-reads).
   `MARKERMAGU_TABLES` is a small task beside them: two cpus and 8 GB, over
   tables of a few hundred rows.
-- **HUMAnN** keeps taxprofiler's policy: a sample is retried once with twice the
-  memory and time, then left out of the tables.
+- **HUMAnN** is not retried: a sample it does not finish in 48 hours on a whole
+  node is left out of the tables.
 - **Nonpareil** is retried three times and then left out of the diversity table,
   and its summary is ignored when it fails.
 - **MultiQC** is ignored when it fails.
@@ -1050,7 +1050,15 @@ On Slurm every host depletion and KneadData attempt has 24 hours, the most
 `resourceLimits` allows, since a deep sample can take either past the 12 hours a
 first attempt gets elsewhere.
 
-`wrike_job.sh`'s 48-hour limit covers the whole workflow, HUMAnN included.
+HUMAnN has 48 hours, past that cap, through a `resourceLimits` of its own. A
+sample of 526 million cleaned reads spent 3 hours in HUMAnN's single-threaded
+post-processing of its nucleotide alignments and 19 hours in DIAMOND on 16 cpus,
+and ran out of a 24-hour limit before it finished.
+
+`wrike_job.sh`'s 60-hour limit covers the whole workflow, HUMAnN included. That
+sample spent about 16 hours in host depletion, KneadData and MetaPhlAn before
+HUMAnN started. A run that reaches the limit is reported as having run out of
+time, with the tasks still running when it did.
 
 
 ## Registering the pipeline in Wrike

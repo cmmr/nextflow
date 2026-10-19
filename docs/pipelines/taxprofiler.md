@@ -916,9 +916,9 @@ input reads, is a policy question rather than a code one.
 
 **One sample that cannot be finished is not a failed run.**
 [`workflows/humann/nextflow.config`](../../workflows/humann/nextflow.config)
-retries a HUMAnN task once with more memory and more time, then ignores it, and
-the tables are built from the samples that did finish — the same treatment
-`NONPAREIL_NONPAREIL` gets, and for the same reason.
+gives a HUMAnN task a whole node for up to 48 hours and ignores it if it fails,
+without a retry, and the tables are built from the samples that did finish — the
+same treatment `NONPAREIL_NONPAREIL` gets, and for the same reason.
 
 **Nothing in this step is fatal to the run either.** Missing databases, missing
 reads, an unreadable profile, or the workflow failing outright all leave the
@@ -928,9 +928,9 @@ left out, so the dashboard simply carries no Functional profiles section. What
 went wrong is appended to the run's `.notes`, which `wrike_followup.sh` reports
 back on the Wrike task.
 
-**Watch the wall clock.** `wrike_job.sh` is submitted with `--time=48:00:00`, and
-that budget now covers taxprofiler *and* HUMAnN. A large run of deep stool
-samples is the case that would reach it.
+**Watch the wall clock.** `wrike_job.sh` is submitted with `--time=60:00:00`, and
+that budget covers taxprofiler *and* HUMAnN, which starts only once taxprofiler
+has finished. A large run of deep stool samples is the case that would reach it.
 
 
 ## Resource limits
@@ -983,9 +983,11 @@ duplicate of the inputs on `/data`.
 The HUMAnN workflow has its own
 [`workflows/humann/nextflow.config`](../../workflows/humann/nextflow.config),
 auto-loaded from the workflow's directory, with the same executor, the same
-image cache and the same node sizing. `HUMANN_PROFILE` is reserved 16 cpus and
-64 GB, doubling on a retry: the reservation is for DIAMOND against the 34 GB
-UniRef90 index, and HUMAnN is left on its default `--memory-use minimum` so
+image cache and the same node sizing. `HUMANN_PROFILE` is reserved a whole node,
+32 cpus and 900 GB, for up to 48 hours, through a `resourceLimits` of its own
+above the 24 hours every other task is capped at. Most of that is for DIAMOND
+against the 34 GB UniRef90 index: a sample of 526 million reads spent 19 hours
+in it on 16 cpus. HUMAnN is left on its default `--memory-use minimum` so
 DIAMOND blocks that index rather than holding it whole. `HUMANN_TABLES` is
 retried for the same reason the steps above are — it is the one task between
 every sample's profile and the published tables.
@@ -997,11 +999,9 @@ bowtie2's alignments of every read beside them, about one and a half times their
 size, and the reads left for DIAMOND as FASTA. Measured on its demo databases,
 that comes to just under four times the sample's uncompressed size at once,
 plus the pangenome index it builds for the sample. A node's `/tmp` is its root
-filesystem, with about 410 GB free, and two HUMAnN tasks can share a node at 16
-cpus each. A sample of 25 GB gzipped can fill it, and the deep ones, at 50–90 GB,
-need one to one and a half terabytes. Too little room fails the same way on every attempt, since
-the retry adds memory and time but not disk. HUMAnN's `--remove-temp-output`
-clears its folder when it finishes.
+filesystem, with about 410 GB free. A sample of 25 GB gzipped can fill it, and
+the deep ones, at 50–90 GB, need one to one and a half terabytes. HUMAnN's
+`--remove-temp-output` clears its folder when it finishes.
 
 Nothing copies a database. Nextflow stages inputs as absolute symlinks
 (`stageInMode` defaults to `symlink`) and `scratch` copies only declared

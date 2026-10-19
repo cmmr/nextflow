@@ -453,6 +453,11 @@ fi
 if JOB_ID=$(sbatch --parsable --job-name="nf-$RUN_ID" --chdir="$RUN_DIR" \
         "$NEXTFLOW_DIR/scripts/wrike_job.sh" "$PIPELINE_UPPER" "$ATTACHMENT_ID" "$RERUN_UID"); then
 
+    # The job wrike_followup.sh asks Slurm about, to explain a run whose job
+    # was killed before it could. --parsable may append ";<cluster>".
+    state_set slurm.job_id "${JOB_ID%%;*}" \
+        || warn "Could not record job $JOB_ID for run $RUN_ID."
+
     # afterany, not afterok, so failures are reported to the user too. A
     # follow-up that fails to submit is not fatal - the pipeline is already
     # queued - but it does mean nothing will report the outcome.

@@ -42,7 +42,9 @@ These carry most of the system's state, and nothing works if you break them:
   a compute node tells `wrike_followup.sh` what happened. The `fail` helper
   records `.message` wherever it finds a state file — which is what makes any
   script in the run, down to a pipeline's own pre- and post-process steps, able
-  to explain itself to the requester without knowing anything about Wrike.
+  to explain itself to the requester without knowing anything about Wrike. A job
+  Slurm kills cannot, so `wrike_followup.sh` writes `.message` for it from how
+  Slurm says the job ended.
 - **`.request` says how the request was read.** Recorded before any validation:
   the SQS event, every question with the custom field it resolved through and the
   value that came back, and the field titles Wrike actually has. A rejected

@@ -17,8 +17,8 @@
 # Usage:     wrike_delete_handler.sh <sqs_message_body_json> <event_type>
 #            where <event_type> is TaskDeleted or TaskParentsRemoved
 # Called by: wrike_sqs_listener.sh
-# Requires:  jq, aws, scancel (Slurm), openssl (via derive_uid), curl (via
-#            call_wrike_api)
+# Requires:  jq, aws, scancel and squeue (Slurm), openssl (via derive_uid),
+#            curl (via call_wrike_api)
 # Env:       NEXTFLOW_DIR, AWS_S3_BUCKET, S3_RUN_PREFIX, GLOBUS_DIR,
 #            GLOBUS_RUN_PREFIX, RUN_ID_SALT, WRIKE_FOLDER_ID,
 #            the Wrike and Globus helper functions and the log/fail/derive_uid
@@ -79,6 +79,10 @@ log "Commencing cleanup protocol for task $TASK_ID (uid $RUN_ID)"
 #    follow-up are named after the uid. Failure is expected, and ignored, once
 #    the jobs have finished.
 scancel --name="nf-$RUN_ID" --user="$(whoami)" > /dev/null 2>&1 || true
+
+#    The tasks nextflow submitted are named after their processes instead, and
+#    are found by the work directory they run in
+cancel_run_tasks "$RUN_DIR" > /dev/null || true
 
 # 2. Purge everything published under the prefix: the progress page
 #    wrike_task_handler.sh put there when the request arrived, and the results on

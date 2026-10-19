@@ -22,7 +22,7 @@
 #
 # Defines: log, warn, fail, run_results_url, escape_html, escape_url, human_size,
 #          human_count, group_count, render_template, is_valid_uid, derive_uid,
-#          run_cpu_seconds
+#          run_cpu_seconds, cancel_run_tasks
 # Env:     RUN_ID_SALT from secrets/.env, for derive_uid only; AWS_S3_BUCKET and
 #          S3_RUN_PREFIX for run_results_url; NEXTFLOW_DIR for render_template
 
@@ -263,4 +263,27 @@ run_cpu_seconds() {
             index($2, here) == 1 { total += $1 }
             END { if (total == 0) exit 1; print total }
         '
+}
+
+# Cancel every Slurm job still queued or running from below a run directory -
+# the tasks nextflow submits from work/, which outlive a nextflow killed before
+# it could cancel them - and print each one cancelled as "<job id>\t<job name>".
+# The pipeline's own job and its follow-up run in the run directory itself, not
+# below it, and are left alone, as are jobs already completing.
+#
+# Prints nothing when squeue cannot answer, or finds nothing to cancel.
+cancel_run_tasks() {
+    local run_dir="${1%/}" id state name dir
+
+    command -v squeue > /dev/null 2>&1 || return 0
+
+    while IFS='|' read -r id state name dir; do
+        [[ "$dir" == "$run_dir"/* && "$state" != "COMPLETING" ]] || continue
+
+        if scancel "$id" 2>/dev/null; then
+            printf '%s\t%s\n' "$id" "$name"
+        else
+            warn "Could not cancel job $id ($name) in $dir."
+        fi
+    done < <(squeue --noheader --user="$(whoami)" --format='%i|%T|%j|%Z' 2>/dev/null)
 }

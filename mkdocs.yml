@@ -48,7 +48,7 @@ nav:
       - ampliseq: pipelines/ampliseq.md
       - taxprofiler: pipelines/taxprofiler.md
       - biobakery: pipelines/biobakery.md
-      - Host removal on its own: pipelines/host-removal.md
+      - Removing human reads: pipelines/host-removal.md
   - Results:
       - results/index.md
       - Composition and diversity: results/composition.md

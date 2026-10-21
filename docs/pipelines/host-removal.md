@@ -1,10 +1,9 @@
-# Host removal on its own
+# Removing human reads
 
-How to remove human reads from paired shotgun reads the way
-[biobakery](biobakery.md#host-depletion) does, without anything from this
-repository. There are two scripts here that do the same job: one runs KneadData
-and the other runs Bowtie2 directly. Both take the same arguments and leave the
-same files behind.
+A quick way to remove human reads from paired shotgun reads using KneadData's
+method. There are two scripts here that do the same job: one runs KneadData and
+the other runs Bowtie2 directly. Both take the same arguments and leave the same
+files behind.
 
 | What | Version |
 | --- | --- |
@@ -142,8 +141,8 @@ KneadData also renames every read to its first word plus `#0/1` or `#0/2`:
 
 ## Option 2: Bowtie2 directly
 
-This is what the biobakery pipeline runs. Pull Bowtie2 2.5.4, with pigz (skip
-this if you already pulled it to build the database):
+Pull Bowtie2 2.5.4, with pigz (skip this if you already pulled it to build the
+database):
 
 ```bash
 apptainer pull bowtie2.sif docker://community.wave.seqera.io/library/bowtie2_htslib_samtools_pigz:edeb13799090a2a6
@@ -291,32 +290,4 @@ Each sample's counts can be joined into one table, keeping one header:
 
 ```bash
 awk 'FNR > 1 || NR == 1' results/*_decontam_counts.tsv > results/counts.tsv
-```
-
-
-## Trimming afterwards
-
-To also trim the reads as biobakery does, run KneadData 0.12.4 over the
-host-depleted files with no reference database:
-
-```bash
-apptainer exec kneaddata.sif kneaddata \
-    --input1 S1_decontam_1.fq.gz --input2 S1_decontam_2.fq.gz \
-    --output kneaddata --output-prefix S1 --threads 16 \
-    --sequencer-source NexteraPE --remove-intermediate-output
-```
-
-It logs "Bypass decontamination" and runs only Trimmomatic (`SLIDINGWINDOW:4:20`,
-a minimum length of half the read length) and Tandem Repeats Finder. The cleaned
-reads are the files its log lists under "Final output files created".
-
-**On large samples, point KneadData at Trimmomatic's jar.** Found on `PATH`, the
-bioconda Trimmomatic wrapper caps Java's heap at 1 GB whatever `--max-memory`
-says, and runs out of memory around a million pairs at 16 threads. Link the jar
-into a directory and pass it with `--trimmomatic` and `--max-memory`:
-
-```bash
-mkdir trimmomatic
-ln -s "$(apptainer exec kneaddata.sif sh -c "find -L /usr/local/share -name 'trimmomatic*.jar' | head -n 1")" trimmomatic/
-apptainer exec kneaddata.sif kneaddata ... --trimmomatic trimmomatic --max-memory 24000m
 ```

@@ -327,8 +327,8 @@ as `raw-sequences/` names them. They are what KneadData reads, and what
 of reads, or a record that does not start with `@`, fails with the read it
 happened at, rather than pairing the wrong mates.
 
-**The same step can be run without this repository**; see [Host removal on its
-own](host-removal.md).
+**The same step can be run without this repository**; see [Removing human
+reads](host-removal.md).
 
 **Each run's counts go to its sample's KneadData log.**
 `<sample>_<run>.host.tsv` names the index and counts the pairs given, those each

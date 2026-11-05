@@ -20,7 +20,9 @@
 #   Overview       overview.html
 #   Deliverables   deliverables.html
 #   ...            the links the upload script declared, in that order
-#   QC Report      multiqc/multiqc_report.html, when the run wrote one
+#   QC Report      multiqc/multiqc_report.html, when the run wrote one; written
+#                  hidden, and shown by the page when its address carries ?qc
+#                  or names #quality
 #   File Explorer  directory_listing.html, the results folder's listing
 #
 # An upload script declares what its pipeline produced and then publishes:
@@ -928,9 +930,12 @@ dashboard_slug() {
 }
 
 # The navigation bar: Overview and Deliverables, the views the pipeline declared
-# in that order, then QC Report when the run wrote one, and File Explorer
+# in that order, then QC Report when the run wrote one, and File Explorer.
+#
+# QC Report is written hidden: the page shows it when its address carries ?qc or
+# names #quality, and a dashboard opened at index.html alone keeps it hidden.
 dashboard_nav() {
-    local entry id label path
+    local entry id label path hidden
     local views=("deliverables|Deliverables|deliverables.html")
 
     views+=(${DASHBOARD_VIEWS[@]+"${DASHBOARD_VIEWS[@]}"})
@@ -949,9 +954,14 @@ dashboard_nav() {
         label=${entry#*|}
         label=${label%%|*}
         path=${entry##*|}
+        hidden=""
 
-        printf '<a class="%s" data-view="%s" href="%s" target="view">%s</a>' \
-            "$DASHBOARD_NAV_OFF" "$id" "$(escape_url "$path")" "$(escape_html "$label")"
+        if [[ "$id" == "quality" ]]; then
+            hidden=" hidden"
+        fi
+
+        printf '<a class="%s" data-view="%s" href="%s" target="view"%s>%s</a>' \
+            "$DASHBOARD_NAV_OFF" "$id" "$(escape_url "$path")" "$hidden" "$(escape_html "$label")"
     done
 }
 

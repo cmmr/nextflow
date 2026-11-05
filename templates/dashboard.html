@@ -32,6 +32,12 @@
   reader last asked the bar for, so reloading or sharing the address returns to
   that rather than to wherever the frame had been browsed to.
 
+  A link written hidden - the QC Report's - is left off the bar until the
+  address asks for it: ?qc in the query shows every such link, and naming its
+  view in the fragment shows that one. Once shown, a link stays shown until the
+  page is reloaded. A link inside another view can still send the frame to its
+  page, and the bar then marks nothing.
+
   Every link is relative, because this page is served from S3 next to the
   objects it points at. The head is shared with the other two pages and is
   inlined from templates/tailwind.html.
@@ -74,6 +80,15 @@ __COMMON_HEAD__
 
   var links = [].slice.call(document.querySelectorAll("#views a"));
   var frame = document.getElementById("view");
+
+  // A link written hidden is left off the bar until the address asks for it:
+  // ?qc in the query shows every such link, and naming a view in the fragment
+  // shows that one. Once shown, a link stays shown until the page is reloaded.
+  function list(link) {
+    link.removeAttribute("hidden");
+  }
+
+  if (/(^\?|&)qc(=|&|$)/.test(location.search)) links.forEach(list);
 
   // The countdown is worked out when the page is read rather than when it was
   // published, so a link opened weeks later still says how long is left. The
@@ -221,9 +236,11 @@ __COMMON_HEAD__
 
   function fromHash() {
     var hash = location.hash.replace("#", "");
-    var known = links.some(function (l) { return l.getAttribute("data-view") === hash; });
+    var named = links.filter(function (l) { return l.getAttribute("data-view") === hash; })[0];
 
-    show(known ? hash : links[0].getAttribute("data-view"));
+    if (named) list(named);
+
+    show(named ? hash : links[0].getAttribute("data-view"));
   }
 
   links.forEach(function (link) {

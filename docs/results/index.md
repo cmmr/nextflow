@@ -54,6 +54,15 @@ straight to the QC Report with the bar still around it. Each link also
 carries `target="view"`, so the bar works with scripting off — the script only
 keeps the fragment and the underline in step with the frame.
 
+**QC Report is hidden unless the address asks for it.** The link is written
+with the `hidden` attribute, for the lab rather than the collaborator the page
+is for. `index.html?qc` shows it for the rest of that visit, and
+`index.html#quality` shows it and opens the report; a dashboard opened at
+`index.html` alone never lists it. The report is still published and the
+Overview's read-count details and the File Explorer still link into it — a
+reader who follows one of those is shown the report with nothing in the bar
+marked.
+
 **Back and forward walk the views.** A view costs exactly one history entry —
 the fragment — because the frame is sent to its page by replacing the address it
 is on rather than by having its `src` rewritten, which would push a second entry
